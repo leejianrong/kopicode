@@ -23,7 +23,7 @@ and call-by-call compare already exist and work.
 kopicode (this repo)          sotong (later)
    terminal coding agent        always-on assistant
               \                /
-            kopi-engine (own repo, not yet created)
+            kopi-engine
               agent loop, tool dispatch, permissions,
               sessions, model routing
                        |
@@ -31,7 +31,8 @@ kopicode (this repo)          sotong (later)
               durable execution, journal, replay, fork
 ```
 
-**kopi-engine is shared with sotong and lives in its own repo.** Two products
+**[kopi-engine](https://github.com/leejianrong/kopi-engine) is shared with sotong
+and lives in its own repo.** Two products
 rather than two modes of one: something that acts while nobody is watching needs
 a stricter safety model than something you are supervising, and that is an
 architecture rather than a config flag.
