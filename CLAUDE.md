@@ -194,6 +194,8 @@ fixtures come from actual runs and get refreshed when the provider changes.
 
 ## Pointers
 
+- [`docs/PRD.md`](docs/PRD.md) — what this is for, numbered requirements R1-R16, success
+  measures, scope boundary, and the epic-to-requirement traceability table
 - [`docs/SLICE-1.md`](docs/SLICE-1.md) — the current slice: scope, build plan,
   acceptance criteria, risks
 - [`docs/adr/`](docs/adr/) — decisions of record, 0001–0005

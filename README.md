@@ -130,6 +130,7 @@ internal/
   permission/        policy decisions (what needs asking, not how to ask)
   bench/             runner, oracle execution, McNemar scoring
 bench/tasks/         the frozen task corpus (data, not code)
+docs/PRD.md          requirements, success measures, scope boundary
 docs/adr/            decisions of record
 docs/SLICE-1.md      the current slice
 ```
