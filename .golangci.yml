@@ -1,0 +1,29 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - bodyclose      # a leaked response body in a streaming provider client is a real leak
+    - errorlint      # errors.Is/As over == and type asserts
+    - copyloopvar
+    - misspell
+    - nilerr
+    - revive
+    - unconvert
+    - usestdlibvars
+    - wastedassign
+  settings:
+    revive:
+      rules:
+        - name: exported
+          disabled: true   # doc comments are enforced by review, not by a linter shouting
+  exclusions:
+    generated: lax
+    rules:
+      # Table-driven tests legitimately shadow and reuse; keep the noise out.
+      - path: _test\.go
+        linters: [errcheck]
+
+formatters:
+  enable:
+    - gofmt
