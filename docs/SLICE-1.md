@@ -10,8 +10,12 @@ headless runner benchmarks it. Both halves are required, because they are what f
 the architecture — a benchmark cannot drive a REPL, so the engine has to be usable by
 two front ends from the first commit ([ADR-0003](adr/0003-single-repo-internal-engine.md)).
 
-One model (`qwen/qwen3-coder-next`), one hardcoded harness, no plugin system. Every
-decision this slice rests on is in [`docs/adr/`](adr/) 0001–0006.
+One model (`qwen/qwen3-coder-next`), one registered harness configuration, no plugin
+system. **That is a scope limit on this slice, not a property of the product**: the
+binary selects its model at run time and resolves a harness configuration from the model
+id, per [ADR-0007](adr/0007-model-selection-and-harness-config-shape.md) — slice 1 simply
+registers one configuration and measures one model against it. Every decision this slice
+rests on is in [`docs/adr/`](adr/) 0001–0007.
 
 The riskiest mechanism is confronted first, deliberately: **weak-model tool calling**.
 Everything else in the loop is well-understood engineering; whether a cheap open model
@@ -47,11 +51,11 @@ answer, so it is task 1, not task 9.
 
 **Explicitly deferred, named so the boundary stays honest.**
 
-Slice 2 or later: fork and `--resume` (G1 restore), a second model driver and the
-plugin catalogue (ADR-0005 §7), the `ask` tool (agent asks on genuine ambiguity),
-semantic model roles (cheap model for grunt work, strong for planning — expands the
-A/B matrix, so it waits for the second driver), and a JSON-RPC surface for editor
-integration.
+Slice 2 or later: fork and `--resume` (G1 restore), a second registered harness
+configuration and the plugin axes it earns (ADR-0005 §7), the `ask` tool (agent asks on
+genuine ambiguity), semantic model roles (cheap model for grunt work, strong for
+planning — expands the A/B matrix, so it waits for the second arm), and a JSON-RPC
+surface for editor integration.
 
 Not planned at all: container/VM isolation for bench (slice 3, and named as a gap
 below), context compaction or retrieval, MCP, subagents, planning modes,
@@ -465,7 +469,8 @@ These are the acceptance criteria for the slice.
 
 - **Upstream:** none. Slice 1 is the root of the graph.
 - **Downstream:** slice 2 (fork and `--resume` over G1's snapshots; the `ask` tool; the
-  second model driver, which is what turns B3's scaffold into a real paired experiment
-  and what earns the plugin axes ADR-0005 §7 defers) and slice 3 (bench isolation,
+  second registered harness configuration, which is what turns B3's scaffold into a real
+  paired experiment and what earns the plugin axes ADR-0005 §7 defers) and slice 3 (bench
+  isolation,
   semantic model roles, a JSON-RPC surface, and context management informed by real
   session data).
