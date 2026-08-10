@@ -471,6 +471,5 @@ These are the acceptance criteria for the slice.
 - **Downstream:** slice 2 (fork and `--resume` over G1's snapshots; the `ask` tool; the
   second registered harness configuration, which is what turns B3's scaffold into a real
   paired experiment and what earns the plugin axes ADR-0005 §7 defers) and slice 3 (bench
-  isolation,
-  semantic model roles, a JSON-RPC surface, and context management informed by real
-  session data).
+  isolation, semantic model roles, a JSON-RPC surface, and context management informed by
+  real session data).
