@@ -24,10 +24,12 @@
 // field. Adding a field to a known payload is compatible for readers, not for
 // rewriters. Adding a whole event type is compatible for both.
 //
-// # Nothing here writes a file
+// # This file writes no file
 //
-// FileJournal (append, fsync, crash-truncated-line detection) and the 64 KiB
-// blob spill live elsewhere. This package is the types and their JSON.
+// event.go and payload.go are the types and their JSON, and nothing here
+// touches a disk. FileJournal — append, fsync, crash-truncated-line detection
+// and secret redaction — is in file.go; the 64 KiB blob spill is still to
+// come.
 package journal
 
 import (
