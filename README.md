@@ -52,6 +52,10 @@ handling — sits on top and is thinner. Build the thick layer first.
 
 There is no plugin catalogue and no add-on taxonomy yet. The axes get invented after
 two models have been made to work, not before ([ADR-0005](docs/adr/0005-benchmark-and-ab-methodology.md)).
+What *does* ship from the start is the shape that holds them: a harness configuration is
+a named value in the binary, resolved from the model id
+([ADR-0007](docs/adr/0007-model-selection-and-harness-config-shape.md)). Deferring the
+axes and deferring the shape are separate questions, and only the first is deferred.
 
 ## Prior art, and what we are deliberately not building
 
@@ -81,7 +85,7 @@ code reliably — which is the only question this project is trying to answer.
 
 What *is* on the roadmap, borrowed deliberately: the `ask` tool (agent asks on genuine
 ambiguity, slice 2), semantic model roles (cheap model for grunt work, strong for
-planning — slice 3, after the second driver, since it expands the A/B matrix), and a
+planning — slice 3, after the second model, since it expands the A/B matrix), and a
 JSON-RPC surface for editors (slice 3, mostly plumbed by the headless runner already).
 AST-structural editing stays an open question, blocked on tree-sitter's Go bindings
 being CGo; the resolution sketch is stdlib `go/ast` for Go plus an optional external
@@ -97,6 +101,7 @@ being CGo; the resolution sketch is stdlib `go/ast` for Go plus an optional exte
 | Line-oriented REPL, no full-screen TUI | [0004](docs/adr/0004-line-oriented-repl.md) |
 | Paired A/B methodology, pinned providers, mock provider | [0005](docs/adr/0005-benchmark-and-ab-methodology.md) |
 | Hash-anchored edits; three-bucket failure attribution | [0006](docs/adr/0006-hash-anchored-edits-and-failure-attribution.md) |
+| One binary for every model; harness config resolved from the model id; what an arm is | [0007](docs/adr/0007-model-selection-and-harness-config-shape.md) |
 
 Two of these reverse earlier plans in this repo, and it is worth being explicit
 about why:
@@ -141,6 +146,18 @@ engine through its interface only, which an import-hygiene test checks.
 
 ## Models
 
+**One binary serves every supported model.** There is no per-model build and no
+build-time model constant; the model is selected at run time with `--model`, falling
+back to `model = "…"` in `.kopicode/config.toml` and then to a built-in default, and an
+unrecognised id is a startup usage error listing what is supported rather than a
+provider error one request later. Each supported model resolves to a per-model harness
+configuration held in the binary, and (model × harness configuration × provider pin) is
+what defines a benchmark arm
+([ADR-0007](docs/adr/0007-model-selection-and-harness-config-shape.md)).
+
+The **Role** column below is about what gets *measured*, and in what order — not about
+what the binary can run.
+
 Verified against OpenRouter on 2026-08-11. Prices are USD per million tokens,
 input/output.
 
@@ -150,6 +167,10 @@ input/output.
 | `minimax/minimax-m2` | 0.26 / 1.02 | 205K | A/B candidate |
 | `z-ai/glm-5.2` | 0.56 / 1.76 | 1M | A/B candidate, long-context |
 | a current frontier model | — | — | ceiling, run rarely |
+
+The last row is a role rather than an entry: the frontier model is picked and added to
+the registry when the ceiling run is actually scheduled, since naming one now would only
+date the table.
 
 `qwen3-coder-next` is the slice-1 target: cheapest of the credible coding models,
 coding-specialised, 80B total with 3B activated, and it runs in non-thinking mode
@@ -175,8 +196,13 @@ Done means both of these are true:
   `qwen3-coder-next` with unit-test oracles, and against a mock provider at zero
   token cost for plumbing regressions.
 
-One model. One hardcoded harness. No plugin system, no second driver, no add-on
-catalogue.
+One model measured, one harness configuration registered. No plugin system, no
+second arm, no add-on catalogue.
+
+That is a **scope limit on slice 1, not a property of the product**. The binary
+selects its model at run time and resolves a harness configuration from it
+([ADR-0007](docs/adr/0007-model-selection-and-harness-config-shape.md)); slice 1 simply
+registers one configuration and measures one model against it.
 
 ## Where this sits
 
