@@ -93,6 +93,17 @@ Numbered so cards and tests can cite them.
   time ([ADR-0001](adr/0001-go-implementation-language.md)).
 - **R16.** Work as ordinary terminal software: scrollback intact, copy-paste working,
   output pipeable to a file with no escape sequences ([ADR-0004](adr/0004-line-oriented-repl.md)).
+- **R17.** One binary serves every supported model, chosen at run time — a flag, then the
+  repository's config file, then a built-in default, with no environment variable in the
+  chain. The model id resolves to a per-model harness configuration, both are recorded on
+  the session record, and together with the provider pin they identify the arm a result
+  belongs to. An unrecognised model id is a startup usage error naming the supported set,
+  not a provider error a request away
+  ([ADR-0007](adr/0007-model-selection-and-harness-config-shape.md)).
+
+R15 and R17 are separate promises and are easy to confuse. R15 is about *installation* —
+the artifact needs nothing from the host. R17 is about *coverage* — one artifact serves
+every model. Per-model binaries would satisfy R15 and violate R17.
 
 ## How we will know it worked
 
@@ -120,11 +131,13 @@ make it credible, and any shortcut there costs the project its point.
 In: the agent loop, the six tools, hash-anchored editing with a fuzzy fallback, forced
 verification, the typed journal, git turn snapshots, engine-side permissions, the REPL,
 the headless runner, the mock and OpenRouter providers, a ten-task corpus, and mechanical
-attribution. One model, one hardcoded harness configuration. The full breakdown is
-[`SLICE-1.md`](SLICE-1.md).
+attribution. One model measured and one harness configuration registered — a scope limit
+on what slice 1 exercises, not on what the binary can select, which is
+[ADR-0007](adr/0007-model-selection-and-harness-config-shape.md)'s subject. The full
+breakdown is [`SLICE-1.md`](SLICE-1.md).
 
 Deferred, with a home: fork and resume over the snapshots already being written, a second
-model driver and the plugin axes it earns, the `ask` tool, semantic model roles, a
+model measured and the plugin axes it earns, the `ask` tool, semantic model roles, a
 JSON-RPC surface, container isolation for the bench runner, and context compaction chosen
 from real session data rather than guessed.
 
@@ -184,12 +197,17 @@ serving none, is a planning bug.
 | Tool surface and call reliability | R2, R8 |
 | Edits, verification, and repo state | R3, R4, R6 |
 | Engine loop and permissions | R1, R5 |
-| Surfaces | R10, R16 |
-| Benchmark rig | R11, R12, R13 |
+| Surfaces | R10, R16, R17 |
+| Benchmark rig | R11, R12, R13, R17 |
 | Slice-1 proof | R1, R15 |
 
 R15 is delivered by the toolchain rather than an epic: `make xbuild` proves it on every
 CI run, and the slice-1 proof is where a human installs the result.
+
+R17 sits in two epics because it is two halves of one promise: the flag, the config key
+and the precedence between them are a surface concern, and the arm definition the
+resolved values feed is a bench concern. Splitting it into two requirements would let one
+half ship without the other, which is exactly the state ADR-0007 was written to end.
 
 ## Open questions
 

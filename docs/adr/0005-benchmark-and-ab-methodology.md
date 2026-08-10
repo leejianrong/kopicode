@@ -12,6 +12,12 @@ the third `unattributed` bucket to failure classification. Read it alongside thi
 a two-bucket classifier lets an undetectable harness defect be counted as model
 incapacity, which silently corrupts every delta this ADR is built to measure.
 
+Extended by [ADR-0007](0007-model-selection-and-harness-config-shape.md), which defines
+the **arm** this ADR compares — (model × harness configuration × provider pin) — and the
+shape a harness configuration ships in. Decision 7 below defers *what the plugin axes
+are*, and that deferral stands; ADR-0007 settles only what kind of thing holds them, and
+supersedes §7's word "hardcoded" without touching its substance.
+
 ## Context
 
 The project thesis is that harness changes move measured coding ability by 10–25

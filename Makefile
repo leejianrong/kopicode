@@ -22,13 +22,26 @@ dev: ## Download deps and install the dev tools
 	go install golang.org/x/tools/gopls@latest
 	go install github.com/zricethezav/gitleaks/v8@latest
 
+# gofmt takes directories literally and walks all of them. The rest of the Go
+# toolchain — go build, go vet, go test, golangci-lint — skips directories whose
+# name begins with "." or "_", so `gofmt -l .` is the one gate that sees files
+# nothing else does. On a machine running parallel agents that means
+# .claude/worktrees/*, where each agent keeps its own checkout of this same
+# module: their half-written files fail the PM's pre-push hook, for a target
+# whose failure message gives no hint where the file came from.
+#
+# Feeding gofmt the output of `go list` confines it to the packages this module
+# actually builds, which is the set every other gate already checks. Assigned
+# with `=` so the subprocess runs only in the recipes that use it.
+GOPKGDIRS = $(shell go list -f '{{.Dir}}' ./...)
+
 .PHONY: fmt
 fmt: ## Format every file in place
-	gofmt -w .
+	gofmt -w $(GOPKGDIRS)
 
 .PHONY: fmtcheck
 fmtcheck: ## Fail if any file is unformatted
-	@out=$$(gofmt -l .); \
+	@out=$$(gofmt -l $(GOPKGDIRS)); \
 	if [ -n "$$out" ]; then echo "unformatted files:"; echo "$$out"; exit 1; fi
 
 .PHONY: vet
