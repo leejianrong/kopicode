@@ -73,20 +73,43 @@ const (
 	// the model meant is exactly the plausible half-success this package
 	// refuses to produce.
 	KindAmbiguousCall
+
+	// KindUnknownTool means the call parsed cleanly and named a tool this
+	// harness does not offer. The four classifications below are the semantic
+	// half of docs/SLICE-1.md §3: they need a [Tools] lookup to reach, and
+	// they are the ones a specific message recovers most often, because the
+	// model was one token away from a working call.
+	KindUnknownTool
+
+	// KindMissingArgument means a required argument of a known tool was absent.
+	KindMissingArgument
+
+	// KindWrongArgumentType means an argument was present with a JSON type the
+	// tool does not accept — a number where a string belongs, an object where
+	// an array belongs.
+	KindWrongArgumentType
+
+	// KindUnknownEnumValue means an argument's value sits outside the closed
+	// set the tool accepts for it.
+	KindUnknownEnumValue
 )
 
 var kindText = map[Kind]string{
-	KindUnspecified:      "unspecified",
-	KindNoCall:           "no_call",
-	KindUnlabelledFence:  "unlabelled_fence",
-	KindUnfencedCall:     "unfenced_call",
-	KindUnclosedFence:    "unclosed_fence",
-	KindUnclosedTag:      "unclosed_tag",
-	KindEmptyBlock:       "empty_block",
-	KindInvalidJSON:      "invalid_json",
-	KindMissingName:      "missing_name",
-	KindInvalidArguments: "invalid_arguments",
-	KindAmbiguousCall:    "ambiguous_call",
+	KindUnspecified:       "unspecified",
+	KindNoCall:            "no_call",
+	KindUnlabelledFence:   "unlabelled_fence",
+	KindUnfencedCall:      "unfenced_call",
+	KindUnclosedFence:     "unclosed_fence",
+	KindUnclosedTag:       "unclosed_tag",
+	KindEmptyBlock:        "empty_block",
+	KindInvalidJSON:       "invalid_json",
+	KindMissingName:       "missing_name",
+	KindInvalidArguments:  "invalid_arguments",
+	KindAmbiguousCall:     "ambiguous_call",
+	KindUnknownTool:       "unknown_tool",
+	KindMissingArgument:   "missing_argument",
+	KindWrongArgumentType: "wrong_argument_type",
+	KindUnknownEnumValue:  "unknown_enum_value",
 }
 
 // String returns the wire form of the kind.
@@ -125,6 +148,17 @@ type Error struct {
 	Kind   Kind
 	Route  Route
 	Detail string
+
+	// Tool names the tool the failure is about, when the failure knows it. The
+	// semantic classifications always do; most extraction failures do not,
+	// because a block that did not parse never named anything. It is what the
+	// journal's ToolCallFailed.Tool carries, and what lets the repair message
+	// quote the shape of one tool rather than the whole catalogue.
+	Tool string
+
+	// Argument names the offending argument on the argument classifications,
+	// and is empty elsewhere.
+	Argument string
 
 	// Snippet is a bounded excerpt of the offending text, for the message only.
 	// The full text is never lost: the provider response it came from is
