@@ -21,9 +21,8 @@ type Session struct {
 // implementation can be written later without the engine noticing
 // (docs/adr/0002-no-durable-runtime-own-journal.md decision 4).
 //
-// No implementation exists yet. FileJournal — append, fsync, and detecting a
-// final line a crash truncated — is the next card, and the blob spill the one
-// after.
+// FileJournal is the implementation: JSONL, one event per line, appended and
+// fsynced. The 64 KiB blob spill is the card after it.
 type Journal interface {
 	// Append stamps the envelope (schema version, session, the next seq, the
 	// time) and records payload durably. It returns the event as written, so a
