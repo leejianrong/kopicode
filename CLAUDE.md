@@ -1,0 +1,204 @@
+# CLAUDE.md — agent brief for kopicode
+
+kopicode is a **terminal coding agent, and a harness you can tune per model**. A
+line-oriented REPL and a headless benchmark runner drive one engine. The bet is that
+harness quality — tool-call parse-and-repair, an edit tool that tolerates imprecision,
+forced verification — moves a cheap open-weight model's measured coding ability by a
+large margin, and that the rig proves it rather than asserting it.
+
+Written in **Go**. Single static binary. No durable-execution runtime.
+
+## Build status — scaffold only, no product code
+
+**Trust the code over the docs.** `docs/` describes the intended system; where they
+disagree, the code is the truth for what exists today — verify before you believe a
+docstring, including this section.
+
+What is real now (2026-08-11):
+
+- **Module + toolchain.** Go 1.26.5, zero third-party dependencies. `Makefile` with the
+  gates below, `.golangci.yml` (v2 schema, validated), `.github/workflows/ci.yml` with
+  parallel jobs, and a pre-push hook mirroring the cheap gates.
+- **Cross-compilation proven.** `make xbuild` produces both binaries for linux/amd64,
+  linux/arm64, darwin/amd64, darwin/arm64 and windows/amd64 with `CGO_ENABLED=0` — the
+  ADR-0001 distribution promise, checked rather than asserted.
+- **Boundary guards, proven red.** `internal/arch` enforces ADR-0003: front ends may
+  import only `internal/engine` and `internal/bench`, and the engine may not import a
+  surface. Both were confirmed to fail when violated, and the failure names the file,
+  the import and the ADR.
+
+What does **not** exist: the engine, the loop, any tool, the journal, the provider
+clients, the REPL, the bench runner, the corpus. `cmd/kopicode` and `cmd/kopibench` are
+stubs that exit **4** rather than 0 — an unimplemented binary exiting cleanly is how a
+broken harness passes a smoke test.
+
+Build order is [`docs/SLICE-1.md`](docs/SLICE-1.md) §Build Plan, steps 2 onward. Step 1
+is done.
+
+Do not add a test count here. It goes stale on the next PR. `make test` prints the real
+number, and a red suite — not a changed count — is the signal something is wrong.
+
+## Decisions of record — read before proposing anything
+
+Five ADRs bind, and two of them reverse earlier plans that still appear in older
+project notes. If a document contradicts an ADR, the ADR wins.
+
+| | |
+|---|---|
+| [0001](docs/adr/0001-go-implementation-language.md) | **Go**, not Python or TypeScript. Distribution, compile-time safety, process control. Rust rejected. |
+| [0002](docs/adr/0002-no-durable-runtime-own-journal.md) | **No durable-execution runtime.** Satay is out: a journal records the agent's decisions, not the repo, so a replayed fork rewinds the conversation over a working tree that never moved. kopicode owns a typed append-only event log; **git** versions the tree via shadow refs. |
+| [0003](docs/adr/0003-single-repo-internal-engine.md) | **One repo.** The engine is `internal/`, not a library. `kopi-engine` is retired. |
+| [0004](docs/adr/0004-line-oriented-repl.md) | **Line-oriented REPL.** No alt-screen, no TUI framework. |
+| [0005](docs/adr/0005-benchmark-and-ab-methodology.md) | **Paired McNemar**, pinned providers, mock/replay provider, early stopping, task pruning. No add-on catalogue yet. |
+| [0006](docs/adr/0006-hash-anchored-edits-and-failure-attribution.md) | **Hash-anchored edits** — the model never reproduces file content; anchor drift is a hard rejection. Three-bucket failure attribution so a harness bug can't be laundered into a `model` number. Post-edit syntax gate. No AST editing. |
+
+Satay's natural consumer in this suite is **sotong** (unattended, triggered,
+credential-holding, not started), not kopicode. Do not reintroduce it here.
+
+## Commands
+
+Prefer the `make` targets — the pre-push hook and CI both go through them, so they
+cannot drift. `make help` lists everything.
+
+```bash
+make dev          # go mod download + tool install
+make fmt          # gofmt -w ./...
+make lint         # golangci-lint run  (staticcheck is one of its linters — not a separate tool)
+make vet          # go vet ./...
+make check        # gofmt -l (fails on any unformatted file) + vet + lint
+make test         # go test -short -race -count=1 ./...  — the fast inner loop, mock provider only
+make test-all     # the FULL suite as CI runs it: -race, integration build tag, e2e git fixtures
+make xbuild       # cross-compile every GOOS/GOARCH target — catches platform-specific code early
+make bench-smoke  # the 10-task corpus against the MOCK provider — zero tokens
+make bench        # the corpus against the real pinned provider — COSTS MONEY
+make secrets      # gitleaks over history + tree
+make ci           # check + test-all + xbuild + bench-smoke
+make install-hooks
+```
+
+**Go-specific gates that are not optional here.** `-race` on every test run, because the
+loop is concurrent (streaming, tool dispatch, cancellation) and a data race in an agent
+loop is exactly the kind of bug that reproduces once a month. `-count=1` because Go
+**caches test results** and a cached pass looks identical to a real one. `gofmt -l` as a
+hard failure, not a suggestion. `make xbuild` because ADR-0001's distribution promise is
+cross-compilation, and `flock`/process-group code is where that breaks first.
+
+Toolchain: Go **1.26.5** at `~/.local/go`, with `golangci-lint`, `gopls` and `gitleaks`
+in `~/go/bin`. Both are on `PATH` via `~/.bashrc`.
+
+**`make bench` spends real money.** It is never in `ci` and never in the hook. Roughly
+$2 per full corpus run at current `qwen/qwen3-coder-next` pricing. `make bench-smoke` is
+the free equivalent and is what gates a PR.
+
+`OPENROUTER_API_KEY` is read from the environment. It must never appear in the journal,
+in a blob, in a log line, or in a test fixture.
+
+## Workflow conventions
+
+- **`main` is protected — PR-only, never push to `main`.**
+- **Branch per slice:** `git switch -c feat/<slice>` off `origin/main`; open a PR.
+- Run `make ci` locally before pushing; the pre-push hook mirrors it.
+- Commit trailer: `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`.
+
+## Module map
+
+```
+cmd/kopicode/        REPL surface — main package
+cmd/kopibench/       headless bench runner — main package
+internal/
+  engine/            agent loop, turn state, context assembly
+  provider/          OpenRouter client + mock/replay provider
+  parse/             tool-call extraction and repair
+  tools/             read, write, edit, list, grep, shell
+  journal/           Journal interface, FileJournal, blob spill, event types
+  repo/              git shadow refs, worktrees, diff rendering
+  permission/        policy decisions
+  bench/             runner, oracle execution, McNemar scoring
+bench/tasks/         the frozen task corpus (data, not code)
+docs/adr/            decisions of record
+docs/SLICE-1.md      the current slice
+```
+
+`bench/` in ADR-0003's sketch is split here into `cmd/kopibench/` plus
+`internal/bench/`, following Go's convention that main packages live under `cmd/`. The
+boundary the ADR cares about — two front ends, one engine, neither reaching past the
+engine's interface — is unchanged.
+
+## Boundaries that must not be crossed
+
+These are the product's structural promises. Hold them.
+
+- **`internal/` is the engine boundary.** Nothing outside this module imports it. The
+  compiler enforces it; do not add a `pkg/` escape hatch, and do not promote
+  `internal/engine` to a published module without an ADR.
+- **Both front ends talk to the engine through its interface only.** An import-hygiene
+  test asserts `cmd/*` never reaches into engine internals. Keep it green — it is the
+  only thing holding a boundary that has no network or module edge to enforce it.
+- **One session record, and it is the journal.** Do not build a parallel transcript.
+  Everything the REPL prints and everything `--print` emits is **derived** from journal
+  events. This is the lesson from sibei-flow
+  [ADR-0013](https://github.com/leejianrong/sibei-flow/blob/main/docs/design/adr/0013-transcript-tagged-union.md):
+  a hand-rolled `list[str]` clipped at 1200 characters was lossy by construction and
+  drifted from reality the first time someone added a tool call and forgot the append.
+- **`slog` never duplicates the journal.** The journal owns session content (messages,
+  tool calls, results, edits, permissions). `slog` owns engine-internal diagnostics only
+  — startup, config resolution, provider connection, lock acquisition, worktree
+  lifecycle — off by default, `--debug`, to **stderr** because `--print` owns stdout. A
+  logger that records session facts is the parallel transcript, arriving disguised as
+  observability. If a fact belongs in both, it belongs in the journal only.
+- **The fixture recorder scrubs secrets at write time**, via a header **allowlist** and
+  not a denylist. Recorded provider traffic is real HTTP, and real headers carry the API
+  key; scrubbing on read means the key already sits in a file someone can commit.
+- **Never truncate tool output.** Payloads over 64 KiB spill to content-addressed blobs.
+  Clipping the diagnostic output that justifies a fix, exactly where a reviewer looks,
+  is the specific failure being designed out.
+- **Events are a compatibility surface from the first commit.** Version them, and make
+  the unmarshaller preserve unknown types rather than dropping them.
+- **Edits fail closed.** An `edit_file` whose anchors no longer match the file is
+  **rejected**, never applied somewhere plausible. Fuzzy matching is a fallback only,
+  and using it marks the session `unattributed` in the bench classifier. Never add an
+  edit path that can apply to the wrong region without emitting a signal — that is the
+  specific defect ADR-0006 exists to prevent, and it corrupts the project's core metric
+  rather than merely breaking a file.
+- **Shell out, do not link.** Language tooling — the syntax gate's `gofmt`/`node
+  --check`/`py_compile`, git, diff rendering — is invoked as a subprocess. No CGo. It
+  costs cross-compilation without a C toolchain and breaks `go install` for users
+  without a compiler, which is the distribution promise ADR-0001 rests on.
+- **Dependencies stay near-zero.** stdlib, plus `golang.org/x/term` for line editing and
+  `github.com/google/go-cmp` in tests. Git is shelled out to, not linked. Diffs render
+  via `git diff --no-index`. Adding a dependency needs a reason in the PR description.
+- **The engine decides policy; the surfaces decide presentation.** The engine decides
+  *that* permission is required and what a decision means, never how it is asked.
+- **Never touch the user's git state.** Shadow refs are written under
+  `refs/kopicode/`, through a throwaway `GIT_INDEX_FILE`. The user's branch, HEAD, index
+  and stashes are off limits, and `.kopicode/` goes in `.git/info/exclude`, never
+  `.gitignore`.
+- **Pin the provider on every benchmark request.** `provider.order`,
+  `allow_fallbacks: false`, fixed `quantizations`, all recorded per result. An unpinned
+  A/B number is not evidence.
+
+## Test seam
+
+The **primary seam is the engine's public interface, driven by the mock/replay provider
+against a temp git-repo fixture**, with an injected clock and a seeded RNG. That is what
+makes the loop testable at zero token cost and deterministic given fixed provider
+output.
+
+Assert **observable outcomes** — journal events, the resulting tree, exit codes,
+captured stdout — never internal loop state. "Did the agent behave correctly" is a
+question about the journal and the diff, not about which method got called.
+
+The mock provider **replays recorded traffic rather than synthesising it**. If it drifts
+from real provider behaviour, green plumbing tests will mask real breakage, so recorded
+fixtures come from actual runs and get refreshed when the provider changes.
+
+## Pointers
+
+- [`docs/PRD.md`](docs/PRD.md) — what this is for, numbered requirements R1-R16, success
+  measures, scope boundary, and the epic-to-requirement traceability table
+- [`docs/SLICE-1.md`](docs/SLICE-1.md) — the current slice: scope, build plan,
+  acceptance criteria, risks
+- [`docs/adr/`](docs/adr/) — decisions of record, 0001–0005
+- [`README.md`](README.md) — the thesis, where the harness gains are, model table
+- `../agentic-harness-ideas.md` — strategy notes and the still-open questions (sandbox
+  model, context management, whether cheap-A/B replay reopens durability)

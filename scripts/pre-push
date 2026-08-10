@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# kopicode pre-push hook.
+#
+# Mirrors the cheap CI jobs so a push rarely lands red. Deliberately excludes
+# anything slow or anything that spends money: no `bench`, no cross-compile
+# matrix. If this gate gets slow, people bypass it and then it protects nothing.
+#
+# Escape hatch: git push --no-verify
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+start=$(date +%s)
+echo "pre-push: cheap gates"
+
+make check
+make test
+
+# gitleaks only if it happens to be installed — a missing optional tool must not
+# block a push, but a leaked key must not land either. CI runs it unconditionally.
+if command -v gitleaks >/dev/null 2>&1; then
+  make secrets
+else
+  echo "pre-push: gitleaks not on PATH, skipping (CI still runs it)"
+fi
+
+echo "pre-push: passed in $(( $(date +%s) - start ))s"

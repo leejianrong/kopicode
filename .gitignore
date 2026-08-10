@@ -1,17 +1,26 @@
-# Python
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-.mypy_cache/
-.ruff_cache/
-.pytest_cache/
-dist/
-build/
-*.egg-info/
+# Build output.
+# These MUST stay anchored with a leading slash: a bare `kopicode` pattern matches
+# any path component with that name, which silently ignores cmd/kopicode/ and its
+# source along with it.
+/bin/
+/dist/
+/kopicode
+/kopibench
 
-# Satay journals + local data
-.satay/
+# Go
+*.test
+*.out
+coverage.txt
+
+# kopicode local data: session journals, blobs, locks, throwaway indexes
+.kopicode/
+
+# Bench results and scratch worktrees
+/bench/results/
+/bench/.worktrees/
+
+# Recorded provider fixtures are committed, but never raw captures
+*.raw.json
 
 # Editors / OS
 .DS_Store
