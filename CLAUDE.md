@@ -8,7 +8,7 @@ large margin, and that the rig proves it rather than asserting it.
 
 Written in **Go**. Single static binary. No durable-execution runtime.
 
-## Build status — scaffold only, no product code
+## Build status — foundations landed, no loop yet
 
 **Trust the code over the docs.** `docs/` describes the intended system; where they
 disagree, the code is the truth for what exists today — verify before you believe a
@@ -16,9 +16,10 @@ docstring, including this section.
 
 What is real now (2026-08-11):
 
-- **Module + toolchain.** Go 1.26.5, zero third-party dependencies. `Makefile` with the
-  gates below, `.golangci.yml` (v2 schema, validated), `.github/workflows/ci.yml` with
-  parallel jobs, and a pre-push hook mirroring the cheap gates.
+- **Module + toolchain.** Go 1.26.5. `Makefile` with the gates below, `.golangci.yml`
+  (v2 schema, validated), `.github/workflows/ci.yml` with parallel jobs, and a pre-push
+  hook mirroring the cheap gates. One third-party dependency:
+  `github.com/google/go-cmp`, tests only.
 - **Cross-compilation proven.** `make xbuild` produces both binaries for linux/amd64,
   linux/arm64, darwin/amd64, darwin/arm64 and windows/amd64 with `CGO_ENABLED=0` — the
   ADR-0001 distribution promise, checked rather than asserted.
@@ -26,14 +27,30 @@ What is real now (2026-08-11):
   import only `internal/engine` and `internal/bench`, and the engine may not import a
   surface. Both were confirmed to fail when violated, and the failure names the file,
   the import and the ADR.
+- **`internal/journal`** — the event tagged union. Envelope plus 19 payload types, with
+  explicit `MarshalJSON`/`UnmarshalJSON` so an unknown future type survives a round trip
+  as bytes rather than being dropped. Two guards, both seen red, make it structurally
+  impossible for a payload *field* to hold a credential: no free-form map anywhere, and
+  no field named for one. Use `journal.Marshal` and not `json.Marshal` — the latter
+  re-escapes HTML in whatever `MarshalJSON` returns and fills the record with `\uXXXX`
+  noise.
+- **`internal/parse`** — tool-call extraction over three routes (native `tool_calls`,
+  fenced JSON, XML-tagged). First success wins, a route that finds its marker commits to
+  it rather than falling through, and ambiguity is a typed error rather than a guess.
+  Returns the route it took as a typed value; it does **not** import the journal.
+- **`internal/anchor`** — the anchor format, settled by ADR-0006 §7 and versioned.
+  8 hex characters of SHA-256 over a length-prefixed (previous, this, next) window,
+  rendered as `<anchor> <line-number>| <content>`. `read_file` must call `anchor.Render`
+  rather than formatting its own lines: derivation and rendering are one model-facing
+  contract and splitting them is how the halves drift.
 
-What does **not** exist: the engine, the loop, any tool, the journal, the provider
-clients, the REPL, the bench runner, the corpus. `cmd/kopicode` and `cmd/kopibench` are
-stubs that exit **4** rather than 0 — an unimplemented binary exiting cleanly is how a
-broken harness passes a smoke test.
+What does **not** exist: the engine, the loop, the tools, `FileJournal` and blob spill,
+the provider clients, the REPL, the bench runner, the corpus. `cmd/kopicode` and
+`cmd/kopibench` are stubs that exit **4** rather than 0 — an unimplemented binary exiting
+cleanly is how a broken harness passes a smoke test.
 
-Build order is [`docs/SLICE-1.md`](docs/SLICE-1.md) §Build Plan, steps 2 onward. Step 1
-is done.
+Build order is [`docs/SLICE-1.md`](docs/SLICE-1.md) §Build Plan. Step 1 is done, and
+steps 2–6 are partially landed as listed above.
 
 Do not add a test count here. It goes stale on the next PR. `make test` prints the real
 number, and a red suite — not a changed count — is the signal something is wrong.
@@ -195,11 +212,11 @@ fixtures come from actual runs and get refreshed when the provider changes.
 
 ## Pointers
 
-- [`docs/PRD.md`](docs/PRD.md) — what this is for, numbered requirements R1-R16, success
+- [`docs/PRD.md`](docs/PRD.md) — what this is for, numbered requirements R1-R17, success
   measures, scope boundary, and the epic-to-requirement traceability table
 - [`docs/SLICE-1.md`](docs/SLICE-1.md) — the current slice: scope, build plan,
   acceptance criteria, risks
-- [`docs/adr/`](docs/adr/) — decisions of record, 0001–0005
+- [`docs/adr/`](docs/adr/) — decisions of record, 0001–0007
 - [`README.md`](README.md) — the thesis, where the harness gains are, model table
 - `../agentic-harness-ideas.md` — strategy notes and the still-open questions (sandbox
   model, context management, whether cheap-A/B replay reopens durability)
