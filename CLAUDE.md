@@ -40,7 +40,7 @@ number, and a red suite — not a changed count — is the signal something is w
 
 ## Decisions of record — read before proposing anything
 
-Five ADRs bind, and two of them reverse earlier plans that still appear in older
+Seven ADRs bind, and two of them reverse earlier plans that still appear in older
 project notes. If a document contradicts an ADR, the ADR wins.
 
 | | |
@@ -51,6 +51,7 @@ project notes. If a document contradicts an ADR, the ADR wins.
 | [0004](docs/adr/0004-line-oriented-repl.md) | **Line-oriented REPL.** No alt-screen, no TUI framework. |
 | [0005](docs/adr/0005-benchmark-and-ab-methodology.md) | **Paired McNemar**, pinned providers, mock/replay provider, early stopping, task pruning. No add-on catalogue yet. |
 | [0006](docs/adr/0006-hash-anchored-edits-and-failure-attribution.md) | **Hash-anchored edits** — the model never reproduces file content; anchor drift is a hard rejection. Three-bucket failure attribution so a harness bug can't be laundered into a `model` number. Post-edit syntax gate. No AST editing. |
+| [0007](docs/adr/0007-model-selection-and-harness-config-shape.md) | **One binary, every supported model.** `--model` > `.kopicode/config.toml` > default; **no env var**; an unknown id is a startup usage error (exit 2), never a provider error. Harness config is a named in-binary value resolved from the model id — slice 1 registers one. A bench **arm** is (model × harness config × provider pin), sampling inside the harness config. |
 
 Satay's natural consumer in this suite is **sotong** (unattended, triggered,
 credential-holding, not started), not kopicode. Do not reintroduce it here.
