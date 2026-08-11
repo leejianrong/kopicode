@@ -31,8 +31,10 @@ What is real now (2026-08-11):
 
 - **Module + toolchain.** Go 1.26.5. `Makefile` with the gates below, `.golangci.yml`
   (v2 schema, validated), `.github/workflows/ci.yml` with parallel jobs, and a pre-push
-  hook mirroring the cheap gates. One third-party dependency:
-  `github.com/google/go-cmp`, tests only.
+  hook mirroring the cheap gates. Two dependencies, both sanctioned in advance:
+  `github.com/google/go-cmp` in tests only, and `golang.org/x/term` for the line
+  editor (ADR-0004 decision 2). Pure Go, no CGo, and `golang.org/x/sys` comes with
+  it as an indirect.
 - **Cross-compilation proven.** `make xbuild` produces both binaries for linux/amd64,
   linux/arm64, darwin/amd64, darwin/arm64 and windows/amd64 with `CGO_ENABLED=0` — the
   ADR-0001 distribution promise, checked rather than asserted.
@@ -77,9 +79,22 @@ What is real now (2026-08-11):
   the bench runner. Commits carry a fixed `kopicode` identity and an injected clock,
   so a snapshot never depends on the user having configured git and the same tree
   yields the same sha.
+- **`cmd/kopicode/lineedit`** — the line editor behind the prompt (ADR-0004): raw
+  mode via `golang.org/x/term`, history, arrows, `Ctrl-A/E/K/U`. It lives under
+  `cmd/` and not `internal/` because it is presentation, and the ADR-0003 allowlist
+  is not the place to make room for a misplaced package. The raw-mode transition is
+  the only platform-specific code and sits behind a two-method `Terminal` seam, so
+  the whole editor is driven headless by the byte sequences a terminal sends. Three
+  properties are guarded rather than hoped for: escape sequences split across reads
+  decode identically at **every** split point, an unrecognised sequence is consumed
+  whole so `F5` cannot type `15~` into the prompt, and the terminal is handed back on
+  every exit path including a panic. The non-TTY path emits no escape byte at all.
+  A key constant that lands without a name, a decoder entry *and* a binding fails the
+  suite — `key_internal_test.go` derives the set from the source with `go/ast` rather
+  than trusting a hand-written table.
 
 What does **not** exist: the engine, the loop, the tools, `FileJournal` and blob spill,
-the provider clients, the REPL, the bench runner, the corpus. `cmd/kopicode` and
+the provider clients, the REPL itself, the bench runner, the corpus. `cmd/kopicode` and
 `cmd/kopibench` are stubs that exit **4** rather than 0 — an unimplemented binary exiting
 cleanly is how a broken harness passes a smoke test.
 
@@ -156,6 +171,7 @@ in a blob, in a log line, or in a test fixture.
 
 ```
 cmd/kopicode/        REPL surface — main package
+  lineedit/          raw-mode line editing for the prompt: history, arrows, Ctrl-A/E/K/U
 cmd/kopibench/       headless bench runner — main package
 internal/
   build/             the binary's identity: version, commit, dirty bit
