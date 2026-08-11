@@ -1,7 +1,7 @@
 // Package tools implements the tools the model calls to inspect and change a
 // repository: read_file, list_dir and grep (KAN-780), run_shell (KAN-782),
-// write_file (KAN-781) and edit_file (KAN-784), all on the same [Root] and the
-// same [Limits].
+// write_file (KAN-781), edit_file (KAN-784) and its fuzzy fallback
+// edit_file_fuzzy (KAN-785), all on the same [Root] and the same [Limits].
 //
 // Three rules shape everything here.
 //
@@ -13,7 +13,9 @@
 // obtainable only from a read, which is what makes an edit into a region the
 // model was never shown structurally impossible rather than merely discouraged.
 // TestNoToolButReadFileEmitsAnchors holds that across the whole tool set, so a
-// tool added later cannot leak one by accident.
+// tool added later cannot leak one by accident. edit_file_fuzzy is the sharpest
+// case of it: its near-miss report quotes file content the model may never have
+// read, and it renders line numbers without anchors for exactly that reason.
 //
 // **Bounds are declared, never silent.** CLAUDE.md forbids clipping the
 // diagnostic output that justifies a fix. Where a bound is unavoidable — a file
@@ -50,6 +52,15 @@ const (
 	ToolRunShell  = "run_shell"
 	ToolWriteFile = "write_file"
 	ToolEditFile  = "edit_file"
+
+	// ToolEditFileFuzzy is the fallback of ADR-0006 §2, for when the model
+	// cannot produce a usable anchor. It is a separate tool and not a second
+	// argument shape on edit_file, because one tool taking either
+	// (anchor_start, anchor_end) or (before, after) would have to decide which
+	// mode a call meant from which fields arrived — and a call that filled
+	// both would have to be adjudicated. That is a place to guess, inside the
+	// one path in this package that is allowed to be approximate at all.
+	ToolEditFileFuzzy = "edit_file_fuzzy"
 )
 
 // Limits are the declared bounds the tools apply. Every one of them is stated
@@ -92,6 +103,18 @@ type Limits struct {
 	// killed outright, and how long a finished command's output pipes are given
 	// to drain when something it started is still holding them.
 	ShellGrace time.Duration
+
+	// FuzzyFloor is the normalised similarity a region must reach before
+	// edit_file_fuzzy will consider it a match at all. See [DefaultFuzzyFloor]
+	// for the default and the basis for it.
+	//
+	// It is a **tunable harness parameter**, not a constant, because SLICE-1
+	// measures what the harness buys and a number that cannot be varied cannot
+	// be measured. A value outside (0, 1] — which includes the zero value of a
+	// hand-built Limits — falls back to the default rather than meaning "match
+	// anything": a forgotten field must not be the thing that turns the one
+	// approximate edit path in this package into an unconditional one.
+	FuzzyFloor float64
 }
 
 // DefaultLimits are the production bounds.
@@ -113,6 +136,7 @@ func DefaultLimits() Limits {
 		MaxMatches:   200,
 		ShellTimeout: 120 * time.Second,
 		ShellGrace:   5 * time.Second,
+		FuzzyFloor:   DefaultFuzzyFloor,
 	}
 }
 

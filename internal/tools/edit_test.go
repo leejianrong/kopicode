@@ -697,14 +697,8 @@ func TestEditRejectionDetailIsTheOutput(t *testing.T) {
 // charges different buckets to different causes, so two reasons sharing a wire
 // form would make the distinction unrecoverable from the journal after the run.
 func TestRejectReasonsAreDistinct(t *testing.T) {
-	all := []tools.RejectReason{
-		tools.RejectMalformedAnchor,
-		tools.RejectAnchorDrift,
-		tools.RejectAmbiguousAnchor,
-		tools.RejectAnchorOrder,
-	}
 	seen := map[tools.RejectReason]bool{}
-	for _, r := range all {
+	for _, r := range declaredRejectReasons(t) {
 		if r == "" {
 			t.Error("a reject reason has an empty wire form")
 		}
@@ -713,47 +707,125 @@ func TestRejectReasonsAreDistinct(t *testing.T) {
 		}
 		seen[r] = true
 	}
+	// The values journal.EditRejected's doc names, so a rename here that left
+	// that doc behind fails rather than drifting.
+	for _, want := range []tools.RejectReason{
+		tools.RejectMalformedAnchor, tools.RejectAnchorDrift,
+		tools.RejectAmbiguousAnchor, tools.RejectAnchorOrder, tools.RejectBelowFloor,
+	} {
+		if !seen[want] {
+			t.Errorf("%q is not among the package's declared reject reasons", want)
+		}
+	}
 }
 
 // TestEveryRejectReasonAdvisesADifferentMove is the test for whether these
-// deserve to be separate values at all. If two reasons produced the same
+// deserve to be separate values at all. If two refusals produced the same
 // sentence back to the model, they would be one reason with two names, and the
 // finer taxonomy would be cost without information.
+//
+// The unit is (mode, reason) rather than reason alone, because the fuzzy
+// fallback reuses "ambiguous" — the *kind* of failure is the same and the
+// recovery is not, and journal.EditRejected carries the mode beside the reason
+// so a classifier can still tell them apart.
+//
+// It is also the completeness check: the set of reasons is parsed out of the
+// package rather than listed here, so a sixth one added without a case fails
+// this test instead of shipping with no evidence that it says anything new.
 func TestEveryRejectReasonAdvisesADifferentMove(t *testing.T) {
-	f := newFixture(t, map[string]string{
+	dupBody := "a\nb\nc\nx\na\nb\nc\ny\n"
+	files := map[string]string{
 		"main.go": editSample,
-		"dup.txt": "a\nb\nc\nx\na\nb\nc\ny\n",
-	})
-	s := f.set(t)
-	a := derivedAnchors(editSample)
-	dup := derivedAnchors("a\nb\nc\nx\na\nb\nc\ny\n")
-
-	cases := map[tools.RejectReason]struct {
-		file string
-		req  tools.EditRequest
-	}{
-		tools.RejectMalformedAnchor: {"main.go", tools.EditRequest{
-			Path: "main.go", AnchorStart: "line 6", AnchorEnd: a[5], NewText: "x\n"}},
-		tools.RejectAnchorDrift: {"main.go", tools.EditRequest{
-			Path: "main.go", AnchorStart: "deadbeef", AnchorEnd: "deadbeef", NewText: "x\n"}},
-		tools.RejectAmbiguousAnchor: {"dup.txt", tools.EditRequest{
-			Path: "dup.txt", AnchorStart: dup[1], AnchorEnd: dup[1], NewText: "x\n"}},
-		tools.RejectAnchorOrder: {"main.go", tools.EditRequest{
-			Path: "main.go", AnchorStart: a[5], AnchorEnd: a[2], NewText: "x\n"}},
+		"dup.txt": dupBody,
+		"twin.go": "func a() {\n\tsame()\n}\n\nfunc b() {\n\tsame()\n}\n",
 	}
 
-	summaries := map[string]tools.RejectReason{}
-	for want, tc := range cases {
-		rej := rejectEdit(t, f, s, tc.file, tc.req)
+	type refusal struct {
+		mode string
+		run  func(t *testing.T, f *fixture, s *tools.Set) *tools.EditRejection
+	}
+	cases := map[tools.RejectReason]refusal{
+		tools.RejectMalformedAnchor: {tools.ModeAnchored,
+			func(t *testing.T, f *fixture, s *tools.Set) *tools.EditRejection {
+				return rejectEdit(t, f, s, "main.go", tools.EditRequest{Path: "main.go",
+					AnchorStart: "line 6", AnchorEnd: derivedAnchors(editSample)[5], NewText: "x\n"})
+			}},
+		tools.RejectAnchorDrift: {tools.ModeAnchored,
+			func(t *testing.T, f *fixture, s *tools.Set) *tools.EditRejection {
+				return rejectEdit(t, f, s, "main.go", tools.EditRequest{Path: "main.go",
+					AnchorStart: "deadbeef", AnchorEnd: "deadbeef", NewText: "x\n"})
+			}},
+		tools.RejectAmbiguousAnchor: {tools.ModeAnchored,
+			func(t *testing.T, f *fixture, s *tools.Set) *tools.EditRejection {
+				return rejectEdit(t, f, s, "dup.txt", tools.EditRequest{Path: "dup.txt",
+					AnchorStart: derivedAnchors(dupBody)[1], AnchorEnd: derivedAnchors(dupBody)[1],
+					NewText: "x\n"})
+			}},
+		tools.RejectAnchorOrder: {tools.ModeAnchored,
+			func(t *testing.T, f *fixture, s *tools.Set) *tools.EditRejection {
+				a := derivedAnchors(editSample)
+				return rejectEdit(t, f, s, "main.go", tools.EditRequest{Path: "main.go",
+					AnchorStart: a[5], AnchorEnd: a[2], NewText: "x\n"})
+			}},
+		tools.RejectBelowFloor: {tools.ModeFuzzy,
+			func(t *testing.T, f *fixture, s *tools.Set) *tools.EditRejection {
+				return rejectFuzzy(t, f, s, "main.go", tools.FuzzyEditRequest{Path: "main.go",
+					Before: "func nothing(zzz complex128) {\n}\n", After: "x\n"})
+			}},
+	}
+	// The fuzzy fallback's ambiguity refusal shares its reason with anchored
+	// mode's and must not share its sentence.
+	fuzzyAmbiguous := func(t *testing.T, f *fixture, s *tools.Set) *tools.EditRejection {
+		return rejectFuzzy(t, f, s, "twin.go", tools.FuzzyEditRequest{Path: "twin.go",
+			Before: "\tsame()\n", After: "x\n"})
+	}
+
+	declared := declaredRejectReasons(t)
+	for _, r := range declared {
+		if _, ok := cases[r]; !ok {
+			t.Errorf("reject reason %q has no case here, so nothing checks that it says "+
+				"anything a different reason does not", r)
+		}
+	}
+	if len(declared) == 0 {
+		t.Fatal("no reject reasons parsed out of the package; the completeness check is " +
+			"asserting nothing")
+	}
+
+	type key struct{ mode, summary string }
+	seen := map[key]tools.RejectReason{}
+	record := func(t *testing.T, mode string, want tools.RejectReason, rej *tools.EditRejection) {
+		t.Helper()
 		if rej.Reason != want {
 			t.Errorf("%s: reason = %q", want, rej.Reason)
-			continue
+			return
 		}
-		if other, dupe := summaries[rej.Summary]; dupe {
-			t.Errorf("%q and %q produce the same sentence, so they are one reason "+
-				"with two names: %s", want, other, rej.Summary)
+		k := key{mode, rej.Summary}
+		if other, dupe := seen[k]; dupe {
+			t.Errorf("%q and %q produce the same sentence in %s mode, so they are one "+
+				"reason with two names: %s", want, other, mode, rej.Summary)
 		}
-		summaries[rej.Summary] = want
+		seen[k] = want
+		if strings.TrimSpace(rej.Detail) == strings.TrimSpace(rej.Summary) {
+			t.Errorf("%q returns no advice beyond its summary, so the model is told what "+
+				"went wrong and not what to do", want)
+		}
+	}
+
+	for want, tc := range cases {
+		f := newFixture(t, files)
+		record(t, tc.mode, want, tc.run(t, f, f.set(t)))
+	}
+
+	f := newFixture(t, files)
+	fuzzyAmb := fuzzyAmbiguous(t, f, f.set(t))
+	record(t, tools.ModeFuzzy, tools.RejectAmbiguousAnchor, fuzzyAmb)
+	for k, r := range seen {
+		if k.mode == tools.ModeAnchored && r == tools.RejectAmbiguousAnchor &&
+			k.summary == fuzzyAmb.Summary {
+			t.Errorf("anchored and fuzzy ambiguity produce the same sentence, so the mode "+
+				"carries no information: %s", k.summary)
+		}
 	}
 }
 
@@ -771,7 +843,7 @@ func TestEveryRejectReasonAdvisesADifferentMove(t *testing.T) {
 // leak one by rendering a line the same way, so it is asserted here over every
 // tool in the set.
 func TestNoToolButReadFileEmitsAnchors(t *testing.T) {
-	f := newFixture(t, map[string]string{"main.go": editSample})
+	f := newFixture(t, map[string]string{"main.go": editSample, "third.go": editSample})
 	s := f.set(t)
 	ctx := context.Background()
 	want := derivedAnchors(editSample)
@@ -810,6 +882,25 @@ func TestNoToolButReadFileEmitsAnchors(t *testing.T) {
 	// what it must not do is hand out anchors for lines the model has not read,
 	// so the diff and the rendered result are what is checked.
 	outputs["edit_file diff"] = edit.Diff
+
+	// edit_file_fuzzy is the sharpest case in the set, and the reason this test
+	// grew when KAN-785 landed. Its near-miss report quotes file content the
+	// model may never have read — that is the whole point of it — so rendering
+	// those lines the way read_file renders them would hand over anchors for a
+	// region the model has not seen, and the structural claim above would stop
+	// being structural.
+	fuzzy := applyFuzzy(t, s, tools.FuzzyEditRequest{
+		Path: "third.go", Before: "\tfmt.Println(\"hello\")\n", After: "\tfmt.Println(\"bye\")\n",
+	})
+	outputs["edit_file_fuzzy applied"] = fuzzy.Output
+
+	missed, _ := s.EditFileFuzzy(ctx, tools.FuzzyEditRequest{
+		Path: "third.go", Before: "func nothing(zzz complex128) {\n}\n", After: "x\n",
+	})
+	if missed.Rejection == nil || len(missed.Rejection.Matches) == 0 {
+		t.Fatal("the fuzzy call was expected to be refused with near misses quoting the file")
+	}
+	outputs["edit_file_fuzzy near misses"] = missed.Rejection.Detail
 
 	for tool, out := range outputs {
 		for i, a := range want {
