@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/leejianrong/kopicode/internal/procgroup"
 )
 
 // ShellRequest is one run_shell call.
@@ -250,7 +252,7 @@ func (s *Set) RunShell(ctx context.Context, req ShellRequest) (ShellResult, erro
 	res.LeftRunning = errors.Is(werr, exec.ErrWaitDelay)
 
 	if ps := cmd.ProcessState; ps != nil {
-		res.ExitCode, res.Signal = exitStatus(ps)
+		res.ExitCode, res.Signal = procgroup.ExitStatus(ps)
 		if res.Outcome == OutcomeExited && res.Signal != "" {
 			res.Outcome = OutcomeSignalled
 		}
@@ -280,33 +282,13 @@ func cancelledShell(req ShellRequest) ShellResult {
 // stopGroup ends the process group and waits for the run to be reaped,
 // returning what it took to stop it.
 //
-// The leader has not been reaped when this runs — cmd.Wait is still blocked on
-// it — so its pid cannot have been recycled, and the negative pid reaches the
-// group that was started here and no other. Signalling a group *after* the
-// leader is reaped is the version of this that can hit a stranger, and it is
-// why nothing here signals on the ordinary exit path.
+// The mechanism — graceful signal, bounded grace period, forceful signal, all
+// aimed at the group rather than the pid — is internal/procgroup's, shared with
+// the post-edit syntax gate so that kopicode has one answer to "how do we kill
+// a subprocess" rather than one per package. What run_shell decides is only the
+// grace period and which clock measures it.
 func (s *Set) stopGroup(cmd *exec.Cmd, waited <-chan error) (string, error) {
-	label, err := terminateGroup(cmd)
-	switch {
-	case err != nil:
-		// The graceful signal was not delivered at all. Waiting out a grace
-		// period for it would be waiting for nothing, so escalate now.
-	case label == "":
-		// There was nothing left to signal: the group exited between the
-		// decision to kill it and the syscall.
-		return "", <-waited
-	default:
-		grace, stop := s.clock().NewTimer(s.Limits.ShellGrace)
-		defer stop()
-		select {
-		case werr := <-waited:
-			return label, werr
-		case <-grace:
-		}
-	}
-
-	label, _ = killGroup(cmd)
-	return label, <-waited
+	return procgroup.Stop(cmd, waited, s.clock(), s.Limits.ShellGrace)
 }
 
 // childEnv is the parent environment minus the provider credential.
