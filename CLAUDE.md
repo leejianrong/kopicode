@@ -94,6 +94,23 @@ What is real now (2026-08-11):
   the bench runner. Commits carry a fixed `kopicode` identity and an injected clock,
   so a snapshot never depends on the user having configured git and the same tree
   yields the same sha.
+- **`internal/provider` + `internal/provider/mock`** — the wire format the loop
+  exchanges with a model, and the replay provider that serves recorded traffic through
+  it. **This is the primary test seam** (SLICE-1 affordance P2), so the shape it settles
+  is the one every engine test inherits. The interface is one method,
+  `Complete(ctx, Request) (*Stream, error)`, and it is declared in **`internal/engine`**
+  because an interface belongs where it is consumed — the real client (KAN-776) will
+  satisfy the same one without importing the engine. A reply arrives as a `Stream`
+  pulled synchronously by its consumer: **no goroutine, no map iteration in any output
+  path**, which is what a byte-identical replayed journal rests on. Replay is at the
+  interface but over the fixture's **recorded SSE frames**, decoded by the same reader
+  the live client will use, so keep-alive comments, argument fragments split across
+  chunks and mid-stream `Ctrl-C` are all driven rather than assumed; the assembled body
+  is passed through untouched as `Reply.Raw`, so the journal records what the provider
+  sent rather than a re-encoding. Asking for traffic the recording does not have is
+  always an error — exhausted, out of order, another arm's pin or model — and
+  `Drained()` reports replies left unconsumed, because a session that ended early
+  otherwise passes every assertion about the turns it did reach.
 - **`cmd/kopicode/lineedit`** — the line editor behind the prompt (ADR-0004): raw
   mode via `golang.org/x/term`, history, arrows, `Ctrl-A/E/K/U`. It lives under
   `cmd/` and not `internal/` because it is presentation, and the ADR-0003 allowlist
@@ -119,8 +136,9 @@ What is real now (2026-08-11):
   `go list ./...` and therefore out of every root gate; reference fixes live in
   `bench/_solutions/`, outside the corpus tree and behind a `_` the Go tool ignores.
 
-What does **not** exist: the engine, the loop, the tools, `FileJournal` and blob spill,
-the provider clients, the REPL itself, the bench runner. `cmd/kopicode` and
+What does **not** exist: the engine loop (`internal/engine` holds the provider interface
+and nothing else), the tools, `FileJournal` and blob spill, the real OpenRouter client,
+the REPL itself, the bench runner. `cmd/kopicode` and
 `cmd/kopibench` are stubs that exit **4** rather than 0 — an unimplemented binary exiting
 cleanly is how a broken harness passes a smoke test.
 
@@ -201,9 +219,10 @@ cmd/kopicode/        REPL surface — main package
 cmd/kopibench/       headless bench runner — main package
 internal/
   build/             the binary's identity: version, commit, dirty bit
-  engine/            agent loop, turn state, context assembly
-  provider/          OpenRouter client + mock/replay provider
+  engine/            agent loop, turn state, context assembly; the Provider interface
+  provider/          the wire format, SSE streaming, and the OpenRouter client
   provider/fixture/  recorded (today: hand-authored) provider traffic + its loader
+  provider/mock/     the replay provider — the primary test seam
   parse/             tool-call extraction and repair
   tools/             read, write, edit, list, grep, shell
   journal/           Journal interface, FileJournal, blob spill, event types
