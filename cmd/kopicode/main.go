@@ -7,14 +7,16 @@ package main
 import (
 	"fmt"
 	"os"
-)
 
-// version is overridden at build time via -ldflags.
-var version = "dev"
+	"github.com/leejianrong/kopicode/internal/build"
+)
 
 func main() {
 	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "version") {
-		fmt.Println(version)
+		// The same identity the engine puts on SessionStarted, printed by the
+		// same call. Two ways of asking a binary who it is would eventually
+		// disagree, and the one nobody looks at would be the one in the record.
+		fmt.Println(build.Current())
 		return
 	}
 

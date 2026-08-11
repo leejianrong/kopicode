@@ -52,6 +52,12 @@ func fixtures() map[journal.Type]journal.Payload {
 			ModelID:           "qwen/qwen3-coder-next",
 			Provider:          pin,
 			HarnessConfigHash: "sha256:abc123",
+			Build: journal.BuildInfo{
+				Version:   "v0.1.0-3-g6c9eab8",
+				Commit:    "6c9eab8f0e2b1c4d5e6f708192a3b4c5d6e7f809",
+				TreeState: "dirty",
+				Source:    "ldflags",
+			},
 		},
 		journal.TypeUserMessage:      journal.UserMessage{Text: text("fix the failing test in internal/parse")},
 		journal.TypeAssistantMessage: journal.AssistantMessage{Text: text("Reading the test first.")},
