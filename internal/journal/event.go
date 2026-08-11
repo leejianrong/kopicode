@@ -28,8 +28,8 @@
 //
 // event.go and payload.go are the types and their JSON, and nothing here
 // touches a disk. FileJournal — append, fsync, crash-truncated-line detection
-// and secret redaction — is in file.go; the 64 KiB blob spill is still to
-// come.
+// and secret redaction — is in file.go; the blob spill that keeps an oversized
+// field whole without putting it in the line is in spill.go and blob.go.
 package journal
 
 import (
