@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "go-flag-equals-form",
+  "title": "Support --name=value in the argument parser",
+  "statement": "The deploy tool's argument parser understands `--name value` but not `--name=value`, which is the form our scripts use. Add it: `--tag=` means an empty value, and `--=oops` is an error. The existing behaviour, including the bare `--` terminator, has to keep working. `go test ./...`.",
+  "language": "go",
+  "requires": ["go"],
+  "oracle": {
+    "argv": ["go", "test", "./..."],
+    "env": {
+      "GOFLAGS": "-mod=readonly",
+      "GOPROXY": "off"
+    },
+    "timeout_seconds": 120
+  },
+  "traits": [],
+  "max_turns": 20,
+  "notes": "Needs the Go toolchain only. The largest edit in the corpus that is still a single hunk: a new branch inserted into a loop whose surrounding cases must be left alone. The terminator and lookahead tests catch a fix that reorders the loop's existing conditions."
+}

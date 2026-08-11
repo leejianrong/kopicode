@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "id": "py-csv-blank-rows",
+  "title": "The nightly report crashes on a blank CSV line",
+  "statement": "The nightly sales report blows up with an IndexError when the CSV has a blank line in it. Blank lines should just be skipped. Run `python3 -m unittest discover -q` to check.",
+  "language": "python",
+  "requires": ["python3"],
+  "oracle": {
+    "argv": ["python3", "-m", "unittest", "discover", "-q"],
+    "env": {
+      "PYTHONDONTWRITEBYTECODE": "1"
+    },
+    "timeout_seconds": 60
+  },
+  "traits": [],
+  "max_turns": 20,
+  "notes": "Needs python3 with the standard library only — no pip, no network, no third-party test runner. PYTHONDONTWRITEBYTECODE keeps the oracle from writing __pycache__ into the tree, so running it does not change the diff the run is judged on. The second language in the corpus: it is here so the harness is not measured against Go alone."
+}
