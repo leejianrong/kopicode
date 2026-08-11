@@ -63,6 +63,17 @@ func (e *GitError) Unwrap() error { return e.Err }
 // whether this command may see a GIT_INDEX_FILE. See [baseEnv] and
 // [Snapshotter.env].
 func runGit(ctx context.Context, dir string, env []string, args ...string) (string, error) {
+	// An empty Dir means os/exec uses the calling process's working directory,
+	// which for a library is whatever the host program happened to chdir to.
+	// Combined with git's upward search for a repository, that is a command
+	// that operates on a repository nobody chose. Every call here has a
+	// resolved directory available, so an empty one is a bug rather than a
+	// default.
+	if dir == "" {
+		return "", fmt.Errorf("repo: git %s: no working directory: %w",
+			strings.Join(args, " "), ErrNoWorkTree)
+	}
+
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	cmd.Env = env

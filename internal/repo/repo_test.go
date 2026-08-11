@@ -64,8 +64,14 @@ func TestOpenOutsideARepository(t *testing.T) {
 }
 
 func TestOpenBareRepository(t *testing.T) {
-	dir := filepath.Join(t.TempDir(), "bare.git")
-	git(t, t.TempDir(), "init", "-q", "--bare", dir)
+	base := t.TempDir()
+	dir := filepath.Join(base, "bare.git")
+	// `git init --bare <path>` is the command that set core.bare=true on
+	// kopicode's own repository when GIT_DIR leaked into the fixture
+	// environment: init honours GIT_DIR over its path argument. The harness
+	// now refuses to run it with any GIT_DIR in scope.
+	git(t, base, "init", "-q", "--bare", dir)
+	assertIsolated(t, dir)
 
 	_, err := repo.Open(context.Background(), dir)
 	if !errors.Is(err, repo.ErrNoWorkTree) {
@@ -229,5 +235,80 @@ func TestExcludeStateDirPreservesAnExistingFile(t *testing.T) {
 func TestGitBinaryIsPresent(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Fatalf("git is not on PATH: %v", err)
+	}
+}
+
+// TestFixtureEnvDropsInheritedGitVariables is the regression test for the
+// escape this package's own test suite caused.
+//
+// GIT_DIR overrides a process's working directory, so a fixture that inherited
+// one committed into kopicode's real repository despite every command setting
+// cmd.Dir to a temp directory. Git exports GIT_DIR into every hook it runs and
+// the pre-push hook runs `make test`, so the variable was present exactly when
+// nobody was watching.
+func TestFixtureEnvDropsInheritedGitVariables(t *testing.T) {
+	for _, name := range gitEnvNames {
+		t.Setenv(name, "/somewhere/else/.git")
+	}
+	t.Setenv("KOPICODE_UNRELATED", "kept")
+
+	env := fixtureEnv()
+	for _, name := range gitEnvNames {
+		if value, found := lookupEnv(env, name); found {
+			t.Errorf("fixtureEnv passed %s=%q through; it redirects git away from cmd.Dir", name, value)
+		}
+	}
+	if value, found := lookupEnv(env, "KOPICODE_UNRELATED"); !found || value != "kept" {
+		t.Errorf("fixtureEnv dropped an unrelated variable: %q, %v", value, found)
+	}
+	// The identity and the configuration pins have to survive, or every
+	// fixture commit fails on a machine with no git identity.
+	for _, name := range []string{"GIT_AUTHOR_EMAIL", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM"} {
+		if _, found := lookupEnv(env, name); !found {
+			t.Errorf("fixtureEnv did not set %s", name)
+		}
+	}
+}
+
+// TestTempRootGuardDiscriminates — the guard is only worth having if it
+// actually separates a fixture directory from the repository this test binary
+// is running inside.
+func TestTempRootGuardDiscriminates(t *testing.T) {
+	if !underTempRoot(t.TempDir()) {
+		t.Errorf("underTempRoot rejected t.TempDir(), so every fixture would fail")
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The package directory is inside kopicode's own checkout — the one a
+	// leaking fixture rewrites.
+	if underTempRoot(cwd) {
+		t.Errorf("underTempRoot accepted the package directory %s, so the guard would not have "+
+			"caught a fixture escaping into the repository under test", cwd)
+	}
+	for _, path := range []string{"", "/", "/etc", filepath.Join(tempRoot, "..")} {
+		if underTempRoot(path) {
+			t.Errorf("underTempRoot accepted %q", path)
+		}
+	}
+}
+
+// TestAmbientFingerprintIsStable — the suite-level backstop must not report a
+// change when nothing changed, or it becomes noise that gets deleted.
+func TestAmbientFingerprintIsStable(t *testing.T) {
+	first, ok := ambientFingerprint()
+	if !ok {
+		t.Skip("no ambient git repository to fingerprint")
+	}
+	second, ok := ambientFingerprint()
+	if !ok {
+		t.Fatal("the ambient repository disappeared between two reads")
+	}
+	if first != second {
+		t.Errorf("fingerprint is not stable:\n%s\nvs\n%s", first, second)
+	}
+	if !strings.Contains(first, "core.bare=") {
+		t.Errorf("fingerprint does not cover core.bare, which a leaking `git init --bare` sets:\n%s", first)
 	}
 }

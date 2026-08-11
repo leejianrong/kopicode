@@ -101,6 +101,17 @@ func TestRepoGitRefusesIndexWritingSubcommands(t *testing.T) {
 	}
 }
 
+// TestRunGitRefusesAnEmptyWorkingDirectory — os/exec would fall back to the
+// calling process's working directory, and git would then search upward from
+// wherever the host program happens to be, operating on a repository nobody
+// chose.
+func TestRunGitRefusesAnEmptyWorkingDirectory(t *testing.T) {
+	_, err := runGit(context.Background(), "", baseEnv(), "rev-parse", "--git-dir")
+	if !errors.Is(err, ErrNoWorkTree) {
+		t.Errorf("runGit with no directory = %v, want ErrNoWorkTree", err)
+	}
+}
+
 func TestValidateSessionID(t *testing.T) {
 	for _, tc := range []struct {
 		id   string
