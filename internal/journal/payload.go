@@ -224,10 +224,28 @@ type ToolResult struct {
 	Output Text `json:"output"`
 	// ExitCode is set for tools that run a process, nil for those that do not.
 	ExitCode *int `json:"exit_code,omitempty"`
-	// ErrorKind is "" on success, "task" when the tool correctly reported a
-	// problem with what was asked, and "internal" when the harness itself
-	// broke. The distinction is what keeps a harness bug out of the model's
-	// score.
+	// ErrorKind is the wire form of the tool package's fault classification,
+	// written as tools.FaultOf(err).String(). It is what SLICE-1 §9's
+	// three-bucket classifier derives from, so the values are load-bearing
+	// rather than descriptive:
+	//
+	//   ""          success
+	//   "task"      the tool correctly reported a problem with what was asked
+	//   "internal"  the harness itself broke — ADR-0006 §3 reads this as
+	//               `harness`, and zero of these is the slice's acceptance bar
+	//   "cancelled" the user or the runner stopped the turn
+	//
+	// "cancelled" belongs to neither bucket. It is not `harness`, because a
+	// Ctrl-C is not a defect; and it must not be reported as "" either, because
+	// §9's `model` arm is "everything else", so a silent cancellation is not
+	// merely lost, it is charged to the model. Both directions launder a
+	// non-failure into a number, which is the thing ADR-0006 exists to stop.
+	//
+	// A plain string rather than a typed value on purpose: internal/tools must
+	// not import this package and this package must not import it, so the
+	// coupling is a documented wire contract. Do not re-list these values
+	// anywhere else — internal/tools is the source of truth, and
+	// internal/tools/cancel_test.go holds the rule.
 	ErrorKind string `json:"error_kind,omitempty"`
 }
 
