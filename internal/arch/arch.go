@@ -10,4 +10,10 @@
 // and no module edge behind it. Per the dev-playbook, a guard is unproven until
 // it has been seen to fail — so if you change it, break it on purpose first and
 // confirm the failure names the right package.
+//
+// gitcmd_test.go holds a second guard of the same shape but a different
+// subject: every git subprocess in this repository must name its target
+// directory and build its own environment. That one is not an architectural
+// boundary, it is an incident that already happened, and it lives here because
+// this is where the repository keeps its static checks over its own source.
 package arch
