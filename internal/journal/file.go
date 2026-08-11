@@ -30,6 +30,7 @@ const (
 	SessionsSubdir = "sessions"
 	// EventsFile is the JSONL event log inside a session directory.
 	EventsFile = "events.jsonl"
+	// Blobs live at StateDir/BlobsSubdir; see blob.go.
 
 	// The record is a private one. A journal carries what the model read and
 	// what the user typed, so it is not group- or world-readable.
@@ -94,8 +95,9 @@ func (e *ReadError) Unwrap() error { return e.Err }
 // alternative is unreproducible: a clock read inside Append cannot be asserted
 // on, and a secret discovered by pattern-matching is a guess.
 type options struct {
-	now       func() time.Time
-	secretEnv []string
+	now           func() time.Time
+	secretEnv     []string
+	blobThreshold int64
 }
 
 // An Option configures Open.
@@ -124,6 +126,25 @@ func WithSecretEnv(names ...string) Option {
 	return func(o *options) { o.secretEnv = append([]string(nil), names...) }
 }
 
+// WithBlobThreshold sets the payload-field size, in bytes, above which content
+// spills to a blob. It defaults to DefaultBlobThreshold.
+//
+// It is a parameter of the journal rather than a package constant because 64 KiB
+// is a guess: a bench run recording provider bodies wants it lower, a REPL
+// session on a fast disk can afford it higher, and a test wants it small enough
+// to exercise the path in a few hundred bytes. Nothing about the guarantee moves
+// with it — a field on either side of the threshold is stored whole.
+//
+// A negative threshold is ignored. Zero is meaningful and spills every non-empty
+// field, which is what a test that wants the blob path on every event asks for.
+func WithBlobThreshold(bytes int64) Option {
+	return func(o *options) {
+		if bytes >= 0 {
+			o.blobThreshold = bytes
+		}
+	}
+}
+
 // FileJournal is the JSONL implementation of Journal: one event per line,
 // appended and fsynced, at .kopicode/sessions/<id>/events.jsonl.
 //
@@ -148,6 +169,11 @@ type FileJournal struct {
 
 	now      func() time.Time
 	redactor *redactor
+
+	// blobs is the content-addressed store oversized fields spill into, and
+	// blobThreshold is the size above which they do.
+	blobs         *blobStore
+	blobThreshold int64
 }
 
 var _ Journal = (*FileJournal)(nil)
@@ -172,7 +198,7 @@ func Open(root, id string, opts ...Option) (*FileJournal, error) {
 		}
 	}
 
-	o := options{now: time.Now, secretEnv: DefaultSecretEnv()}
+	o := options{now: time.Now, secretEnv: DefaultSecretEnv(), blobThreshold: DefaultBlobThreshold}
 	for _, opt := range opts {
 		opt(&o)
 	}
@@ -205,12 +231,14 @@ func Open(root, id string, opts ...Option) (*FileJournal, error) {
 	}
 
 	return &FileJournal{
-		sess:     Session{ID: id, StartedAt: o.now().UTC(), Dir: dir},
-		path:     path,
-		f:        f,
-		seq:      last,
-		now:      o.now,
-		redactor: newRedactor(o.secretEnv, os.LookupEnv),
+		sess:          Session{ID: id, StartedAt: o.now().UTC(), Dir: dir},
+		path:          path,
+		f:             f,
+		seq:           last,
+		now:           o.now,
+		redactor:      newRedactor(o.secretEnv, os.LookupEnv),
+		blobs:         &blobStore{dir: BlobDir(root)},
+		blobThreshold: o.blobThreshold,
 	}, nil
 }
 
@@ -235,11 +263,14 @@ func (j *FileJournal) String() string {
 // is a caller-supplied bug. It is 1-based, per session, and increases by one
 // per successful append; a rejected event does not consume one.
 //
-// The line is written whole — encode, redact, append the newline, one Write —
-// and fsynced before returning, so a caller that has been told an event was
-// recorded is being told the truth. Nothing on this path clips: the 64 KiB blob
-// spill (KAN-770) hooks between the payload arriving and Marshal, and until it
-// lands an oversized payload is written whole rather than shortened.
+// The line is written whole — spill, encode, redact, append the newline, one
+// Write — and fsynced before returning, so a caller that has been told an event
+// was recorded is being told the truth. Nothing on this path clips: a field over
+// the blob threshold moves to .kopicode/blobs and is replaced by a reference,
+// and every other field is written as it arrived.
+//
+// The returned event is the event as *written*, so a spilled field comes back as
+// a reference with no inline value. Read is the side that puts the value back.
 //
 // ctx is deliberately not checked for cancellation. The journal is the record,
 // and the events worth having most are the ones explaining why a turn stopped;
@@ -261,13 +292,21 @@ func (j *FileJournal) Append(_ context.Context, turn int, payload Payload) (Even
 		return Event{}, fmt.Errorf("journal: %s: %w", j.path, ErrClosed)
 	}
 
+	// Spill before the envelope is built, and therefore before Marshal: an
+	// oversized field must never be encoded into the line at all, and the blob
+	// it moves to has to be durable before the line that names it is written.
+	spilled, err := j.spill(payload)
+	if err != nil {
+		return Event{}, fmt.Errorf("journal: spilling event seq %d: %w", j.seq+1, err)
+	}
+
 	ev := Event{
 		SchemaVersion: SchemaVersion,
 		SessionID:     j.sess.ID,
 		Seq:           j.seq + 1,
 		Turn:          turn,
 		Time:          j.now().UTC(),
-		Payload:       payload,
+		Payload:       spilled,
 	}
 
 	// Marshal, not json.Marshal: encoding/json re-escapes HTML in whatever a
@@ -306,12 +345,12 @@ func (j *FileJournal) Append(_ context.Context, turn int, payload Payload) (Even
 	return ev, nil
 }
 
-// Read yields every event on disk in seq order.
+// Read yields every event on disk in seq order, with spilled fields rehydrated.
 //
 // It opens its own descriptor, so reading a journal that is still being
 // appended to is safe and yields everything fsynced so far.
 func (j *FileJournal) Read(ctx context.Context) iter.Seq2[Event, error] {
-	return readEvents(ctx, j.path)
+	return readEvents(ctx, j.path, j.blobs)
 }
 
 // Close releases the descriptor. Every event is already fsynced, so closing
@@ -343,7 +382,19 @@ func (j *FileJournal) Close() error {
 // The events before it are yielded first, then the error, then iteration stops.
 // A caller gets the intact prefix and is told exactly where the record ends;
 // dropping the tail silently and parsing it silently are both wrong.
-func readEvents(ctx context.Context, path string) iter.Seq2[Event, error] {
+//
+// # A damaged blob, which is not the same thing
+//
+// blobs is nil for a read that only wants the envelopes — resumeSeq — and
+// non-nil for a read that owes the caller the content. A missing or corrupt
+// blob is reported the same way, as a *ReadError naming the line and wrapping
+// ErrBlobMissing or ErrBlobCorrupt, but iteration *continues*: the damage is
+// confined to one field of one event, where a truncated line makes everything
+// after it unreadable. Yielding the event alongside its error is the honest
+// shape — the reference and the size are still on the line, so the caller can
+// see what is gone rather than reading an empty string as "the tool said
+// nothing".
+func readEvents(ctx context.Context, path string, blobs *blobStore) iter.Seq2[Event, error] {
 	return func(yield func(Event, error) bool) {
 		f, err := os.Open(path)
 		if err != nil {
@@ -400,6 +451,18 @@ func readEvents(ctx context.Context, path string) iter.Seq2[Event, error] {
 			}
 			lastSeq = ev.Seq
 
+			if blobs != nil {
+				hydrated, err := rehydrate(blobs, ev.Payload)
+				ev.Payload = hydrated
+				if err != nil {
+					if !yield(ev, &ReadError{Path: path, Line: line, Offset: start,
+						Detail: "the event is intact; the content it refers to is not", Err: err}) {
+						return
+					}
+					continue
+				}
+			}
+
 			if !yield(ev, nil) {
 				return
 			}
@@ -415,9 +478,13 @@ func readEvents(ctx context.Context, path string) iter.Seq2[Event, error] {
 // costs; the alternative — seeking to the tail — would skip the very integrity
 // checks that make appending safe. Any error is fatal to the open: appending
 // after a line that was cut mid-write splices the next event onto it.
+//
+// It reads without a blob store on purpose. It wants seq numbers, so fetching
+// every blob in the session would be waste — and a lost blob is not a reason to
+// refuse to keep recording, which is what making it fatal here would mean.
 func resumeSeq(path, id string) (uint64, error) {
 	var last uint64
-	for ev, err := range readEvents(context.Background(), path) {
+	for ev, err := range readEvents(context.Background(), path, nil) {
 		if err != nil {
 			return 0, fmt.Errorf("journal: %s exists but cannot be appended to safely: %w", path, err)
 		}
