@@ -79,6 +79,15 @@ var cancellableTools = []cancellable{
 		})
 		return err
 	}},
+	{"EditFileFuzzy", func(ctx context.Context, s *tools.Set) error {
+		// Text that is in the file verbatim and appears once, so an unended
+		// context would apply it: what this row observes is the cancellation
+		// and not a below-floor or ambiguity refusal standing in for one.
+		_, err := s.EditFileFuzzy(ctx, tools.FuzzyEditRequest{
+			Path: "main.go", Before: "\tfmt.Println(\"hello\")\n", After: "\tfmt.Println(\"bye\")\n",
+		})
+		return err
+	}},
 }
 
 // endedContext is a context that is already over, for each of the two ways that
