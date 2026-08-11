@@ -86,12 +86,25 @@ build: ## Build both binaries for this host
 	go build -ldflags '$(LDFLAGS)' -o $(BIN)/kopicode ./cmd/kopicode
 	go build -ldflags '$(LDFLAGS)' -o $(BIN)/kopibench ./cmd/kopibench
 
+# The `go vet ./...` per platform is the load-bearing half, not the binary builds.
+#
+# cmd/kopicode and cmd/kopibench are stubs that import nothing from internal/, so
+# building only them cross-compiled two main packages and proved nothing about the
+# code that actually has platform-specific behaviour — path handling, os.Root,
+# process groups, flock. The ADR-0001 distribution promise was being checked
+# nominally.
+#
+# `go vet` is used rather than `go build ./...` because it typechecks _test.go
+# files too, and a test that fails to compile under GOOS=windows is a platform
+# break that only shows up when someone runs the suite there. It costs about the
+# same second per platform.
 .PHONY: xbuild
-xbuild: ## Cross-compile every target — proves the no-CGo distribution promise
+xbuild: ## Cross-compile and vet every target — proves the no-CGo distribution promise
 	@set -e; for p in $(PLATFORMS); do \
 	  os=$${p%/*}; arch=$${p#*/}; ext=""; \
 	  [ "$$os" = "windows" ] && ext=".exe"; \
 	  echo "  $$os/$$arch"; \
+	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go vet ./...; \
 	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch \
 	    go build -ldflags '$(LDFLAGS)' -o $(BIN)/$$os-$$arch/kopicode$$ext ./cmd/kopicode; \
 	  CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch \
