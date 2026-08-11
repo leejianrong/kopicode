@@ -409,9 +409,10 @@ func TestWriteFileRefusesNonFiles(t *testing.T) {
 
 // --- cancellation ---------------------------------------------------------
 
-// TestWriteFileCancellationIsAResult pins the convention: run_shell's, not
-// read_file's. A Ctrl-C classified as FaultInternal would bucket every
-// interrupted session as a harness failure under ADR-0006 §3.
+// TestWriteFileCancellationIsAResult pins the half of KAN-808's convention that
+// is specific to this tool: the result still arrives, saying nothing was
+// written and leaving no file behind. The classification that comes with it is
+// tabled across all five tools in cancel_test.go.
 func TestWriteFileCancellationIsAResult(t *testing.T) {
 	f := newFixture(t, nil)
 	s := f.set(t)
@@ -420,15 +421,12 @@ func TestWriteFileCancellationIsAResult(t *testing.T) {
 	cancel()
 
 	res, err := s.WriteFile(ctx, tools.WriteRequest{Path: "new.txt", Content: "x\n"})
-	if err != nil {
-		t.Fatalf("WriteFile on a cancelled context returned an error: %v "+
-			"(run_shell's convention is a result)", err)
-	}
 	if !res.Cancelled {
 		t.Error("Cancelled is false on a cancelled context")
 	}
-	if got := tools.FaultOf(err); got != tools.FaultNone {
-		t.Errorf("fault = %q, want none — a cancellation is nobody's failure", got)
+	if got := tools.FaultOf(err); got != tools.FaultCancelled {
+		t.Errorf("fault = %q, want %q — a cancellation is nobody's failure, "+
+			"and a nil error would read as a clean stop", got, tools.FaultCancelled)
 	}
 	if !strings.Contains(res.Output, "cancelled") {
 		t.Errorf("output does not say the call was cancelled:\n%s", res.Output)

@@ -171,10 +171,10 @@ func TestListDirRefusals(t *testing.T) {
 		}
 	})
 
-	t.Run("cancellation is internal, not the model's fault", func(t *testing.T) {
+	t.Run("cancellation is nobody's fault", func(t *testing.T) {
 		cancelled, cancel := context.WithCancel(ctx)
 		cancel()
 		_, err := s.ListDir(cancelled, tools.ListRequest{})
-		wantFault(t, err, tools.FaultInternal)
+		wantFault(t, err, tools.FaultCancelled)
 	})
 }

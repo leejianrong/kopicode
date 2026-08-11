@@ -48,8 +48,9 @@ type WriteResult struct {
 	CreatedDirs []string
 
 	// Cancelled reports that the context was cancelled before the write
-	// happened, so nothing was written. See the note on [Set.WriteFile] about
-	// why this is a result rather than an error.
+	// happened, so nothing was written. The call also returns a
+	// [FaultCancelled] error saying the same thing — this field is for the
+	// caller, that one is for the classifier. See the note on [Set.WriteFile].
 	Cancelled bool
 
 	// Output is the model-facing rendering of everything above.
@@ -111,16 +112,15 @@ const (
 // hard links and the identity a watcher tracks — and the failure it protects
 // against, a half-written file, is already covered by the turn snapshot.
 //
-// **A cancellation is a result, not an error.** It returns a WriteResult with
-// Cancelled set and a nil error, which is [Set.RunShell]'s convention.
-// Classifying a user pressing Ctrl-C as [FaultInternal] would bucket every
-// interrupted session as a harness failure under ADR-0006 §3, which is the one
-// thing that is nobody's failure. (read_file, list_dir and grep do route
-// cancellation into internalErr today; KAN-808 makes that consistent, and this
-// tool follows run_shell rather than adding a fifth behaviour.)
+// **A cancellation is a result *and* a [FaultCancelled] error.** The result so
+// the model is told nothing was written; the error so the bench classifier can
+// see the call was abandoned. KAN-808 settled that shape across all five tools:
+// [FaultInternal] would bucket every Ctrl-C as a harness failure under ADR-0006
+// §3, and a nil error would let SLICE-1 §9's "everything else" arm charge it to
+// the model instead. Neither is true of a user deciding to stop.
 func (s *Set) WriteFile(ctx context.Context, req WriteRequest) (WriteResult, error) {
-	if cancelled(ctx) {
-		return cancelledWrite(req.Path), nil
+	if err := ctx.Err(); err != nil {
+		return cancelledWrite(req.Path), cancelledErr(ToolWriteFile, req.Path, err, "nothing was written")
 	}
 
 	p, err := s.Root.Resolve(ToolWriteFile, req.Path)
@@ -155,8 +155,8 @@ func (s *Set) WriteFile(ctx context.Context, req WriteRequest) (WriteResult, err
 	// The last check before anything on disk changes. After the write there is
 	// nothing to cancel: reporting a completed write as cancelled would leave
 	// the model believing a file it created is not there.
-	if cancelled(ctx) {
-		return cancelledWrite(req.Path), nil
+	if err := ctx.Err(); err != nil {
+		return cancelledWrite(req.Path), cancelledErr(ToolWriteFile, req.Path, err, "nothing was written")
 	}
 
 	if len(missing) > 0 {
@@ -178,21 +178,6 @@ func (s *Set) WriteFile(ctx context.Context, req WriteRequest) (WriteResult, err
 	res.Lines = len(anchor.Split(content))
 	res.Output = res.render()
 	return res, nil
-}
-
-// cancelled reports whether ctx has ended, without producing an error value.
-//
-// It is a bool and not a ctx.Err() check because write_file answers a
-// cancellation with a result rather than an error (see [Set.WriteFile]), so the
-// error has nowhere to go — and "checked an error, returned nil" is a shape the
-// nilerr linter is right to distrust everywhere it is not this.
-func cancelled(ctx context.Context) bool {
-	select {
-	case <-ctx.Done():
-		return true
-	default:
-		return false
-	}
 }
 
 // cancelledWrite is the result of a call the context ended before it wrote.

@@ -74,17 +74,29 @@ func TestRunShellRejectsBadRequests(t *testing.T) {
 	}
 }
 
-func TestRunShellRejectsACancelledContext(t *testing.T) {
+// TestRunShellOnAnAlreadyCancelledContext pins the half of KAN-808's convention
+// that is specific to this tool: no process is started, and the result says
+// that rather than describing a process group that never existed. The
+// classification is tabled across all five tools in cancel_test.go.
+func TestRunShellOnAnAlreadyCancelledContext(t *testing.T) {
 	f := newFixture(t, nil)
 	s := f.set(t)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	if _, err := s.RunShell(ctx, tools.ShellRequest{Command: "true"}); err == nil {
+	res, err := s.RunShell(ctx, tools.ShellRequest{Command: "true"})
+	if err == nil {
 		t.Fatal("want an error for an already-cancelled context, got nil")
-	} else if !errors.Is(err, context.Canceled) {
+	}
+	if !errors.Is(err, context.Canceled) {
 		t.Errorf("error = %v, want it to wrap context.Canceled", err)
+	}
+	if res.Outcome != tools.OutcomeCancelled {
+		t.Errorf("outcome = %s, want %s", res.Outcome, tools.OutcomeCancelled)
+	}
+	if !strings.Contains(res.Output, "cancelled before starting") {
+		t.Errorf("output does not say nothing was run:\n%s", res.Output)
 	}
 }
 

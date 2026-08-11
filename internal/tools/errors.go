@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"errors"
 	"strings"
 )
@@ -28,12 +29,32 @@ const (
 	// bucket, and it is the honest one — an internal failure dressed up as a
 	// task failure is a harness defect laundered into a model number.
 	FaultInternal
+
+	// FaultCancelled means nobody failed. The call stopped because whoever
+	// started it decided to stop — Ctrl-C in the REPL, or a bench runner
+	// abandoning a task — and that says nothing about either the model or the
+	// harness.
+	//
+	// It is a fourth value rather than a nil error because the classifier has
+	// to *see* a cancellation in order to leave the trial out. SLICE-1 §9 reads
+	// an internal tool error as `harness` and sends "everything else" — a loop
+	// that ran to a clean stop — to `model`, so a cancellation reported as
+	// success is not merely lost, it is charged to the model. Both directions
+	// corrupt the number this project exists to measure; this value is the exit
+	// from both (KAN-808).
+	//
+	// It deliberately does not distinguish a deadline from a Ctrl-C. Both mean
+	// "this trial did not finish", the classifier does the same thing with
+	// either, and the reason stays recoverable from the cause with
+	// errors.Is(err, context.DeadlineExceeded) for a report that wants it.
+	FaultCancelled
 )
 
 var faultText = map[Fault]string{
-	FaultNone:     "",
-	FaultTask:     "task",
-	FaultInternal: "internal",
+	FaultNone:      "",
+	FaultTask:      "task",
+	FaultInternal:  "internal",
+	FaultCancelled: "cancelled",
 }
 
 // String returns the wire form, matching journal.ToolResult.ErrorKind.
@@ -50,9 +71,20 @@ func (f Fault) String() string {
 // deliberate and it is the direction ADR-0006 asks us to be wrong in: an
 // unclassified error means somebody forgot to say which side it came from, and
 // guessing "task" would credit the harness's own oversight to the model.
+//
+// A cancelled context is the one thing that outranks what the tool concluded.
+// The check lives here rather than only at the call sites so that the next tool
+// to reach for internalErr on a ctx.Err() — which is what read_file, list_dir
+// and grep all did before KAN-808 — still cannot book a Ctrl-C as a harness
+// defect. ADR-0006's bias towards over-counting harness failures is about model
+// versus harness; a cancellation is outside that argument, and counting it as a
+// harness defect is noise against an acceptance criterion of zero.
 func FaultOf(err error) Fault {
 	if err == nil {
 		return FaultNone
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return FaultCancelled
 	}
 	var e *Error
 	if errors.As(err, &e) && e.Fault != FaultNone {
@@ -147,4 +179,15 @@ func taskErr(tool, path string, cause error, detail string) *Error {
 // internalErr is the expensive case: the harness broke.
 func internalErr(tool, path string, cause error, detail string) *Error {
 	return &Error{Tool: tool, Fault: FaultInternal, Path: path, Detail: detail, err: cause}
+}
+
+// cancelledErr is the case that is nobody's: the caller stopped the call.
+//
+// cause is the context's own error, so errors.Is still tells a deadline from a
+// Ctrl-C without a second Fault value existing for it. Every tool in this
+// package routes a cancellation through here — that is the whole of KAN-808 —
+// and tools that have a partial result to report return it alongside rather
+// than dropping it.
+func cancelledErr(tool, path string, cause error, detail string) *Error {
+	return &Error{Tool: tool, Fault: FaultCancelled, Path: path, Detail: detail, err: cause}
 }

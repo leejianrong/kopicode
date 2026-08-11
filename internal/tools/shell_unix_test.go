@@ -113,11 +113,14 @@ func TestRunShellCancellationKillsTheWholeProcessGroup(t *testing.T) {
 	cancel()
 
 	got := <-done
-	if got.err != nil {
-		t.Fatalf("RunShell: %v", got.err)
+	// A cancellation is nobody's failure, and KAN-808 has it arrive as both: a
+	// result, so the output the command managed to produce is not dropped, and
+	// a FaultCancelled error, so the bench classifier can see the run was
+	// abandoned. FaultInternal would put every Ctrl-C into ADR-0006's harness
+	// bucket; a nil error would let SLICE-1 §9 charge it to the model.
+	if fault := tools.FaultOf(got.err); fault != tools.FaultCancelled {
+		t.Fatalf("fault = %q, want %q (err: %v)", fault, tools.FaultCancelled, got.err)
 	}
-	// A cancellation is nobody's failure. Returning it as an internal fault
-	// would put every Ctrl-C into ADR-0006's harness bucket.
 	if got.res.Outcome != tools.OutcomeCancelled {
 		t.Errorf("outcome = %s, want %s", got.res.Outcome, tools.OutcomeCancelled)
 	}
