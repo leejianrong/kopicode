@@ -13,8 +13,8 @@ import (
 // this package will open.
 //
 // [Root.Resolve] is the shared entry point every tool goes through — read_file,
-// list_dir and grep today; write_file (KAN-781), run_shell (KAN-782) and
-// edit_file (KAN-784) as they land. Nothing in this package opens a path the
+// list_dir, grep and run_shell's working directory today; write_file (KAN-781)
+// and edit_file (KAN-784) as they land. Nothing in this package opens a path the
 // caller supplied, and nothing re-implements the containment check locally.
 //
 // There are two guards, and they are not redundant.
