@@ -78,7 +78,9 @@ and `fsync`ed. Shared envelope, per-type payload.
 - **Envelope:** `schema_version`, `session_id`, `seq` (per-session monotonic, 1-based),
   `turn`, `type`, `ts` (RFC 3339 UTC), `payload`.
 - **Event types:** `SessionStarted` (cwd, repo head, model id, pinned provider,
-  harness config hash) · `UserMessage` · `AssistantMessage` · `ThinkingBlock` ·
+  harness config hash, **build identity** — version, commit, tree state and where those
+  came from; the hash deliberately excludes the code, so this is what stops two
+  incomparable binaries pooling as one arm, ADR-0007 decisions 6 and 7) · `UserMessage` · `AssistantMessage` · `ThinkingBlock` ·
   `ProviderRequest` (model, provider pin, quantization, sampling params, token counts
   — **never the API key**) · `ProviderResponse` (raw response body ref, token counts,
   finish reason) · `ToolCallRequested` (raw text as emitted) · `ToolCallParsed` (tool,

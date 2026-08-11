@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "go-config-retries",
+  "title": "Add a retries setting across the config package",
+  "statement": "Add a `retries` setting to the config package: an integer, default 3, settable in the config file the same way the other keys are, and a non-integer value should be an error like the other typed keys. The tests already describe what's expected — make `go test ./...` pass.",
+  "language": "go",
+  "requires": ["go"],
+  "oracle": {
+    "argv": ["go", "test", "./..."],
+    "env": {
+      "GOFLAGS": "-mod=readonly",
+      "GOPROXY": "off"
+    },
+    "timeout_seconds": 120
+  },
+  "traits": ["multi_file", "requires_read"],
+  "max_turns": 20,
+  "notes": "Needs the Go toolchain only. The coordinated multi-file task: the field lives in config.go, its default in defaults.go and its parser case in parse.go, and the suite fails until all three are in step. The starting tree does not compile, because the test is written ahead of the feature — so the oracle fails with a build error rather than a test failure, which is the same non-zero exit but worth knowing when reading a report."
+}

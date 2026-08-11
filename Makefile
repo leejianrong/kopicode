@@ -2,8 +2,37 @@
 SHELL := /bin/bash
 
 MODULE   := github.com/leejianrong/kopicode
-VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS  := -s -w -X main.version=$(VERSION)
+
+# The build identity that lands on every SessionStarted (KAN-806, ADR-0007
+# decision 7). The harness config hash deliberately excludes the code, so two
+# arms can carry identical hashes from different binaries; this is what tells
+# them apart, and a dirty build is what it must never quietly call clean.
+#
+# These git commands target the ambient repository on purpose — the checkout
+# being compiled *is* the subject, so there is no directory to name and nothing
+# to isolate from. All three are read-only, and `status` carries
+# --no-optional-locks so it reports without refreshing the index behind the
+# user's back (`git status` writes the index while reporting; internal/repo
+# refuses it outright for that reason).
+#
+# Empty is the honest failure. Every one of these substitutes to nothing outside
+# a git checkout, and internal/build resolves an absent commit to "unknown"
+# rather than to a plausible default, so a no-git build is recorded as one.
+BUILDPKG := $(MODULE)/internal/build
+VERSION  ?= $(shell git describe --tags --always --dirty 2>/dev/null)
+COMMIT   ?= $(shell git rev-parse HEAD 2>/dev/null)
+
+# Deliberately a stricter definition than `git describe --dirty`, which only
+# looks at tracked files: an untracked .go file changes the binary just as much
+# as an edited one does. Computed separately so the journaled bit is a value a
+# machine reads rather than a suffix parsed off a human string.
+TREE_STATE ?= $(shell git rev-parse --git-dir >/dev/null 2>&1 && \
+  { [ -z "$$(git --no-optional-locks status --porcelain 2>/dev/null)" ] && echo clean || echo dirty; })
+
+LDFLAGS  := -s -w \
+  -X $(BUILDPKG).version=$(VERSION) \
+  -X $(BUILDPKG).commit=$(COMMIT) \
+  -X $(BUILDPKG).treeState=$(TREE_STATE)
 BIN      := bin
 PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64
 

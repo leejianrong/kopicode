@@ -10,14 +10,16 @@ package main
 import (
 	"fmt"
 	"os"
-)
 
-// version is overridden at build time via -ldflags.
-var version = "dev"
+	"github.com/leejianrong/kopicode/internal/build"
+)
 
 func main() {
 	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "version") {
-		fmt.Println(version)
+		// The identity a bench result is attributed to. Printing it from the
+		// same call the record uses is what keeps a report and a journal from
+		// disagreeing about which binary produced a number.
+		fmt.Println(build.Current())
 		return
 	}
 

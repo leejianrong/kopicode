@@ -19,6 +19,11 @@ coverage.txt
 /bench/results/
 /bench/.worktrees/
 
+# Python corpus tasks run their oracle with PYTHONDONTWRITEBYTECODE=1, so this
+# should never appear. It is here for the run that forgets to set it, because a
+# __pycache__ inside a task tree changes the diff that run is scored on.
+__pycache__/
+
 # Recorded provider fixtures are committed, but never raw captures
 *.raw.json
 

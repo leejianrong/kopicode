@@ -74,6 +74,41 @@ type Sampling struct {
 	Seed *int64 `json:"seed,omitempty"`
 }
 
+// BuildInfo identifies the binary that produced this record.
+//
+// It is the third leg of an arm's identity that the harness config hash cannot
+// carry. ADR-0007 decision 6 keeps the code out of the hash preimage on
+// purpose, so a change to the loop that touches no configuration field leaves
+// the hash identical — and two results from two different binaries would pool
+// as one arm. Nothing else on the record closes that: RepoHead is the tree the
+// session ran *against*, and the envelope's schema_version is the journal
+// format, not the binary.
+//
+// The values are produced by internal/build and mapped here. This type is the
+// wire contract and is deliberately its own declaration rather than the
+// producer's struct, the same way AnchorVersion is a string here rather than an
+// anchor.Version: the journal is a compatibility surface from the first commit
+// and must not change shape when a producer package is refactored. A test in
+// this package checks that every field internal/build produces has somewhere to
+// land here, so the decoupling cannot become a silent drop.
+type BuildInfo struct {
+	// Version is the build's `git describe` output, or the module version, or
+	// "unknown". Human-facing; read TreeState for the dirty bit rather than
+	// parsing a suffix off this.
+	Version string `json:"version"`
+	// Commit is the full commit sha the binary was built from, or "unknown".
+	Commit string `json:"commit"`
+	// TreeState is "clean", "dirty" or "unknown" — never empty.
+	//
+	// This is the field the bench runner acts on. A build that is not
+	// "clean" is not poolable with anything, because no commit describes what
+	// was actually compiled (ADR-0007 decision 7).
+	TreeState string `json:"tree_state"`
+	// Source is which mechanism supplied the fields above: "ldflags",
+	// "buildinfo" or "unknown".
+	Source string `json:"source"`
+}
+
 // SessionStarted opens the record.
 type SessionStarted struct {
 	// CWD is the directory the session was started in.
@@ -87,6 +122,10 @@ type SessionStarted struct {
 	// HarnessConfigHash identifies the harness configuration, so two runs can
 	// be compared only when they were run the same way.
 	HarnessConfigHash string `json:"harness_config_hash"`
+	// Build identifies the binary. Two sessions may carry the same
+	// HarnessConfigHash from different builds; this is what tells them apart
+	// (ADR-0007 decisions 6 and 7).
+	Build BuildInfo `json:"build"`
 }
 
 func (SessionStarted) Type() Type { return TypeSessionStarted }
