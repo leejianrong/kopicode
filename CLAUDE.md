@@ -168,8 +168,10 @@ credential-holding, not started), not kopicode. Do not reintroduce it here.
 
 ## Commands
 
-Prefer the `make` targets — the pre-push hook and CI both go through them, so they
-cannot drift. `make help` lists everything.
+Prefer the `make` targets — the pre-push hook and CI both invoke them rather than
+open-coding the commands, so a gate's *definition* cannot drift between them. They do
+not run the same **set**: the hook is deliberately the cheap subset. See below.
+`make help` lists everything.
 
 ```bash
 make dev          # go mod download + tool install
@@ -183,9 +185,18 @@ make xbuild       # cross-compile every GOOS/GOARCH target — catches platform-
 make bench-smoke  # the 10-task corpus against the MOCK provider — zero tokens
 make bench        # the corpus against the real pinned provider — COSTS MONEY
 make secrets      # gitleaks over history + tree
-make ci           # check + test-all + xbuild + bench-smoke
+make ci           # check + test-all + xbuild
 make install-hooks
 ```
+
+**What actually runs where, because three agents have now reasoned from a wrong version
+of this.** `make ci` is `check test-all xbuild` — `bench-smoke` is **not** in it, and
+must not be until `cmd/kopibench` stops being the stub that exits 4, or `ci` is red by
+construction (KAN-801 enables it, blocked on KAN-796). The **pre-push hook** runs
+`check`, `test` and `secrets` — not `test-all`, not `xbuild`, not `bench-smoke` — by
+design, because the hook exists to catch cheap mistakes and CI exists to catch the rest.
+So a green pre-push does not predict a green CI, and `--no-verify` is not the way to get
+past a target the hook never runs.
 
 **Go-specific gates that are not optional here.** `-race` on every test run, because the
 loop is concurrent (streaming, tool dispatch, cancellation) and a data race in an agent
@@ -208,8 +219,58 @@ in a blob, in a log line, or in a test fixture.
 
 - **`main` is protected — PR-only, never push to `main`.**
 - **Branch per slice:** `git switch -c feat/<slice>` off `origin/main`; open a PR.
-- Run `make ci` locally before pushing; the pre-push hook mirrors it.
+- Run `make ci` locally before pushing. The pre-push hook runs a **cheaper subset**
+  (`check`, `test`, `secrets`), so passing it is not evidence CI will pass.
 - Commit trailer: `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`.
+- **Strict branch protection serialises landings.** Every merge puts the other open PRs
+  out of date, so each one needs `gh pr update-branch <n>` and a full re-run before it
+  can merge. Wait for all six checks to be *created and resolved*, not merely
+  "not pending" — a loop that only greps for `pending` exits immediately in the window
+  after `update-branch` when the checks do not exist yet.
+
+### Worktrees: lease them, do not sweep them
+
+Parallel agents get a worktree each. **Manage their lifecycle with `treehouse`** rather
+than hand-rolled `git worktree add` plus a cleanup sweep, which is the combination that
+eventually deletes a worktree an agent is still working in.
+
+```bash
+treehouse get --lease --lease-holder agent-<id>   # prints the path; never handed out twice
+treehouse status --json                            # what is live — read this before cleaning
+treehouse return <path>                            # release when the agent is done
+treehouse prune                                    # dry run by default; --yes to act
+treehouse destroy <path>                           # dry run by default; skips risky classes
+```
+
+A leased worktree is never handed out by a later `get` and never removed by `prune`, even
+with no process running in it, until it is returned. `prune` treats a worktree as stale
+only when it is unleased, idle, clean, and already merged into the default branch.
+`destroy` removes only the disposable set unless you opt in per risk class
+(`--include-unlanded`, `--include-in-use`, `--include-leased`) and refuses a global sweep.
+
+**What this is and is not.** It is a *lifecycle* tool. It is **not** an isolation
+boundary and not a defence against the corruption this repo has already suffered: a
+leased worktree is an ordinary git worktree, sharing `.git/config`, the object store, the
+ref store and the stash with the parent. The defences against *that* are unchanged and
+not superseded — every git subprocess names its `Dir` **and** builds its own `Env`,
+`internal/arch/gitcmd_test.go` enforces it statically, and fixtures assert isolation
+before use. Read
+[`.claude/skills/agent-ground-rules/SKILL.md`](.claude/skills/agent-ground-rules/SKILL.md).
+
+**Housekeeping rules that hold whatever created the worktree.** Clean up only when
+nothing is running, and remove completed agents' worktrees **by path** rather than
+sweeping a glob. After removing any, run `golangci-lint cache clean`: the lint cache is
+keyed on package *content*, not path, so a deleted sibling checkout leaves entries that
+resurface as findings against paths that no longer exist. `make lint` now sets a
+per-checkout `GOLANGCI_LINT_CACHE`, which prevents new collisions but does not clean up
+old ones.
+
+**One honest gap.** When an agent runs under the Claude Code harness with
+`isolation: "worktree"`, the harness creates the worktree itself under
+`.claude/worktrees/` and `treehouse` does not manage it — `treehouse status` will not
+show it and `treehouse prune` will not reclaim it. Using treehouse properly means
+briefing the agent to `treehouse get --lease` and work there instead. Until that is the
+default, expect harness worktrees to need the manual path above.
 
 ## Module map
 
@@ -283,8 +344,19 @@ These are the product's structural promises. Hold them.
   costs cross-compilation without a C toolchain and breaks `go install` for users
   without a compiler, which is the distribution promise ADR-0001 rests on.
 - **Dependencies stay near-zero.** stdlib, plus `golang.org/x/term` for line editing and
-  `github.com/google/go-cmp` in tests. Git is shelled out to, not linked. Diffs render
-  via `git diff --no-index`. Adding a dependency needs a reason in the PR description.
+  `github.com/google/go-cmp` in tests. Git is shelled out to, not linked. Adding a
+  dependency needs a reason in the PR description. **Never add a diff library** — but
+  which of the two ways to render a diff you pick depends on where it goes:
+  - A **tree diff for a human to read** (turn snapshots, `internal/repo`) shells out to
+    `git diff --no-index`. Zero deps, exact fidelity, and nothing downstream depends on
+    the bytes being stable.
+  - A **diff that gets journaled** is built in-process, and `internal/tools/edit.go` is
+    the worked example. SLICE-1 requires a replayed session to produce a byte-identical
+    journal, and `git diff` output varies with the installed git version and the user's
+    config (`diff.algorithm`, external drivers), so shelling out would make the criterion
+    fail on someone else's machine. An anchored edit replaces one contiguous region, so
+    there is no diff *algorithm* to run and the in-process version is exact by
+    construction rather than approximated.
 - **The engine decides policy; the surfaces decide presentation.** The engine decides
   *that* permission is required and what a decision means, never how it is asked.
 - **Never touch the user's git state.** Shadow refs are written under

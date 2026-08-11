@@ -261,15 +261,13 @@ not be crossed" section in full.
   diagnostic output that justifies a fix is the specific failure this project is
   designed to prevent.
 
-## Why we do not use a worktree pool manager
+## We use a worktree pool manager — for lifecycle, not for safety
 
-`treehouse` is on this machine and it is a reasonable tool: it keeps a pool of
-pre-warmed worktrees, leases them so a cleanup sweep cannot delete one that an agent
-is still using, and its `prune` and `destroy` are dry runs by default. If we ever
-drive agents outside the Claude Code harness, it is worth revisiting.
+This section used to say we did not. That has changed, and the reason it changed is
+worth stating precisely, because the old argument was correct and is still correct.
 
-It would not have prevented any of this. Its worktrees are ordinary git worktrees,
-which was checked rather than assumed:
+**What has not changed: `treehouse` is not a safety mechanism.** Its worktrees are
+ordinary git worktrees, which was checked rather than assumed:
 
 ```bash
 $ cat $(treehouse get --lease)/.git
@@ -280,6 +278,42 @@ $ git -C <parent repo> config --get core.bare
 true
 ```
 
-Same shared config, same failure. The problem was never how worktrees are handed out.
-It was a test suite whose git subprocesses could be redirected at the real repository,
-and no pool manager fixes that.
+Same shared config, same failure. Everything on this page still applies inside a leased
+worktree. A pool manager would not have prevented the incident that caused this
+document, because the problem was never how worktrees are handed out — it was a test
+suite whose git subprocesses could be redirected at the real repository. **Do not treat
+a lease as isolation.** `Dir` *and* `Env` on every git subprocess, the static check in
+`internal/arch/gitcmd_test.go`, and `TestMain` fingerprinting remain the actual defences.
+
+**What has changed: the lifecycle problem turned out to be real, and it is a different
+problem.** Running many agents against one repo produced, in a single session:
+
+- eleven worktrees accumulating, because a sweep could not safely run while any agent
+  was live, and there was nothing marking which were live;
+- ten `gh pr merge --delete-branch` failures on branches still checked out elsewhere;
+- a linter defect surfaced by a *deleted* sibling worktree, whose stale entries kept
+  reappearing as findings against paths that no longer existed.
+
+Leasing addresses all three, and the safe-by-default removal addresses the accident this
+page's own advice was written to avoid ("never blanket-prune while agents are running").
+
+```bash
+treehouse get --lease --lease-holder agent-<id>   # prints the path; never handed out twice
+treehouse status --json                            # what is live — read before cleaning
+treehouse return <path>                            # release when done
+treehouse prune                                    # dry run by default; --yes to act
+treehouse destroy <path>                           # dry run by default; skips risky classes
+```
+
+A leased worktree is never handed out by a later `get` and never removed by `prune` until
+returned, even with no process running in it. `prune` counts a worktree stale only when
+it is unleased, idle, clean and already merged. `destroy` removes only the disposable set
+unless you opt in per risk class (`--include-unlanded`, `--include-in-use`,
+`--include-leased`), and refuses a global sweep outright.
+
+**The gap to know about.** A worktree the Claude Code harness created for you
+(`isolation: "worktree"`, under `.claude/worktrees/`) is *not* treehouse-managed:
+`treehouse status` will not list it and `treehouse prune` will not reclaim it. If you are
+in one, clean-up is manual, by path, only after nothing is running — and run
+`golangci-lint cache clean` afterwards, because the lint cache is keyed on package
+content rather than path and a removed sibling checkout leaves entries behind.

@@ -252,8 +252,12 @@ Ordered so each step produces something the next depends on.
 1. **Scaffold.** Go module `github.com/leejianrong/kopicode`, Apache-2.0. Makefile with
    the targets in `CLAUDE.md`. `golangci-lint`, `go vet`, `staticcheck`. Pre-push hook.
    Dependencies held to stdlib plus `golang.org/x/term` (line editing) and
-   `github.com/google/go-cmp` (tests only). Git is shelled out to, not linked. Diffs are
-   rendered by `git diff --no-index` — zero deps, exact fidelity.
+   `github.com/google/go-cmp` (tests only). Git is shelled out to, not linked. **Tree**
+   diffs meant for a human are rendered by `git diff --no-index` — zero deps, exact
+   fidelity. A diff that is **journaled** is built in-process instead, because §Test Plan
+   requires a replayed session to produce a byte-identical journal and `git diff` output
+   varies with the installed git and the user's config; see `internal/tools/edit.go`.
+   Either way, no diff library.
 
 2. **Journal (J1).** Event types as a tagged union: an envelope struct plus a
    `Payload` interface with a `type` discriminator, JSON round-tripping through
