@@ -65,6 +65,21 @@ What is real now (2026-08-11):
   `cmd/`'s import allowlist, and `internal/arch` enforces both halves. `internal/arch`
   also checks statically that every `-X` target in the Makefile names a real string
   variable — `go build` does not report a bogus one, it silently ships the zero value.
+- **`internal/provider/fixture`** — provider traffic as data, plus the loader and
+  validator for it. Enough to drive a two-turn session end to end, one fixture per
+  extraction route. **Every fixture in it is hand-authored and says so in the file**
+  (`"origin": "hand_authored"`), because the mock provider is build step 3 and the real
+  client is step 8, so there is no traffic to record yet. That is a deliberate,
+  temporary violation of the test-seam rule below, and the drift risk is real: a
+  synthetic body that does not match OpenRouter produces a green suite over a loop that
+  fails live. Bounded, not removed, by three things — the origin marker, a validator that
+  holds each fixture to itself (the SSE frames must fold back into the assembled body,
+  the declared finish reason and usage must match it, the pin must be a pin), and a note
+  on every wire field saying whether it was verified against OpenRouter's docs. The
+  streaming tool-call delta shape is the one OpenRouter documents nowhere; the fixtures
+  follow OpenAI's contract and say so. A recording (KAN-774) replaces a hand-authored
+  fixture rather than joining it. The pin values are the `PROVISIONAL-` placeholder —
+  KAN-775 chooses the real slug and quantization.
 - **`internal/repo`** — turn snapshots via git shadow refs (ADR-0002 §3), write
   only; restore and fork are slice 2. `git add -A` into a throwaway
   `GIT_INDEX_FILE`, `write-tree`, `commit-tree`, `update-ref
@@ -161,6 +176,7 @@ internal/
   build/             the binary's identity: version, commit, dirty bit
   engine/            agent loop, turn state, context assembly
   provider/          OpenRouter client + mock/replay provider
+  provider/fixture/  recorded (today: hand-authored) provider traffic + its loader
   parse/             tool-call extraction and repair
   tools/             read, write, edit, list, grep, shell
   journal/           Journal interface, FileJournal, blob spill, event types
