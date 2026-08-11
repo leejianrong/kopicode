@@ -54,7 +54,13 @@ dev: ## Download deps and install the dev tools
 # gofmt takes directories literally and walks all of them. The rest of the Go
 # toolchain — go build, go vet, go test, golangci-lint — skips directories whose
 # name begins with "." or "_", so `gofmt -l .` is the one gate that sees files
-# nothing else does. On a machine running parallel agents that means
+# nothing else does. That sentence used to be an assumption; KAN-833 measured it
+# and it holds for all four (the evidence is in the lint block below). What it
+# does NOT mean is that those four are confined to this checkout — golangci-lint
+# leaks across checkouts through its cache instead, which is a different
+# mechanism and needs a different fix. Read both blocks together.
+#
+# On a machine running parallel agents that means
 # .claude/worktrees/*, where each agent keeps its own checkout of this same
 # module: their half-written files fail the PM's pre-push hook, for a target
 # whose failure message gives no hint where the file came from.
@@ -94,7 +100,52 @@ fmtcheck: ## Fail if any file is unformatted
 vet: ## go vet
 	go vet ./...
 
+# golangci-lint is confined to this checkout by its CACHE, not by its file list.
+# KAN-833, and the order matters because the obvious fix is the wrong one.
+#
+# The file list was never the problem, which was measured rather than reasoned
+# about. With an unformatted Go file carrying a compile error planted in both
+# .kan833probe/ and _kan833probe/, `gofmt -l .` listed both, while `go list
+# ./...`, `go build ./...`, `go vet ./...` and `go test ./...` ignored both and
+# stayed green. Under `strace -f -e trace=openat golangci-lint run` the linter
+# made 47053 openat calls and not one named either directory. So confining lint
+# to $(GOPKGDIRS) the way fmtcheck is confined would change nothing, and would
+# leave a second comment asserting a mechanism that is not the one at work.
+#
+# The leak is the result cache. It lives in GOLANGCI_LINT_CACHE, default
+# ~/.cache/golangci-lint — ONE directory shared by every checkout on the machine
+# — and its key is the package's content, not its path. Two checkouts of this
+# module whose sources match therefore hit each other's entries, and a restored
+# issue carries the absolute filename of whichever checkout computed it first.
+# When that checkout was an agent worktree that has since been removed, the
+# result is a finding reported against a path that no longer exists. Reproduced
+# by planting a misspelling, linting a throwaway copy of the tree, deleting the
+# copy, and linting here again:
+#
+#   level=warning msg="[runner] Can't process results by generated_file_filter
+#     processor: ... /tmp/<copy>/internal/bench/errors.go: no such file or directory"
+#   ../../../../../../../../tmp/<copy>/internal/bench/errors.go:1:64: `recieve`
+#     is a misspelling of `receive` (misspell)
+#
+# Note the exit code there is 1 and the finding is still printed. This is
+# misattribution and noise, NOT a vacuous green: the cache is keyed on content,
+# so a reused issue is always a true issue about identical bytes, merely labelled
+# with a path the reader cannot open, and a failed processor leaves the issue
+# list untouched rather than dropping it. That is why this gate gets no
+# require_pkgdirs-style guard — unlike `gofmt -l` handed an empty file list, it
+# has no way to report success having checked nothing.
+#
+# A per-checkout cache directory fixes it at the mechanism, and keeps working
+# when the next dot-directory is called something other than .claude. $(BIN) is
+# already git-ignored and already what `make clean` removes, so the cache needs
+# no new ignore rule; the price is one cold run per checkout, ~4.3s against ~0.9s
+# warm.
+#
+# CI never caught this and never will: it runs on a clean checkout with no
+# .claude/worktrees/ and a cold cache, so there is no sibling to collide with.
+# This defect exists only on a machine running parallel agents.
 .PHONY: lint
+lint: export GOLANGCI_LINT_CACHE := $(CURDIR)/$(BIN)/golangci-lint-cache
 lint: ## golangci-lint (staticcheck is one of its linters, not a separate tool)
 	golangci-lint run
 
