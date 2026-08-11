@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "go-lru-cache",
+  "title": "Reading an entry should make it recently used",
+  "statement": "The LRU cache evicts the wrong entry. With capacity 2, storing \"a\" and \"b\", reading \"a\", then storing \"c\" drops \"a\" — it should drop \"b\", because \"a\" was just read. Make `go test ./...` pass.",
+  "language": "go",
+  "requires": ["go"],
+  "oracle": {
+    "argv": ["go", "test", "./..."],
+    "env": {
+      "GOFLAGS": "-mod=readonly",
+      "GOPROXY": "off"
+    },
+    "timeout_seconds": 120
+  },
+  "traits": ["requires_read"],
+  "max_turns": 20,
+  "notes": "Needs the Go toolchain only. The fix is one call to an unexported helper that already exists, so the model has to read the file to find it rather than reimplement recency tracking; a from-scratch rewrite tends to drop Keys() or the capacity floor, both covered."
+}

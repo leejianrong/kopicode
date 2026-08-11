@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "corpus_version": "1.0.0",
+  "digest": "sha256:065198d0ed6f94a5e6296a88377ed39deac54505d77caad1c83dea83ab866535",
+  "description": "kopicode slice-1 benchmark corpus: ten small deterministic repair-and-extend tasks, Go and Python, oracle-graded by each task's own test suite.",
+  "tasks": [
+    "go-unicode-reverse",
+    "go-json-response-shape",
+    "go-error-wrapping",
+    "go-interval-merge",
+    "go-lru-cache",
+    "go-wordwrap-width",
+    "py-csv-blank-rows",
+    "go-flag-equals-form",
+    "go-config-retries",
+    "py-calc-modulo"
+  ]
+}

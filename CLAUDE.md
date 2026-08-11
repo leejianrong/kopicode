@@ -69,8 +69,20 @@ What is real now (2026-08-11):
   so a snapshot never depends on the user having configured git and the same tree
   yields the same sha.
 
+- **`bench/tasks` + `internal/corpus`** — the frozen 10-task corpus (build plan step
+  15) and the loader that validates it. Data, not code: a task is a starting tree, a
+  statement in the form a user would type, and an argv oracle that exits non-zero
+  before the fix and zero after. Both directions are checked for every task under the
+  `integration` tag, which caught three tasks whose suites could not pass even with the
+  correct fix. Tasks are discovered by walking the directory, so an eleventh cannot be
+  silently unvalidated, and `Load` **refuses** a corpus whose contents no longer match
+  the digest in `corpus.json` — ADR-0005's experiment-series boundary made checkable
+  rather than conventional. Go tasks carry their own `go.mod`, which keeps them out of
+  `go list ./...` and therefore out of every root gate; reference fixes live in
+  `bench/_solutions/`, outside the corpus tree and behind a `_` the Go tool ignores.
+
 What does **not** exist: the engine, the loop, the tools, `FileJournal` and blob spill,
-the provider clients, the REPL, the bench runner, the corpus. `cmd/kopicode` and
+the provider clients, the REPL, the bench runner. `cmd/kopicode` and
 `cmd/kopibench` are stubs that exit **4** rather than 0 — an unimplemented binary exiting
 cleanly is how a broken harness passes a smoke test.
 

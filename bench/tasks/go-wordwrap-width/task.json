@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "go-wordwrap-width",
+  "title": "Wrapped lines run one character over the limit",
+  "statement": "`go test ./...` fails: the help-text wrapper sometimes emits a line one character wider than the width it was given. Track it down and fix it.",
+  "language": "go",
+  "requires": ["go"],
+  "oracle": {
+    "argv": ["go", "test", "./..."],
+    "env": {
+      "GOFLAGS": "-mod=readonly",
+      "GOPROXY": "off"
+    },
+    "timeout_seconds": 120
+  },
+  "traits": ["requires_read"],
+  "max_turns": 20,
+  "notes": "Needs the Go toolchain only. An off-by-one the statement describes by symptom only: the separating space is not counted when deciding whether the next word fits. The failing property test sweeps widths 5 to 20, so a fix that special-cases one width does not pass, and Indent and Longest are covered so a rewrite of the file has to keep them."
+}
