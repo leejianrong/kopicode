@@ -1,17 +1,19 @@
 // Package tools implements the tools the model calls to inspect and change a
-// repository. This slice holds the read half — read_file, list_dir and grep
-// (KAN-780) — plus run_shell (KAN-782) and write_file (KAN-781); edit_file
-// lands beside them (KAN-784) on the same [Root] and the same [Limits].
+// repository: read_file, list_dir and grep (KAN-780), run_shell (KAN-782),
+// write_file (KAN-781) and edit_file (KAN-784), all on the same [Root] and the
+// same [Limits].
 //
 // Three rules shape everything here.
 //
 // **Anchors come from read_file and nowhere else.** read_file renders every
 // line through [anchor.Render], so the model can name a region without ever
-// reproducing its content, and edit_file re-derives those anchors at apply time
-// (docs/adr/0006-hash-anchored-edits-and-failure-attribution.md). grep
+// reproducing its content, and [Set.EditFile] re-derives those anchors at apply
+// time (docs/adr/0006-hash-anchored-edits-and-failure-attribution.md). grep
 // deliberately does *not* emit anchors: ADR-0006 rests on anchors being
 // obtainable only from a read, which is what makes an edit into a region the
 // model was never shown structurally impossible rather than merely discouraged.
+// TestNoToolButReadFileEmitsAnchors holds that across the whole tool set, so a
+// tool added later cannot leak one by accident.
 //
 // **Bounds are declared, never silent.** CLAUDE.md forbids clipping the
 // diagnostic output that justifies a fix. Where a bound is unavoidable — a file
@@ -47,6 +49,7 @@ const (
 	ToolGrep      = "grep"
 	ToolRunShell  = "run_shell"
 	ToolWriteFile = "write_file"
+	ToolEditFile  = "edit_file"
 )
 
 // Limits are the declared bounds the tools apply. Every one of them is stated

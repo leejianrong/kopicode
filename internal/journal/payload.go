@@ -317,7 +317,15 @@ type EditRejected struct {
 	CallID string `json:"call_id"`
 	Path   string `json:"path"`
 	Mode   string `json:"mode"`
-	// Reason is "anchor_drift", "below_floor" or "ambiguous".
+	// Reason is the machine-readable kind, decided by the edit tool and copied
+	// here unchanged. Anchored mode produces "anchor_malformed" (the argument
+	// is not an anchor at all), "anchor_drift" (a well-formed anchor matching
+	// no line), "ambiguous" (an anchor matching several) and "anchor_order"
+	// (both resolve, end above start); the fuzzy fallback adds "below_floor".
+	//
+	// They are kept apart because each implies a different recovery, and a
+	// classifier that saw one string could not tell a model that cannot copy an
+	// anchor back — SLICE-1 risk 2 — from a file that genuinely moved.
 	Reason      string `json:"reason"`
 	AnchorStart string `json:"anchor_start,omitempty"`
 	AnchorEnd   string `json:"anchor_end,omitempty"`
