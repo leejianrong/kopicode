@@ -1,0 +1,148 @@
+{
+  "format_version": 1,
+  "origin": "hand_authored",
+  "origin_note": "Written by hand for KAN-772, same basis and same caveats as the other two. This file carries one extra deliberate assumption: the usage arrives on a trailing chunk with an empty choices array, rather than on the chunk that carries finish_reason as the other fixtures show. OpenRouter documents only that 'the final chunk includes usage stats' and shows no bytes, so the set covers both spellings and a client written against it cannot quietly depend on one.",
+  "name": "two_turn_xml_tag_tool_call",
+  "description": "Two turns, with the first call arriving as a <tool_call> block in the reply text — the Hermes/Qwen convention the target model family was trained on. Also the fixture that puts usage on a trailing chunk with empty choices.",
+  "model_id": "qwen/qwen3-coder-next",
+  "pin": {
+    "order": [
+      "PROVISIONAL-PIN"
+    ],
+    "allow_fallbacks": false,
+    "quantizations": [
+      "fp8"
+    ]
+  },
+  "exchanges": [
+    {
+      "turn": 1,
+      "attempt": 1,
+      "note": "The XML-tagged route, again with finish_reason stop and no native tool_calls. The tag is split across stream fragments, so a client that scans for a closing tag per chunk rather than over the assembled text will not find one.",
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "text/event-stream"
+        },
+        "body": {
+          "id": "gen-0000000005-kopicodefixture",
+          "object": "chat.completion",
+          "created": 1767398400,
+          "model": "qwen/qwen3-coder-next",
+          "provider": "PROVISIONAL-PIN",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": "Let me look at the file.\n<tool_call>\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"internal/greet/greet.go\"}}\n</tool_call>"
+              },
+              "finish_reason": "stop",
+              "native_finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1288,
+            "completion_tokens": 38,
+            "total_tokens": 1326
+          }
+        },
+        "stream": [
+          ": OPENROUTER PROCESSING",
+          "",
+          "data: {\"id\":\"gen-0000000005-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398400,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-0000000005-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398400,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Let me look at the file.\\n<tool_\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-0000000005-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398400,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"call>\\n{\\\"name\\\": \\\"read_file\\\", \\\"ar\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-0000000005-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398400,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"guments\\\": {\\\"path\\\": \\\"internal/gr\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-0000000005-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398400,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"eet/greet.go\\\"}}\\n</tool_call>\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-0000000005-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398400,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null},\"finish_reason\":\"stop\",\"native_finish_reason\":\"stop\"}]}",
+          "",
+          "data: {\"id\":\"gen-0000000005-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398400,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[],\"usage\":{\"prompt_tokens\":1288,\"completion_tokens\":38,\"total_tokens\":1326}}",
+          "",
+          "data: [DONE]",
+          ""
+        ]
+      },
+      "expect": {
+        "finish_reason": "stop",
+        "route": "xml_tag",
+        "tools": [
+          "read_file"
+        ],
+        "usage": {
+          "prompt": 1288,
+          "completion": 38,
+          "total": 1326
+        },
+        "served_by": "PROVISIONAL-PIN"
+      }
+    },
+    {
+      "turn": 2,
+      "attempt": 1,
+      "note": "The terminal turn: prose, no call, finish_reason stop.",
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "text/event-stream"
+        },
+        "body": {
+          "id": "gen-0000000006-kopicodefixture",
+          "object": "chat.completion",
+          "created": 1767398413,
+          "model": "qwen/qwen3-coder-next",
+          "provider": "PROVISIONAL-PIN",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": "Greet(\"\") never reaches an empty-name branch: the switch falls through to the default arm and returns \"Hello, \" + name + \"!\", which renders as \"Hello, !\". The fix is a case for the empty string that returns the stranger greeting."
+              },
+              "finish_reason": "stop",
+              "native_finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 1699,
+            "completion_tokens": 96,
+            "total_tokens": 1795
+          }
+        },
+        "stream": [
+          ": OPENROUTER PROCESSING",
+          "",
+          "data: {\"id\":\"gen-0000000006-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398413,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-0000000006-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398413,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Greet(\\\"\\\") never reaches an empty-name branch: the switch falls through to the\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-0000000006-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398413,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" default arm and returns \\\"Hello, \\\" + name + \\\"!\\\", which renders as \\\"Hello, !\\\".\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-0000000006-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398413,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" The fix is a case for the empty string that returns the stranger greeting.\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-0000000006-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398413,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null},\"finish_reason\":\"stop\",\"native_finish_reason\":\"stop\"}]}",
+          "",
+          "data: {\"id\":\"gen-0000000006-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398413,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[],\"usage\":{\"prompt_tokens\":1699,\"completion_tokens\":96,\"total_tokens\":1795}}",
+          "",
+          "data: [DONE]",
+          ""
+        ]
+      },
+      "expect": {
+        "finish_reason": "stop",
+        "route": "",
+        "usage": {
+          "prompt": 1699,
+          "completion": 96,
+          "total": 1795
+        },
+        "served_by": "PROVISIONAL-PIN"
+      }
+    }
+  ]
+}

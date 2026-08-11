@@ -67,6 +67,21 @@ What is real now (2026-08-11):
   `cmd/`'s import allowlist, and `internal/arch` enforces both halves. `internal/arch`
   also checks statically that every `-X` target in the Makefile names a real string
   variable — `go build` does not report a bogus one, it silently ships the zero value.
+- **`internal/provider/fixture`** — provider traffic as data, plus the loader and
+  validator for it. Enough to drive a two-turn session end to end, one fixture per
+  extraction route. **Every fixture in it is hand-authored and says so in the file**
+  (`"origin": "hand_authored"`), because the mock provider is build step 3 and the real
+  client is step 8, so there is no traffic to record yet. That is a deliberate,
+  temporary violation of the test-seam rule below, and the drift risk is real: a
+  synthetic body that does not match OpenRouter produces a green suite over a loop that
+  fails live. Bounded, not removed, by three things — the origin marker, a validator that
+  holds each fixture to itself (the SSE frames must fold back into the assembled body,
+  the declared finish reason and usage must match it, the pin must be a pin), and a note
+  on every wire field saying whether it was verified against OpenRouter's docs. The
+  streaming tool-call delta shape is the one OpenRouter documents nowhere; the fixtures
+  follow OpenAI's contract and say so. A recording (KAN-774) replaces a hand-authored
+  fixture rather than joining it. The pin values are the `PROVISIONAL-` placeholder —
+  KAN-775 chooses the real slug and quantization.
 - **`internal/repo`** — turn snapshots via git shadow refs (ADR-0002 §3), write
   only; restore and fork are slice 2. `git add -A` into a throwaway
   `GIT_INDEX_FILE`, `write-tree`, `commit-tree`, `update-ref
@@ -92,9 +107,20 @@ What is real now (2026-08-11):
   A key constant that lands without a name, a decoder entry *and* a binding fails the
   suite — `key_internal_test.go` derives the set from the source with `go/ast` rather
   than trusting a hand-written table.
+- **`bench/tasks` + `internal/corpus`** — the frozen 10-task corpus (build plan step
+  15) and the loader that validates it. Data, not code: a task is a starting tree, a
+  statement in the form a user would type, and an argv oracle that exits non-zero
+  before the fix and zero after. Both directions are checked for every task under the
+  `integration` tag, which caught three tasks whose suites could not pass even with the
+  correct fix. Tasks are discovered by walking the directory, so an eleventh cannot be
+  silently unvalidated, and `Load` **refuses** a corpus whose contents no longer match
+  the digest in `corpus.json` — ADR-0005's experiment-series boundary made checkable
+  rather than conventional. Go tasks carry their own `go.mod`, which keeps them out of
+  `go list ./...` and therefore out of every root gate; reference fixes live in
+  `bench/_solutions/`, outside the corpus tree and behind a `_` the Go tool ignores.
 
 What does **not** exist: the engine, the loop, the tools, `FileJournal` and blob spill,
-the provider clients, the REPL itself, the bench runner, the corpus. `cmd/kopicode` and
+the provider clients, the REPL itself, the bench runner. `cmd/kopicode` and
 `cmd/kopibench` are stubs that exit **4** rather than 0 — an unimplemented binary exiting
 cleanly is how a broken harness passes a smoke test.
 
@@ -177,6 +203,7 @@ internal/
   build/             the binary's identity: version, commit, dirty bit
   engine/            agent loop, turn state, context assembly
   provider/          OpenRouter client + mock/replay provider
+  provider/fixture/  recorded (today: hand-authored) provider traffic + its loader
   parse/             tool-call extraction and repair
   tools/             read, write, edit, list, grep, shell
   journal/           Journal interface, FileJournal, blob spill, event types

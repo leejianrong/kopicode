@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "go-unicode-reverse",
+  "title": "Reverse a string by character, not by byte",
+  "statement": "strutil.Reverse mangles non-ASCII text: reversing \"héllo\" gives broken bytes instead of \"olléh\". Fix it so it reverses characters rather than bytes, and keep the rest of the package working. Run `go test ./...` to check.",
+  "language": "go",
+  "requires": ["go"],
+  "oracle": {
+    "argv": ["go", "test", "./..."],
+    "env": {
+      "GOFLAGS": "-mod=readonly",
+      "GOPROXY": "off"
+    },
+    "timeout_seconds": 120
+  },
+  "traits": ["requires_read"],
+  "max_turns": 20,
+  "notes": "Needs the Go toolchain and nothing else: the module has no requirements, and GOPROXY=off makes that structural rather than incidental. Discriminates on whether the model edits the existing loop instead of rewriting the file — strutil.go also holds Initials and Truncate, both covered by the suite, so a blind write_file of the whole file fails the oracle."
+}

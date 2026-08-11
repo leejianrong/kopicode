@@ -1,0 +1,6 @@
+# The benchmark corpus is content-addressed: internal/corpus records a SHA-256
+# over every task file and refuses to load a corpus whose bytes have changed
+# (ADR-0005 makes it an experiment-series boundary). End-of-line translation on
+# checkout would rewrite every file on a Windows machine and change the digest,
+# so the corpus is checked out byte-for-byte as committed.
+bench/** -text

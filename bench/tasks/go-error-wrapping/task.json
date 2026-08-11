@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "go-error-wrapping",
+  "title": "errors.Is stops matching ErrNotFound",
+  "statement": "Callers do `errors.Is(err, store.ErrNotFound)` and it comes back false for a missing key, from both Get and Delete. Fix the store so the sentinel survives, without losing the key name from the message. `go test ./...`.",
+  "language": "go",
+  "requires": ["go"],
+  "oracle": {
+    "argv": ["go", "test", "./..."],
+    "env": {
+      "GOFLAGS": "-mod=readonly",
+      "GOPROXY": "off"
+    },
+    "timeout_seconds": 120
+  },
+  "traits": ["requires_read"],
+  "max_turns": 20,
+  "notes": "Needs the Go toolchain only. Two near-identical lines in one file have to change and a third, already correct one must not — Put already wraps with %w. Near-duplicate lines are exactly where an edit tool that matches on text rather than on a hash-anchored region applies the change to the wrong one, so this task is aimed at ADR-0006's failure mode."
+}
