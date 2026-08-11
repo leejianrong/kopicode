@@ -167,8 +167,21 @@ type ToolCallRepaired struct {
 	CallID string `json:"call_id"`
 	// Attempt is 1-based and capped at the repair budget.
 	Attempt int `json:"attempt"`
-	// Classification is the failure kind: "unparseable", "unknown_tool",
-	// "missing_arg", "wrong_type" or "unknown_enum".
+	// Classification is the failure kind, written as the wire string of the
+	// parse package's Kind — parse.Error.Kind.String().
+	//
+	// Do not re-list the values here. An earlier version of this comment gave
+	// a five-value illustrative vocabulary that collapsed every extraction
+	// failure into one "unparseable" bucket, which is exactly the distinction
+	// the repair loop is scored on: an unlabelled fence, a trailing comma and
+	// a tag that never closes each earn a different sentence back to the
+	// model, and a journal that records all three identically cannot measure
+	// whether the wording worked. The taxonomy lives in internal/parse and
+	// this field records whatever it says.
+	//
+	// It is a plain string rather than a typed value on purpose: internal/parse
+	// must not import this package and this package must not import it, so the
+	// coupling is a documented wire contract instead of a dependency edge.
 	Classification string `json:"classification"`
 	// Error is the message fed back to the model, verbatim, so repair-recovery
 	// rate can be attributed to the wording that produced it.
