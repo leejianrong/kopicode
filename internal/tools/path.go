@@ -148,6 +148,13 @@ func escapes(rel string) bool {
 	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
+// maxLinkHops bounds the dangling-link walk in [realPath].
+//
+// filepath.EvalSymlinks detects a cycle among links it can resolve and reports
+// ELOOP, which is not fs.ErrNotExist and so never reaches that walk at all. The
+// bound is for the shapes it cannot see, and no real repository comes near it.
+const maxLinkHops = 32
+
 // realPath resolves every symlink in p, tolerating a tail that does not exist.
 //
 // filepath.EvalSymlinks resolves elements left to right, so a ".." after a
@@ -156,22 +163,56 @@ func escapes(rel string) bool {
 // write_file's whole job is a path that does not yet; so a missing tail is
 // peeled off and rejoined onto its resolved parent, where filepath.Join's clean
 // is safe because everything to its left is already link-free.
-func realPath(p string) (string, error) {
+func realPath(p string) (string, error) { return realPathHops(p, maxLinkHops) }
+
+// realPathHops is realPath with the link budget made explicit.
+func realPathHops(p string, hops int) (string, error) {
 	if resolved, err := filepath.EvalSymlinks(p); err == nil {
 		return resolved, nil
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return "", err
+	}
+	if hops <= 0 {
+		return "", fmt.Errorf("resolving %q: too many levels of symbolic links", p)
 	}
 
 	trimmed := p
 	for len(trimmed) > 1 && os.IsPathSeparator(trimmed[len(trimmed)-1]) {
 		trimmed = trimmed[:len(trimmed)-1]
 	}
+
+	// A *dangling* symlink — a link whose target is not there — reports the
+	// same fs.ErrNotExist as a name that is simply free, and the two must not
+	// be treated alike. Peeling a dangling link off as if it were a new name
+	// would decide containment on where the link *sits* rather than on where
+	// it points, so `root/s -> ../outside/new.txt` would resolve to `root/s`,
+	// look perfectly inside the root, and then be written through to the
+	// sibling directory by an open() that follows it. os.Root would still
+	// refuse the write, but as an unexplained syscall refusal — [FaultInternal]
+	// — which under ADR-0006 §3 books the model's escape attempt as a harness
+	// failure. So the link is followed by hand, exactly as open() would.
+	//
+	// The trailing separators come off first: lstat("link/") on a dangling
+	// link fails with ENOENT, and so would silently drop this case for a
+	// directory link.
+	if fi, lerr := os.Lstat(trimmed); lerr == nil && fi.Mode()&fs.ModeSymlink != 0 {
+		target, rerr := os.Readlink(trimmed)
+		if rerr != nil {
+			return "", rerr
+		}
+		if !filepath.IsAbs(target) {
+			// Concatenated rather than joined, for the reason on Resolve:
+			// cleaning before the links are followed is the lexical mistake.
+			target = filepath.Dir(trimmed) + string(filepath.Separator) + target
+		}
+		return realPathHops(target, hops-1)
+	}
+
 	dir, base := filepath.Split(trimmed)
 	if dir == "" || base == "" {
 		return "", fmt.Errorf("resolving %q: %w", p, fs.ErrNotExist)
 	}
-	realDir, err := realPath(dir)
+	realDir, err := realPathHops(dir, hops)
 	if err != nil {
 		return "", err
 	}
