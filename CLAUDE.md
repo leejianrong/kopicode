@@ -56,6 +56,15 @@ What is real now (2026-08-11):
   rendered as `<anchor> <line-number>| <content>`. `read_file` must call `anchor.Render`
   rather than formatting its own lines: derivation and rendering are one model-facing
   contract and splitting them is how the halves drift.
+- **`internal/build`** — the binary's own identity, journaled on `SessionStarted`
+  (ADR-0007 decisions 6 and 7). Version, commit and a machine-readable `tree_state`,
+  from the Makefile's `-X` injection, falling back to `runtime/debug.ReadBuildInfo`
+  and then to an explicit `unknown` — never to a plausible default, because a
+  fabricated build id pools with real ones and a missing one refuses. A leaf package:
+  it imports nothing from this module, which is what makes it the one exception on
+  `cmd/`'s import allowlist, and `internal/arch` enforces both halves. `internal/arch`
+  also checks statically that every `-X` target in the Makefile names a real string
+  variable — `go build` does not report a bogus one, it silently ships the zero value.
 - **`internal/repo`** — turn snapshots via git shadow refs (ADR-0002 §3), write
   only; restore and fork are slice 2. `git add -A` into a throwaway
   `GIT_INDEX_FILE`, `write-tree`, `commit-tree`, `update-ref
@@ -161,6 +170,7 @@ in a blob, in a log line, or in a test fixture.
 cmd/kopicode/        REPL surface — main package
 cmd/kopibench/       headless bench runner — main package
 internal/
+  build/             the binary's identity: version, commit, dirty bit
   engine/            agent loop, turn state, context assembly
   provider/          OpenRouter client + mock/replay provider
   parse/             tool-call extraction and repair
@@ -188,7 +198,10 @@ These are the product's structural promises. Hold them.
   `internal/engine` to a published module without an ADR.
 - **Both front ends talk to the engine through its interface only.** An import-hygiene
   test asserts `cmd/*` never reaches into engine internals. Keep it green — it is the
-  only thing holding a boundary that has no network or module edge to enforce it.
+  only thing holding a boundary that has no network or module edge to enforce it. The
+  allowlist has exactly one non-engine entry, `internal/build`, because `--version` is a
+  surface concern and that package holds no behaviour; it is allowed only for as long as
+  it stays a leaf, which a second test enforces. Do not add a third entry without an ADR.
 - **One session record, and it is the journal.** Do not build a parallel transcript.
   Everything the REPL prints and everything `--print` emits is **derived** from journal
   events. This is the lesson from sibei-flow
