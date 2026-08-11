@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/leejianrong/kopicode/internal/build"
 	"github.com/leejianrong/kopicode/internal/journal"
 )
 
@@ -87,6 +88,49 @@ func walkFields(t *testing.T, typ reflect.Type, path string, visit func(string, 
 		}
 		if ft.Kind() == reflect.Struct && ft.PkgPath() != "time" {
 			walkFields(t, ft, fieldPath, visit)
+		}
+	}
+}
+
+// TestBuildInfoCanHoldEverythingTheBuildPackageProduces keeps the two
+// declarations of a build identity from drifting apart.
+//
+// journal.BuildInfo is deliberately not build.Info: the journal is a
+// compatibility surface and must not change shape because a producer package
+// was refactored (the same reason EditApplied.AnchorVersion is a string rather
+// than an anchor.Version). The cost of that decoupling is that a field added to
+// build.Info would simply never be journaled, and nothing would say so — the
+// failure would be a missing fact in a record nobody notices is incomplete.
+//
+// So the check is directional rather than an equality: every field
+// internal/build produces must have somewhere to land here. The journal may
+// carry more than the producer does — a field kept for records written by an
+// older build is exactly what a compatibility surface is for.
+//
+// This is a test-only import. internal/journal itself imports nothing from this
+// module, and that stays true.
+func TestBuildInfoCanHoldEverythingTheBuildPackageProduces(t *testing.T) {
+	wire := reflect.TypeOf(journal.BuildInfo{})
+	produced := reflect.TypeOf(build.Info{})
+
+	for i := range produced.NumField() {
+		f := produced.Field(i)
+		if !f.IsExported() {
+			continue
+		}
+		w, ok := wire.FieldByName(f.Name)
+		if !ok {
+			t.Errorf("build.Info.%s has no journal.BuildInfo field — a build fact that "+
+				"never reaches the record is a fact nobody can act on", f.Name)
+			continue
+		}
+		if w.Type.Kind() != f.Type.Kind() {
+			t.Errorf("journal.BuildInfo.%s is a %s but build.Info.%s is a %s",
+				f.Name, w.Type.Kind(), f.Name, f.Type.Kind())
+		}
+		if w.Tag.Get("json") == "" {
+			t.Errorf("journal.BuildInfo.%s has no json tag — the wire name would be "+
+				"the Go name, which is not the contract", f.Name)
 		}
 	}
 }

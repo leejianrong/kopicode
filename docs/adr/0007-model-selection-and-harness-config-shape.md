@@ -186,6 +186,10 @@ Not in the preimage:
 - a **per-run seed value**. The policy (fixed, or unseeded) is a harness property; the
   value drawn for one run is not, and hashing it would give every run its own arm.
 - the **corpus version**. That belongs to the experiment, not the arm — decision 7.
+- the **build**. Hashing the binary would make every recompile a new arm, which is not
+  what the field is for. The cost is that a code change altering loop behaviour without
+  touching a configuration field is invisible here, so **the build is recorded separately
+  on `SessionStarted` and decision 7 acts on it**. See the consequence below.
 
 Sampling belongs inside the harness configuration rather than beside it because choosing
 temperature 0.2 for one model and 0.7 for another *is* per-model tuning, and because a
@@ -198,9 +202,31 @@ relationship `ProviderResponse.ServedBy` has to the declared `ProviderPin`.
 not the same question as pairable.**
 
 - **Poolable** — two results may be aggregated into one arm's score — iff they carry the
-  same `model_id`, the same `harness_config_hash`, and a `ServedBy` inside the declared
-  pin. A result whose `ServedBy` falls outside it is **discarded, not adjusted**
-  (ADR-0005 §2), and the discard is reported.
+  same `model_id`, the same `harness_config_hash`, the same **build**, and a `ServedBy`
+  inside the declared pin. A result whose `ServedBy` falls outside it is **discarded, not
+  adjusted** (ADR-0005 §2), and the discard is reported.
+
+  **Same build** means `SessionStarted.build.commit` is equal and
+  `SessionStarted.build.tree_state` is `clean` on both. The tree state is a separate
+  machine-readable field rather than a suffix on the version string precisely so this
+  rule can be evaluated without parsing prose.
+
+  Two results whose builds differ are **not pooled**, and the report names the build as
+  the axis that differs — the same treatment a differing pin gets, and for the same
+  reason: the harness config hash cannot see a code change, so nothing else would catch
+  it.
+
+  A build whose `tree_state` is **`dirty` is not poolable with anything, including
+  another dirty build from the same commit**. No commit describes what was compiled, and
+  two uncommitted trees at one commit need not be the same tree. A `tree_state` of
+  `unknown` is treated exactly as `dirty`: absence of evidence is not evidence of a clean
+  tree, and the case it covers — a binary built with neither the Makefile's ldflags nor
+  Go's VCS stamping — is one where nothing recorded what the code was. Both are reported
+  as unpoolable rather than dropped silently, because a bench run that produced nothing
+  poolable should say why.
+
+  A dirty build is still perfectly reasonable for development and for a smoke run. What
+  it may not do is contribute to a published number.
 - **Pairable** — two results may form a McNemar discordant pair — iff they are the same
   task at the same corpus version, from two arms, inside one experiment series.
 - **An experiment series** is bounded by a corpus version bump and by an
@@ -211,6 +237,15 @@ The pin is in the tuple not because anyone A/Bs it deliberately, but because it 
 *involuntarily* — a pinned provider disappearing mid-series is already named as a
 consequence of ADR-0005 — and a change in it must invalidate pooling rather than pass
 unnoticed.
+
+**The build is a pooling condition and not a fourth axis**, which is the one asymmetry in
+the rule above and is deliberate. An arm is something you choose; nobody sets out to A/B
+a commit, and treating every rebuild as a new arm would mean no arm ever accumulated more
+than one run. What a build *is* is a validity condition on a result, in the same family
+as `ServedBy` having to fall inside the declared pin: it does not name the experiment, it
+says whether this result belongs to the one it claims. Hence "same model, same harness
+hash, same pin, **and** the same clean build" for pooling, against a three-tuple for the
+arm's identity.
 
 Two arms differing in **more than one** axis may still be compared; the result attributes
 to the combination and to neither axis alone, and the report must state which axes
@@ -296,10 +331,20 @@ the coupling is not deleted by someone tidying the preimage.
   the registry cannot check. Rows should carry the date the mapping was last validated.
 - **The harness config hash cannot detect a code change** that alters loop behaviour
   without touching a configuration field. Two arms with identical hashes from different
-  builds are not necessarily comparable, and nothing currently catches that:
-  `SessionStarted` carries no build version, and the envelope's `schema_version` is about
-  the journal format, not the binary. A build identifier on the session record is the
-  obvious fix and is left as a separate card rather than smuggled in here.
+  builds are not necessarily comparable, and the envelope's `schema_version` does not
+  help: it is about the journal format, not the binary. **Closed by KAN-806**, which is
+  the source of decision 6's fourth exclusion and decision 7's build condition:
+  `SessionStarted` now carries `build` — `version`, `commit`, `tree_state`, `source` —
+  produced by `internal/build` from linker-injected values, with
+  `runtime/debug.ReadBuildInfo` as the fallback and an explicit `unknown` when neither
+  spoke. It is recorded rather than hashed, so a rebuild is not a new arm; see decision 7
+  for why that is a validity condition and not a fourth axis.
+- **A build with no identity is now a reportable condition rather than an invisible one.**
+  `go build ./cmd/kopicode` with no ldflags and `-buildvcs=false` yields
+  `source: "unknown"`, and such a result cannot be pooled. That is the intended trade: a
+  fabricated build id would pool, and quietly widen an arm to cover two binaries nobody
+  compared. The `--version` output on both front ends comes from the same call the
+  journal does, so a binary cannot have two answers to which build it is.
 - **The system prompt is now inside a hash**, which means editing it is an
   experiment-series-adjacent act. That is correct — a prompt change is a harness change,
   and it is the single most likely thing to be edited casually mid-series.
