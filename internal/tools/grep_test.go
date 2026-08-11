@@ -213,10 +213,10 @@ func TestGrepRefusals(t *testing.T) {
 		wantFault(t, err, tools.FaultTask)
 	})
 
-	t.Run("cancellation is internal, not the model's fault", func(t *testing.T) {
+	t.Run("cancellation is nobody's fault", func(t *testing.T) {
 		cancelled, cancel := context.WithCancel(ctx)
 		cancel()
 		_, err := s.Grep(cancelled, tools.GrepRequest{Pattern: "package"})
-		wantFault(t, err, tools.FaultInternal)
+		wantFault(t, err, tools.FaultCancelled)
 	})
 }

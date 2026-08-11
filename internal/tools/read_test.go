@@ -346,8 +346,9 @@ func TestReadRefusals(t *testing.T) {
 	})
 }
 
-// TestReadCancelled checks the context is honoured and, when it is not the
-// model's doing, classified as internal rather than charged to the model.
+// TestReadCancelled checks the context is honoured on a file that is otherwise
+// perfectly readable, so the refusal is the cancellation and nothing else. The
+// classification itself is tabled across all five tools in cancel_test.go.
 func TestReadCancelled(t *testing.T) {
 	f := newFixture(t, map[string]string{"main.go": sample})
 	s := f.set(t)
@@ -359,5 +360,5 @@ func TestReadCancelled(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("got %v, want context.Canceled", err)
 	}
-	wantFault(t, err, tools.FaultInternal)
+	wantFault(t, err, tools.FaultCancelled)
 }

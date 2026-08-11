@@ -145,9 +145,15 @@ const apiKeyEnv = "OPENROUTER_API_KEY"
 // line is the one ADR-0006 §3 buckets on, so putting a failed build in the
 // `internal` bucket would be a harness defect laundered into a model number.
 //
-// A cancellation is also a result. Classifying a user pressing Ctrl-C as an
-// internal fault would inflate the harness bucket with the one thing that is
-// nobody's failure.
+// **A cancellation is a result *and* a [FaultCancelled] error.** The result
+// carries the output the command managed to produce and the kill that stopped
+// it, so nothing is dropped; the error is what the bench classifier reads.
+// KAN-808 settled that shape across all five tools, in both directions:
+// [FaultInternal] would inflate ADR-0006 §3's harness bucket with the one thing
+// that is nobody's failure, and a nil error would look like a clean stop, which
+// SLICE-1 §9's "everything else" arm charges to the *model*. A timeout is
+// different and stays a plain result — that is this tool deciding the command
+// had had long enough, which is a fact about the command.
 //
 // Dir is resolved through [Root.Resolve], but that is a check on where the
 // command *starts* and not a containment guarantee: a shell can cd anywhere the
@@ -162,7 +168,7 @@ const apiKeyEnv = "OPENROUTER_API_KEY"
 // than hanging until the timeout.
 func (s *Set) RunShell(ctx context.Context, req ShellRequest) (ShellResult, error) {
 	if err := ctx.Err(); err != nil {
-		return ShellResult{}, internalErr(ToolRunShell, req.Dir, err, "cancelled")
+		return cancelledShell(req), cancelledErr(ToolRunShell, req.Dir, err, "nothing was run")
 	}
 	if strings.TrimSpace(req.Command) == "" {
 		return ShellResult{}, taskErr(ToolRunShell, req.Dir, nil, "a command is required")
@@ -250,7 +256,25 @@ func (s *Set) RunShell(ctx context.Context, req ShellRequest) (ShellResult, erro
 		}
 	}
 	res.Output = res.render()
+	if res.Outcome == OutcomeCancelled {
+		return res, cancelledErr(ToolRunShell, req.Dir, ctx.Err(),
+			"the process group was stopped and the run abandoned")
+	}
 	return res, nil
+}
+
+// cancelledShell is the result of a call the context had already ended before
+// anything was started. It is separate from [ShellResult.render] because that
+// one describes a run — "the process group was killed" is the wrong sentence
+// for a command that never had a process group.
+func cancelledShell(req ShellRequest) ShellResult {
+	return ShellResult{
+		Command:  req.Command,
+		Outcome:  OutcomeCancelled,
+		ExitCode: -1,
+		Output: fmt.Sprintf("run_shell `%s`: cancelled before starting; nothing was run\n",
+			req.Command),
+	}
 }
 
 // stopGroup ends the process group and waits for the run to be reaped,

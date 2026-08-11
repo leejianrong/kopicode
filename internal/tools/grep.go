@@ -50,7 +50,7 @@ type GrepRequest struct {
 // this project does not ship a requirement for a core tool.
 func (s *Set) Grep(ctx context.Context, req GrepRequest) (string, error) {
 	if err := ctx.Err(); err != nil {
-		return "", internalErr(ToolGrep, req.Path, err, "cancelled")
+		return "", cancelledErr(ToolGrep, req.Path, err, "nothing was searched")
 	}
 	if req.Pattern == "" {
 		return "", taskErr(ToolGrep, req.Path, nil, "a pattern is required")
@@ -157,7 +157,7 @@ func (sc *scan) walk(ctx context.Context, dir Path) error {
 	})
 	if err != nil {
 		if ctx.Err() != nil {
-			return internalErr(ToolGrep, dir.Given, err, "cancelled")
+			return cancelledErr(ToolGrep, dir.Given, err, "the search was abandoned part-way")
 		}
 		return sc.set.handleErr(ToolGrep, dir, err)
 	}
@@ -183,7 +183,7 @@ func (sc *scan) read(rel string) ([]byte, bool) {
 // file searches one file, identified by its root-relative slash path.
 func (sc *scan) file(ctx context.Context, rel string, size int64) error {
 	if err := ctx.Err(); err != nil {
-		return internalErr(ToolGrep, rel, err, "cancelled")
+		return cancelledErr(ToolGrep, rel, err, "the search was abandoned part-way")
 	}
 	if sc.bounded {
 		return nil

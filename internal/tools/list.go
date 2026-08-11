@@ -52,7 +52,7 @@ var skipDirs = []string{".git", ".kopicode"}
 // tree and cannot loop.
 func (s *Set) ListDir(ctx context.Context, req ListRequest) (string, error) {
 	if err := ctx.Err(); err != nil {
-		return "", internalErr(ToolListDir, req.Path, err, "cancelled")
+		return "", cancelledErr(ToolListDir, req.Path, err, "nothing was listed")
 	}
 
 	p, err := s.Root.Resolve(ToolListDir, req.Path)
@@ -171,7 +171,7 @@ func (s *Set) collect(ctx context.Context, p Path, req ListRequest) ([]entry, in
 	})
 	if err != nil {
 		if ctx.Err() != nil {
-			return nil, 0, internalErr(ToolListDir, req.Path, err, "cancelled")
+			return nil, 0, cancelledErr(ToolListDir, req.Path, err, "the listing was abandoned part-way")
 		}
 		return nil, 0, s.handleErr(ToolListDir, p, err)
 	}

@@ -69,7 +69,7 @@ const binaryProbeBytes = 8 << 10
 //     offset that fetches the rest. Nothing is ever dropped silently.
 func (s *Set) ReadFile(ctx context.Context, req ReadRequest) (string, error) {
 	if err := ctx.Err(); err != nil {
-		return "", internalErr(ToolReadFile, req.Path, err, "cancelled")
+		return "", cancelledErr(ToolReadFile, req.Path, err, "nothing was read")
 	}
 
 	p, err := s.Root.Resolve(ToolReadFile, req.Path)
@@ -104,7 +104,7 @@ func (s *Set) ReadFile(ctx context.Context, req ReadRequest) (string, error) {
 		return "", err
 	}
 	if err := ctx.Err(); err != nil {
-		return "", internalErr(ToolReadFile, req.Path, err, "cancelled")
+		return "", cancelledErr(ToolReadFile, req.Path, err, "nothing was read")
 	}
 	if looksBinary(src) {
 		return "", taskErr(ToolReadFile, req.Path, ErrBinaryFile,
