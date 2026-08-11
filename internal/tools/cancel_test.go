@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/leejianrong/kopicode/internal/anchor"
 	"github.com/leejianrong/kopicode/internal/tools"
 )
 
@@ -67,6 +68,15 @@ var cancellableTools = []cancellable{
 	}},
 	{"WriteFile", func(ctx context.Context, s *tools.Set) error {
 		_, err := s.WriteFile(ctx, tools.WriteRequest{Path: "new.txt", Content: "x\n"})
+		return err
+	}},
+	{"EditFile", func(ctx context.Context, s *tools.Set) error {
+		// Anchors that would resolve on an unended context, so the cancellation
+		// is what this row observes rather than a rejection standing in for it.
+		a := anchor.Derive(anchor.Split([]byte(sample)))
+		_, err := s.EditFile(ctx, tools.EditRequest{
+			Path: "main.go", AnchorStart: a[0], AnchorEnd: a[0], NewText: "package other\n",
+		})
 		return err
 	}},
 }
