@@ -124,12 +124,22 @@ route taken is journaled, because *which* route a model actually uses is a findi
 
 Repair, on a malformed or unknown call:
 
-- The failure is classified — unparseable, unknown tool, missing required arg, wrong
-  type, unknown enum value.
+- The failure is classified. The taxonomy lives in `internal/parse` and is finer than
+  this list was originally written to be: extraction failures (an unlabelled fence, an
+  unclosed fence or tag, invalid JSON, a missing name, an ambiguous call) are each
+  distinct from one another and from the semantic ones (unknown tool, missing required
+  arg, wrong type, unknown enum value). The distinction is the point — each earns a
+  different sentence back to the model, and a journal that records them identically
+  cannot measure whether the wording worked.
 - A **specific** error goes back as the tool result: what was wrong, what was expected,
   and the correct shape for that one tool. Not the whole schema again.
-- Max **2** repair attempts per call, then `ToolCallFailed` and the turn continues with
-  the failure as an observation rather than aborting.
+- Max **2** repair attempts per **reply**, then `ToolCallFailed` and the turn continues
+  with the failure as an observation rather than aborting. This said "per call" until
+  the loop was built; the unit is the reply because a reply carrying one good call and
+  one malformed one cannot have the good half dispatched. A weak model asked to fix the
+  malformed call will usually re-emit both, and the good one would then apply twice —
+  so nothing in a reply is dispatched until all of it parses. The budget is a parameter,
+  not a constant, because running with none is how you measure what repair buys.
 
 Every attempt is journaled, so parse-success rate and repair-recovery rate are
 measurable rather than anecdotal.
