@@ -508,9 +508,14 @@ func TestLinesAreNotHTMLEscaped(t *testing.T) {
 	}
 }
 
-// TestLargePayloadIsNotTruncated: the blob spill is a later card, and until it
-// lands an oversized payload is written whole. Clipping it would be the exact
-// failure the spill exists to avoid, arriving early.
+// TestLargePayloadIsNotTruncated: an oversized payload comes back whole.
+//
+// It is now the spill path that keeps that promise — 240 KiB is well over the
+// default threshold, so this reads through a blob — but the assertion is
+// deliberately unchanged and says nothing about where the bytes were kept.
+// Clipping is the failure this guards against, and it would be a failure
+// whichever storage the journal picked. The spill's own behaviour is pinned in
+// blob_test.go.
 func TestLargePayloadIsNotTruncated(t *testing.T) {
 	root := t.TempDir()
 	j := open(t, root)

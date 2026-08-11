@@ -11,10 +11,20 @@ import "encoding/json"
 // full length in bytes either way, so a reader knows what it is looking at
 // without fetching.
 //
-// The spill itself is not implemented in this package. The type exists now so
-// that turning it on later is not a wire-format change.
+// Callers build a Text with InlineText and never decide where it lives:
+// FileJournal.Append spills anything over its threshold, and Read fetches it
+// back, so a caller appends a value and reads the same value (spill.go).
+//
+// Size is the length of the value as it was handed over. Redaction can make the
+// stored bytes shorter — the [redacted:NAME] marker in the content is what
+// explains the difference — so Size is an upper bound on what a fetch returns,
+// not a promise about it.
 type Text struct {
 	// Inline is the full value, when it was small enough to keep in the line.
+	//
+	// On disk exactly one of Inline and Blob is set. In a value returned by
+	// Read both are: the reference says where the content is kept, Inline
+	// carries it.
 	Inline string `json:"inline,omitempty"`
 	// Blob is the sha256 of the spilled content, hex-encoded, when it was not.
 	Blob string `json:"blob,omitempty"`
@@ -28,7 +38,9 @@ func InlineText(s string) Text { return Text{Inline: s, Size: int64(len(s))} }
 // BlobText refers to spilled content by its sha256, hex-encoded.
 func BlobText(sha256Hex string, size int64) Text { return Text{Blob: sha256Hex, Size: size} }
 
-// Spilled reports whether the value lives in a blob rather than in the event.
+// Spilled reports whether the value is stored as a blob rather than in the
+// event line. It stays true after Read has fetched the content back, because
+// where the record keeps a value is a fact about the record.
 func (t Text) Spilled() bool { return t.Blob != "" }
 
 // ProviderPin is the routing kopicode demanded of the provider.
