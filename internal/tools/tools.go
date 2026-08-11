@@ -1,7 +1,7 @@
 // Package tools implements the tools the model calls to inspect and change a
 // repository. This slice holds the read half — read_file, list_dir and grep
-// (KAN-780) — plus run_shell (KAN-782); write_file and edit_file land beside
-// them (KAN-781, KAN-784) on the same [Root] and the same [Limits].
+// (KAN-780) — plus run_shell (KAN-782) and write_file (KAN-781); edit_file
+// lands beside them (KAN-784) on the same [Root] and the same [Limits].
 //
 // Three rules shape everything here.
 //
@@ -42,10 +42,11 @@ import (
 
 // Tool names, as the model calls them and as journal.ToolResult records them.
 const (
-	ToolReadFile = "read_file"
-	ToolListDir  = "list_dir"
-	ToolGrep     = "grep"
-	ToolRunShell = "run_shell"
+	ToolReadFile  = "read_file"
+	ToolListDir   = "list_dir"
+	ToolGrep      = "grep"
+	ToolRunShell  = "run_shell"
+	ToolWriteFile = "write_file"
 )
 
 // Limits are the declared bounds the tools apply. Every one of them is stated
