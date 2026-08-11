@@ -22,7 +22,8 @@ type Session struct {
 // (docs/adr/0002-no-durable-runtime-own-journal.md decision 4).
 //
 // FileJournal is the implementation: JSONL, one event per line, appended and
-// fsynced. The 64 KiB blob spill is the card after it.
+// fsynced, with fields over the blob threshold stored out of line and fetched
+// back transparently.
 type Journal interface {
 	// Append stamps the envelope (schema version, session, the next seq, the
 	// time) and records payload durably. It returns the event as written, so a
@@ -34,7 +35,11 @@ type Journal interface {
 	// does not have to fit in memory to be read.
 	//
 	// A malformed line yields a non-nil error and stops iteration; it is never
-	// skipped silently.
+	// skipped silently. Content that was stored out of line is fetched back
+	// before the event is yielded, so a caller reads the value it appended
+	// without knowing where it was kept — and an event whose stored content is
+	// missing or damaged is yielded *with* a non-nil error and iteration
+	// continues, because that damage is confined to one event.
 	Read(ctx context.Context) iter.Seq2[Event, error]
 
 	// Session reports which session this journal records.
