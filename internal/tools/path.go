@@ -101,18 +101,7 @@ func (p Path) Slash() string { return filepath.ToSlash(p.Rel) }
 // lexically against a parent that does, so write_file can create a file and
 // still be checked. That is why the check cannot be "stat it and see".
 func (r *Root) Resolve(tool, given string) (Path, error) {
-	arg := given
-	if arg == "" {
-		arg = "."
-	}
-
-	// Deliberately not filepath.Join: Join cleans, and cleaning "link/../x"
-	// down to "x" before the link is followed is exactly the lexical mistake
-	// this function exists to avoid.
-	candidate := arg
-	if !filepath.IsAbs(arg) {
-		candidate = r.real + string(filepath.Separator) + arg
-	}
+	candidate := r.candidate(given)
 
 	resolved, err := realPath(candidate)
 	if err != nil {
@@ -139,6 +128,25 @@ func (r *Root) Resolve(tool, given string) (Path, error) {
 	}
 
 	return Path{Given: given, Rel: rel, Abs: resolved}, nil
+}
+
+// candidate makes given absolute against the root, following nothing and
+// cleaning nothing. It is the first half of [Root.Resolve], split out so that
+// [Resolver] can share it — one absolutisation, one link walk, one containment
+// check in this package, and no copy of any of them anywhere else.
+//
+// Deliberately not filepath.Join: Join cleans, and cleaning "link/../x" down to
+// "x" before the link is followed is exactly the lexical mistake [Root.Resolve]
+// exists to avoid. The result is fed to [realPath], which does the following.
+func (r *Root) candidate(given string) string {
+	arg := given
+	if arg == "" {
+		arg = "."
+	}
+	if filepath.IsAbs(arg) {
+		return arg
+	}
+	return r.real + string(filepath.Separator) + arg
 }
 
 // escapes reports whether a root-relative path leaves the root. filepath.Rel

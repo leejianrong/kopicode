@@ -349,10 +349,21 @@ type Outcome struct {
 //     remainder is the usual way; returning an error is not, because it would
 //     deny every new file.
 //
-// The intended implementation is the path-resolution helper landing in
-// internal/tools (KAN-780). It is not imported here: this package is consumed
-// by the engine, and a third implementation of containment is how two of them
-// end up disagreeing. Supply that helper at the call site.
+// The production implementation is tools.Resolver, built with
+// tools.Root.Resolver (KAN-810); the engine supplies it at the call site. It is
+// not imported here: this package is consumed by the engine, and a third
+// implementation of containment is how two of them end up disagreeing.
+//
+// The signature returns a string rather than the validated tools.Path, and that
+// was weighed rather than defaulted to. tools.Path exists only for a path proven
+// inside one specific root, and the two things this package must resolve are a
+// write that may be *outside* the root — which is the whole of
+// [KindWriteOutsideRoot] — and a path judged against the bench task's worktree,
+// which is not that root at all. A return type that cannot represent a path
+// outside the root cannot answer either question, so the richer type is not
+// available here; what replaces it is that the string is only ever judged and
+// never opened. Opening goes back through tools.Root.Resolve and the os.Root
+// handle.
 //
 // No context parameter: this is a path computation over local filesystem
 // metadata, not something a user waits on. [Policy.Decide] is the call that
