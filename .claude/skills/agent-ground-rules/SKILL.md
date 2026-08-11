@@ -183,6 +183,29 @@ Treat every path you pass to a subprocess as something you are responsible for.
 **Reading outside your worktree is fine.** Checking the parent's state to verify you
 did no harm is exactly the right use of it. Writing is what to avoid.
 
+## Undoing a deliberate breakage
+
+Every card that adds a guard has to break it on purpose, watch it fail, and put it back.
+That last step is where agents have hurt themselves, and it is worth its own rules
+because it is routine rather than exotic.
+
+**Put it back with the inverse edit.** You broke it with Edit, so fix it with Edit. It is
+the only method that touches exactly what you changed.
+
+**Never `git checkout -- <paths>` to undo it.** That restores from the index, and if you
+have staged nothing the index is empty, so it silently reverts the file all the way to
+HEAD. On a card in progress that throws away your work, not just the breakage, and it
+does it without a word. An agent lost most of two files this way.
+
+**Do not reach for `git stash` either.** The stash is shared with the parent repository,
+which is the whole subject of this page. A stash round-trip that goes well leaves no
+trace; one that goes badly leaves an entry that would delete tracked files if anyone
+popped it, which has already happened here once.
+
+If you genuinely need a checkpoint before breaking something, commit it on your own
+branch. You can always squash or amend afterwards, and a commit cannot be silently
+reverted by a command that looks like it does something narrower.
+
 ## Before you report a card done
 
 Run your gates, then check you left nothing behind. **Run these from inside your own
