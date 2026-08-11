@@ -272,8 +272,12 @@ func TestSnapshotIdentityIsKopicodeNotTheUser(t *testing.T) {
 		t.Fatalf("Snapshot: %v", err)
 	}
 
-	got := git(t, dir, "show", "-s", "--format=%an|%ae|%cn|%ce|%aI", snap.Commit)
-	want := "kopicode|kopicode@kopicode.invalid|kopicode|kopicode@kopicode.invalid|2023-11-14T22:13:20+00:00"
+	// %at, the epoch seconds, rather than %aI. Both render the same instant,
+	// but git spells a UTC offset "+00:00" up to 2.34 and "Z" after it, so an
+	// ISO assertion pins the git version rather than the behaviour — which is
+	// how this first went red on CI while passing locally.
+	got := git(t, dir, "show", "-s", "--format=%an|%ae|%cn|%ce|%at|%ct", snap.Commit)
+	want := "kopicode|kopicode@kopicode.invalid|kopicode|kopicode@kopicode.invalid|1700000000|1700000000"
 	if got != want {
 		t.Errorf("commit identity and date = %q, want %q", got, want)
 	}
@@ -541,8 +545,8 @@ func TestSnapshotReadsTheClockPerSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	firstAt := git(t, dir, "show", "-s", "--format=%aI", first.Commit)
-	secondAt := git(t, dir, "show", "-s", "--format=%aI", second.Commit)
+	firstAt := git(t, dir, "show", "-s", "--format=%at", first.Commit)
+	secondAt := git(t, dir, "show", "-s", "--format=%at", second.Commit)
 	if firstAt == secondAt {
 		t.Errorf("both snapshots are dated %s; the clock was read once and reused", firstAt)
 	}
