@@ -47,12 +47,12 @@ git status                              # in the parent
 fatal: this operation must be run in a work tree
 ```
 
-That is what happened here. A test helper ran a git command with no working directory
-set, it inherited the test process's directory, which was inside the real repository,
-and `core.bare = true` landed in the real `.git/config`. Every git command in the main
-checkout failed until someone noticed. The same run also left a `task` branch and a
-stash in the real ref store, and that stash would have deleted `CLAUDE.md`, the
-`Makefile`, the `LICENSE` and every doc if anyone had popped it.
+Something in that family is what happened here. A test suite reached the real
+repository and left `core.bare = true` in its `.git/config`, at which point every git
+command in the main checkout failed. The same run left a `task` branch, a `refs/tags/v1`
+authored by `fixture@example.invalid`, a worktree registered under `/tmp`, and a stash
+that would have deleted `CLAUDE.md`, the `Makefile`, the `LICENSE` and every doc if
+anyone had popped it. The next section has the precise mechanisms, both reproduced.
 
 The card that did this was KAN-788, whose stated purpose is "never touch the user's
 git state". The promise was in the prose while the test harness broke it. Assume the
@@ -60,28 +60,56 @@ same gap exists in your card until you have checked.
 
 ## Writing a git test that cannot escape
 
-The rule is short: **every git subprocess names its target explicitly, every time.**
+Two rules, and the second one is the one people get wrong: **every git subprocess names
+its target directory, and builds its own environment.** `Dir` alone is not enough.
 
-`exec.Command("git", "init")` with no `Dir` set runs in the test process's working
-directory, which is the package directory, which is inside the real repository. There
-is no version of this that is safe, and it fails silently rather than loudly, which is
-what makes it dangerous.
+Start with `Dir`, because without it nothing else matters. `exec.Command("git", "init")`
+with no `Dir` set runs in the test process's working directory, which is the package
+directory, which is inside the real repository.
 
 ```go
 // Wrong. Inherits the test process's directory.
 cmd := exec.Command("git", "init")
 
-// Right. Says where it runs.
+// Necessary, but still not sufficient. See below.
 cmd := exec.Command("git", "init")
 cmd.Dir = dir
 ```
 
-Four more things, in the order they bite:
+**`GIT_DIR` beats `Dir`.** This is the part that bites, because the command looks
+correctly targeted and is not. If `GIT_DIR` is set in the inherited environment, git
+ignores where the process is running and operates on whatever `GIT_DIR` points at:
 
-**Clear the git environment for fixture subprocesses.** `GIT_DIR`, `GIT_WORK_TREE`,
-`GIT_INDEX_FILE` and the `GIT_CONFIG*` variables are all inherited, and an inherited
-`GIT_DIR` sends a correctly-targeted command at the wrong repository anyway. Build the
-environment you mean rather than filtering the one you were handed.
+```bash
+$ cd /tmp/other-repo
+$ GIT_DIR=/real/repo/.git git rev-parse --absolute-git-dir
+/real/repo/.git
+```
+
+Combine that with a subcommand that defaults to "here" when given no path argument and
+you get the failure that started this. `git init --bare` with no path re-initialises
+whatever `GIT_DIR` names, and re-initialising an existing repository as bare sets
+`core.bare = true` on it:
+
+```bash
+$ GIT_DIR=/real/repo/.git git init --bare
+Reinitialized existing Git repository in /real/repo/.git/
+$ git -C /real/repo config --get core.bare
+true
+```
+
+That is the exact state the checkout was found in. (`git init --bare <path>` with an
+explicit path is safe: the argument wins. The danger is the argumentless form.)
+
+So build the environment you mean rather than filtering the one you were handed.
+`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and the `GIT_CONFIG*` variables are all
+inherited, and any one of them will redirect a command whose `Dir` is perfectly correct.
+
+One honest note on scope. Which command carried `GIT_DIR` into that run was never
+pinned down conclusively, and the pre-push hook was suspected but does not export
+`GIT_DIR` on git 2.34.1, which is what this machine runs. Do not spend time on the
+archaeology. Both mechanisms above are real, both were reproduced, and the defences
+below cover the whole class rather than one path through it.
 
 **Isolate the user's global config.** A fixture that reads `~/.gitconfig` picks up
 whatever the developer has set, and a test that passes for you because of your
@@ -113,7 +141,18 @@ func assertIsolated(t *testing.T, dir string) {
 **A linked worktree in a test is created from the fixture.** If your card exercises
 the `.git`-as-a-file case, and several do, `git worktree add` still has to run against
 the fixture repository. Otherwise you register a worktree against the real one, which
-is the fourth thing that went wrong here.
+is one of the things that went wrong here.
+
+**Fingerprint the ambient repository in `TestMain`.** Record `core.bare`, the stash
+list, the refs your fixtures author and any `/tmp` worktrees before the package runs,
+compare after, and fail loudly on a difference. Pick the fields so a leak trips it but a
+colleague committing in another window does not.
+
+`internal/repo` is the worked example for all of this, and it is worth reading before
+you write a git test. It also carries two guards that are structural rather than
+advisory: the isolated path verifies `GIT_INDEX_FILE` is set before every snapshot, and
+the read-only path refuses any index-writing subcommand, `status` included, because
+`status` rewrites the index while reporting.
 
 ## What isolation does and does not give you
 
@@ -190,4 +229,5 @@ true
 ```
 
 Same shared config, same failure. The problem was never how worktrees are handed out.
-It was a test running a subprocess without saying where.
+It was a test suite whose git subprocesses could be redirected at the real repository,
+and no pool manager fixes that.

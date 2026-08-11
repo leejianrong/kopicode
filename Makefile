@@ -33,14 +33,31 @@ dev: ## Download deps and install the dev tools
 # Feeding gofmt the output of `go list` confines it to the packages this module
 # actually builds, which is the set every other gate already checks. Assigned
 # with `=` so the subprocess runs only in the recipes that use it.
+#
+# Both recipes check the list is non-empty first. `go list` fails whenever the
+# module does not load — a syntax error, a broken go.mod, a repository someone
+# has just half-broken — and an empty list makes `gofmt -l` read stdin, find
+# nothing and exit 0. The gate would then report success having checked no files
+# at all, which is worse than the failure it was covering for: it is loudest
+# exactly when it goes quiet.
 GOPKGDIRS = $(shell go list -f '{{.Dir}}' ./...)
+
+define require_pkgdirs
+	if [ -z "$(GOPKGDIRS)" ]; then \
+	  echo "no packages found: 'go list ./...' failed, so this gate would check nothing"; \
+	  echo "run 'go list ./...' to see why"; \
+	  exit 1; \
+	fi
+endef
 
 .PHONY: fmt
 fmt: ## Format every file in place
+	@$(require_pkgdirs)
 	gofmt -w $(GOPKGDIRS)
 
 .PHONY: fmtcheck
 fmtcheck: ## Fail if any file is unformatted
+	@$(require_pkgdirs)
 	@out=$$(gofmt -l $(GOPKGDIRS)); \
 	if [ -n "$$out" ]; then echo "unformatted files:"; echo "$$out"; exit 1; fi
 
