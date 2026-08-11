@@ -20,8 +20,10 @@ import (
 // It is a named value rather than a bare string because journal.EditApplied and
 // journal.EditRejected both carry a Mode, and ADR-0006 §3 turns that field into
 // a bench classification — a session containing one fuzzy edit is
-// `unattributed`. The fuzzy fallback is KAN-785 and does not exist yet; when it
-// does it adds a second value here, and nothing in this file has a path into it.
+// `unattributed`. [ModeFuzzy] is the second value, landed by KAN-785 as a
+// separate tool, and nothing in this file has a path into it —
+// TestAnchoredModeCannotReachTheFuzzyFallback proves that over the source
+// rather than asserting it in a comment.
 const ModeAnchored = "anchored"
 
 // RejectReason says why an edit was refused, in a form a classifier can read.
@@ -143,9 +145,19 @@ type EditRejection struct {
 	Field string
 	// Anchor is the argument that failed, as the model wrote it.
 	Anchor string
-	// Candidates are the 1-based line numbers a [RejectAmbiguousAnchor] anchor
-	// matched, ascending. Nil for every other reason.
+	// Candidates are the 1-based first line numbers of every region the
+	// refusal found more than one of: the lines a [RejectAmbiguousAnchor]
+	// anchor matched in anchored mode, and the first line of each region above
+	// the floor in fuzzy mode. Ascending. Nil for every other reason.
 	Candidates []int
+
+	// Matches are the regions the fuzzy fallback found, and it is nil in
+	// anchored mode. On [RejectBelowFloor] it is the near misses, closest
+	// first and at most [NearMissCount] of them; on [RejectAmbiguousAnchor] it
+	// is **every** region at or above the floor, because the model has to see
+	// all of them to pick one — returning two of five would make the file look
+	// less repetitive than it is.
+	Matches []FuzzyMatch
 
 	// Current is the file's anchors as they are right now, for the region the
 	// model was aiming at. It is the whole point of failing closed: the model
@@ -173,7 +185,13 @@ type EditResult struct {
 	// Path is the file, as a slash path relative to the root. On a
 	// cancellation it is the argument as given, because nothing was resolved.
 	Path string
-	// Mode is the edit mode used, always [ModeAnchored] in this slice.
+	// Mode is the edit mode used: [ModeAnchored] from [Set.EditFile],
+	// [ModeFuzzy] from [Set.EditFileFuzzy]. It is never empty on a result this
+	// package returned with a file argument that resolved, and it is copied
+	// straight into journal.EditApplied.Mode and journal.EditRejected.Mode —
+	// SLICE-1 §9 classifies a session containing one fuzzy edit as
+	// `unattributed`, so an unset mode under-counts that bucket and flatters
+	// the harness.
 	Mode string
 	// AnchorStart and AnchorEnd are the anchors the model referenced, echoed
 	// so the engine journals what was asked for rather than what was found.
@@ -201,6 +219,16 @@ type EditResult struct {
 
 	// Rejection is set, and the file byte-identical, when the edit was refused.
 	Rejection *EditRejection
+
+	// Fuzzy is set on **every** result [Set.EditFileFuzzy] returns — applied,
+	// refused or cancelled — and nil on every result [Set.EditFile] returns.
+	//
+	// It is a second, independent signal beside Mode and it is deliberate.
+	// SLICE-1 §9 marks a whole session `unattributed` if the fuzzy fallback ran
+	// at any point, so a caller that misses the signal under-counts the bucket
+	// in the flattering direction; a nil-pointer check and a string comparison
+	// fail differently, and TestFuzzyModeIsUnmistakable holds both.
+	Fuzzy *FuzzyInfo
 
 	// Cancelled reports that the context ended before anything was written.
 	// The call also returns a [FaultCancelled] error saying the same thing —
@@ -260,14 +288,14 @@ func (s *Set) EditFile(ctx context.Context, req EditRequest) (EditResult, error)
 		return EditResult{}, err
 	}
 
-	src, err := s.editSource(req, p)
+	src, err := s.editSource(ToolEditFile, req.Path, p)
 	if err != nil {
 		return EditResult{}, err
 	}
 
 	lines := anchor.Split(src)
 	spans := lineSpans(src)
-	if err := checkSpans(req, src, lines, spans); err != nil {
+	if err := checkSpans(ToolEditFile, req.Path, src, lines, spans); err != nil {
 		return EditResult{}, err
 	}
 	anchors := anchor.Derive(lines)
@@ -291,7 +319,7 @@ func (s *Set) EditFile(ctx context.Context, req EditRequest) (EditResult, error)
 	repl := anchor.Split([]byte(req.NewText))
 	next := apply(src, spans, start, end, repl)
 	if err := s.Root.dir.WriteFile(p.Rel, next, defaultFileMode); err != nil {
-		return EditResult{}, s.editErr(req.Path, p, err)
+		return EditResult{}, s.editErr(ToolEditFile, req.Path, err)
 	}
 
 	res := EditResult{
@@ -339,35 +367,40 @@ func rejectedEdit(req EditRequest, p Path, rej *EditRejection) EditResult {
 	}
 }
 
-// editSource reads the file the edit targets, refusing the same shapes
+// editSource reads the file an edit targets, refusing the same shapes
 // read_file refuses and for the same reasons: anchoring needs the whole file in
 // memory, and bytes that are not UTF-8 are mangled by the JSON encoding on the
 // way to the model, so its anchors could never match the file.
-func (s *Set) editSource(req EditRequest, p Path) ([]byte, error) {
-	info, err := s.stat(ToolEditFile, p)
+//
+// tool and given are passed rather than taken from an [EditRequest] because
+// both edit modes read a file the same way and only the name in the message
+// differs. The fuzzy fallback matches whole normalised lines, so it needs the
+// file whole for the same reason anchoring does.
+func (s *Set) editSource(tool, given string, p Path) ([]byte, error) {
+	info, err := s.stat(tool, p)
 	if err != nil {
 		return nil, err
 	}
 	if info.IsDir() {
-		return nil, taskErr(ToolEditFile, req.Path, ErrNotRegular,
-			"it is a directory; edit_file edits files")
+		return nil, taskErr(tool, given, ErrNotRegular,
+			"it is a directory; "+tool+" edits files")
 	}
 	if !info.Mode().IsRegular() {
-		return nil, taskErr(ToolEditFile, req.Path, ErrNotRegular,
+		return nil, taskErr(tool, given, ErrNotRegular,
 			fmt.Sprintf("its mode is %s", info.Mode()))
 	}
 	if info.Size() > s.Limits.MaxFileBytes {
-		return nil, taskErr(ToolEditFile, req.Path, ErrTooLarge,
+		return nil, taskErr(tool, given, ErrTooLarge,
 			fmt.Sprintf("it is %d bytes and the limit is %d; a line's anchor depends on its neighbours, "+
 				"so a file that cannot be read whole cannot be anchored", info.Size(), s.Limits.MaxFileBytes))
 	}
 
-	src, err := s.open(ToolEditFile, p)
+	src, err := s.open(tool, p)
 	if err != nil {
 		return nil, err
 	}
 	if looksBinary(src) {
-		return nil, taskErr(ToolEditFile, req.Path, ErrBinaryFile,
+		return nil, taskErr(tool, given, ErrBinaryFile,
 			fmt.Sprintf("it is %d bytes of non-UTF-8 data, which cannot be anchored", len(src)))
 	}
 	return src, nil
@@ -382,15 +415,15 @@ func (s *Set) editSource(req EditRequest, p Path) ([]byte, error) {
 // proved this path inside the root, so an unexplained refusal is the harness's
 // problem, and calling it a task failure would hide a harness limitation inside
 // a model score.
-func (s *Set) editErr(given string, p Path, err error) error {
+func (s *Set) editErr(tool, given string, err error) error {
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return taskErr(ToolEditFile, given, err,
+		return taskErr(tool, given, err,
 			"the file disappeared between being read and being written")
 	case errors.Is(err, fs.ErrPermission):
-		return taskErr(ToolEditFile, given, err, "the path is not writable")
+		return taskErr(tool, given, err, "the path is not writable")
 	default:
-		return internalErr(ToolEditFile, given, err,
+		return internalErr(tool, given, err,
 			"the root handle refused a path that resolved inside the root")
 	}
 }
@@ -524,7 +557,7 @@ func (s *Set) reject(req EditRequest, lines, anchors []string, field, arg string
 	var notice string
 	rej.Current, notice = s.anchorWindow(lines, anchors, positions, whole)
 	rej.Summary = rejectSummary(field, arg, fault, len(lines))
-	rej.Detail = rejectDetail(req, rej, notice, len(lines))
+	rej.Detail = rejectDetail(req.Path, rej, notice, len(lines))
 	return rej
 }
 
@@ -551,9 +584,9 @@ func rejectSummary(field, arg string, fault *anchorFault, total int) string {
 
 // rejectDetail is the full model-facing text: what was refused, why, what to do
 // about it, and the current anchors to do it with.
-func rejectDetail(req EditRequest, rej *EditRejection, notice string, total int) string {
+func rejectDetail(path string, rej *EditRejection, notice string, total int) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "edit_file %s: rejected, the file was not changed\n", req.Path)
+	fmt.Fprintf(&b, "%s %s: rejected, the file was not changed\n", ToolEditFile, path)
 	fmt.Fprintf(&b, "reason: %s — %s\n", rej.Reason, rej.Summary)
 	b.WriteString(rejectAdvice(rej.Reason, total))
 	b.WriteByte('\n')
@@ -714,15 +747,15 @@ func lineSpans(src []byte) []span {
 //
 // A disagreement is [FaultInternal] and not a rejection: the model did nothing
 // wrong, the harness did, and ADR-0006 §3 wants that counted as `harness`.
-func checkSpans(req EditRequest, src []byte, lines []string, spans []span) error {
+func checkSpans(tool, given string, src []byte, lines []string, spans []span) error {
 	if len(spans) != len(lines) {
-		return internalErr(ToolEditFile, req.Path, nil, fmt.Sprintf(
+		return internalErr(tool, given, nil, fmt.Sprintf(
 			"line offsets disagree with the anchored lines: %d spans for %d lines",
 			len(spans), len(lines)))
 	}
 	for i, sp := range spans {
 		if string(src[sp.start:sp.end]) != lines[i] {
-			return internalErr(ToolEditFile, req.Path, nil, fmt.Sprintf(
+			return internalErr(tool, given, nil, fmt.Sprintf(
 				"line offsets disagree with the anchored lines at line %d", i+1))
 		}
 	}
@@ -859,11 +892,18 @@ func joinInts(ns []int) string {
 }
 
 // render is the model-facing form of an applied or cancelled edit. A rejected
-// one is rendered by [rejectDetail], because a refusal has to carry the current
-// anchors and an application has to carry the diff.
+// one is rendered by [rejectDetail] or [fuzzyDetail], because a refusal has to
+// carry the current anchors or the near misses, and an application has to carry
+// the diff.
+//
+// The mode is named in the line the model reads, not only in the struct the
+// engine journals: a fuzzy edit that looked like an anchored one in the
+// transcript would be the same under-counting SLICE-1 §9 is about, arriving
+// through the surface instead of through the record.
 func (r EditResult) render() string {
+	tool := editToolName(r.Mode)
 	if r.Cancelled {
-		return fmt.Sprintf("edit_file %s: cancelled before writing; the file was not changed\n", r.Path)
+		return fmt.Sprintf("%s %s: cancelled before writing; the file was not changed\n", tool, r.Path)
 	}
 
 	var b strings.Builder
@@ -871,9 +911,24 @@ func (r EditResult) render() string {
 	if r.StartLine == r.EndLine {
 		region = fmt.Sprintf("line %d", r.StartLine)
 	}
-	fmt.Fprintf(&b, "edit_file %s: applied at %s, %s replaced by %s (%s)\n",
-		r.Path, region, plural(r.LinesRemoved, "line", "lines"),
-		plural(r.LinesAdded, "line", "lines"), r.Mode)
+	mode := r.Mode
+	if r.Fuzzy != nil {
+		mode = fmt.Sprintf("%s, similarity %s against a floor of %s",
+			r.Mode, formatScore(r.Fuzzy.Similarity), formatScore(r.Fuzzy.Floor))
+	}
+	fmt.Fprintf(&b, "%s %s: applied at %s, %s replaced by %s (%s)\n",
+		tool, r.Path, region, plural(r.LinesRemoved, "line", "lines"),
+		plural(r.LinesAdded, "line", "lines"), mode)
 	b.WriteString(r.Diff)
 	return b.String()
+}
+
+// editToolName is the tool a result came from, derived from its mode so that
+// one [EditResult] can render for either without carrying a second field that
+// could disagree with the first.
+func editToolName(mode string) string {
+	if mode == ModeFuzzy {
+		return ToolEditFileFuzzy
+	}
+	return ToolEditFile
 }
