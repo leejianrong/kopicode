@@ -8,6 +8,19 @@ large margin, and that the rig proves it rather than asserting it.
 
 Written in **Go**. Single static binary. No durable-execution runtime.
 
+## Read this first if you are a sub-agent
+
+[`.claude/skills/agent-ground-rules/SKILL.md`](.claude/skills/agent-ground-rules/SKILL.md),
+before you run any command or write any test.
+
+The short version, because it has already cost this repo one broken checkout: **a git
+worktree is not a separate repository.** It shares `.git/config`, the object store and
+the ref store with the repo it came from. Only `HEAD` and the index are private. So a
+git subprocess with no working directory set runs in the *real* repository, and one
+`git config` from inside a worktree can leave every command in the main checkout
+failing with `fatal: this operation must be run in a work tree`. The skill has the
+rules that prevent it and the checks that catch it.
+
 ## Build status — foundations landed, no loop yet
 
 **Trust the code over the docs.** `docs/` describes the intended system; where they
@@ -203,6 +216,16 @@ These are the product's structural promises. Hold them.
   `refs/kopicode/`, through a throwaway `GIT_INDEX_FILE`. The user's branch, HEAD, index
   and stashes are off limits, and `.kopicode/` goes in `.git/info/exclude`, never
   `.gitignore`.
+- **Every git subprocess names its target directory, in tests as well as in product
+  code.** `exec.Command("git", ...)` with no `Dir` set runs wherever the process
+  happens to be, which in a test is inside this repository. That is not hypothetical:
+  it has already set `core.bare = true` in the real `.git/config` and left a stash that
+  would have deleted every tracked file. A git worktree shares config, objects and refs
+  with its parent, so being "in a worktree" protects nothing here. Fixture subprocesses
+  get a built environment rather than an inherited one, `HOME` and `GIT_CONFIG_*`
+  included, and a fixture asserts its git dir is under `t.TempDir()` before it is used.
+  [`.claude/skills/agent-ground-rules/SKILL.md`](.claude/skills/agent-ground-rules/SKILL.md)
+  has the detail.
 - **Pin the provider on every benchmark request.** `provider.order`,
   `allow_fallbacks: false`, fixed `quantizations`, all recorded per result. An unpinned
   A/B number is not evidence.
