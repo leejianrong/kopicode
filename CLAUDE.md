@@ -43,6 +43,18 @@ What is real now (2026-08-11):
   rendered as `<anchor> <line-number>| <content>`. `read_file` must call `anchor.Render`
   rather than formatting its own lines: derivation and rendering are one model-facing
   contract and splitting them is how the halves drift.
+- **`internal/repo`** — turn snapshots via git shadow refs (ADR-0002 §3), write
+  only; restore and fork are slice 2. `git add -A` into a throwaway
+  `GIT_INDEX_FILE`, `write-tree`, `commit-tree`, `update-ref
+  refs/kopicode/<session>/<turn>`. Two guards hold "never touch the user's git
+  state": the environment is **verified** to redirect the index rather than assumed
+  to, and the read-only path **refuses** any index-writing subcommand outright
+  (`status` included — it rewrites the index while reporting). Seen red both ways.
+  The exclude goes in `$GIT_COMMON_DIR/info/exclude`, not `$GIT_DIR`'s — a linked
+  worktree does not read the latter, so writing there works everywhere except under
+  the bench runner. Commits carry a fixed `kopicode` identity and an injected clock,
+  so a snapshot never depends on the user having configured git and the same tree
+  yields the same sha.
 
 What does **not** exist: the engine, the loop, the tools, `FileJournal` and blob spill,
 the provider clients, the REPL, the bench runner, the corpus. `cmd/kopicode` and
