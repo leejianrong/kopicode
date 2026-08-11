@@ -84,6 +84,10 @@ func TestKindTextRoundTrip(t *testing.T) {
 		parse.KindMissingName,
 		parse.KindInvalidArguments,
 		parse.KindAmbiguousCall,
+		parse.KindUnknownTool,
+		parse.KindMissingArgument,
+		parse.KindWrongArgumentType,
+		parse.KindUnknownEnumValue,
 	}
 
 	seen := map[string]bool{}
