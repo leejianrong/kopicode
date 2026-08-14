@@ -140,7 +140,7 @@ func TestMain(m *testing.M) {
 // is separate from [tryGit] so that the temp-root guard cannot be bypassed by
 // reaching for the wrong helper by accident. Nothing here writes.
 func ambientGit(args ...string) (string, bool) {
-	//kopicode:allow-git-nodir: the ambient repository is the subject here, so the package
+	//kopicode:allow-nodir: the ambient repository is the subject here, so the package
 	// directory is the correct target. Read-only by construction — every caller passes a
 	// query. The Env rule still applies and is honoured below.
 	cmd := exec.Command("git", args...)

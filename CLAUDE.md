@@ -253,7 +253,7 @@ boundary and not a defence against the corruption this repo has already suffered
 leased worktree is an ordinary git worktree, sharing `.git/config`, the object store, the
 ref store and the stash with the parent. The defences against *that* are unchanged and
 not superseded — every git subprocess names its `Dir` **and** builds its own `Env`,
-`internal/arch/gitcmd_test.go` enforces it statically, and fixtures assert isolation
+`internal/arch/subprocess_test.go` enforces it statically, and fixtures assert isolation
 before use. Read
 [`.claude/skills/agent-ground-rules/SKILL.md`](.claude/skills/agent-ground-rules/SKILL.md).
 
@@ -363,7 +363,7 @@ These are the product's structural promises. Hold them.
   `refs/kopicode/`, through a throwaway `GIT_INDEX_FILE`. The user's branch, HEAD, index
   and stashes are off limits, and `.kopicode/` goes in `.git/info/exclude`, never
   `.gitignore`.
-- **Every git subprocess names its target directory *and* builds its own environment,
+- **Every subprocess names the directory it runs in *and* builds its own environment,
   in tests as well as in product code.** `Dir` alone is not enough: `GIT_DIR` overrides
   the working directory entirely, so an inherited one redirects a command that looks
   perfectly targeted. That is not hypothetical. It has already set `core.bare = true`
@@ -374,6 +374,19 @@ These are the product's structural promises. Hold them.
   the run. `internal/repo` is the worked example;
   [`.claude/skills/agent-ground-rules/SKILL.md`](.claude/skills/agent-ground-rules/SKILL.md)
   has the reproductions.
+
+  **The rule is not git-specific and neither is the guard** (KAN-837). An inherited
+  environment changes what any subprocess does while the command still reads correctly:
+  `GOFLAGS`/`GOOS` change what `go build` produces, `PYTHONPATH`/`VIRTUAL_ENV` change
+  what `python` imports, `NODE_OPTIONS` changes what `node` runs, and `PATH` decides
+  which binary runs at all — and the syntax gate spawns all three.
+  `internal/arch/subprocess_test.go` holds every `exec.Command`/`exec.CommandContext` in
+  the tree to both halves, whatever it runs, and fails closed on a `Cmd` it cannot
+  follow. The git half was **not** relaxed to fit the general case: the rule is
+  identical and only the failure message differs. Sites where the inherited directory or
+  environment genuinely is the right one carry `//kopicode:allow-nodir: <reason>` or
+  `//kopicode:allow-noenv: <reason>` in place. The two are independent, a waiver with no
+  reason waives nothing, and a comment that only looks like a waiver fails the suite.
 - **Pin the provider on every benchmark request.** `provider.order`,
   `allow_fallbacks: false`, fixed `quantizations`, all recorded per result. An unpinned
   A/B number is not evidence.

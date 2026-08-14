@@ -373,6 +373,10 @@ func assertGone(t *testing.T, pid int, what string) {
 // psLine is the evidence in a failure message: whatever ps can still say about
 // a process that was supposed to be gone.
 func psLine(pid int) string {
+	//kopicode:allow-nodir: ps is asked about one pid, so no working directory is the
+	// right one; there is nothing here for a directory to change.
+	//kopicode:allow-noenv: this is diagnostic text for a failure message, never an
+	// assertion, and ps has to be found on the ambient PATH to produce any at all.
 	out, err := exec.Command("ps", "-o", "pid=,ppid=,stat=,args=", "-p", strconv.Itoa(pid)).Output()
 	if err != nil || len(strings.TrimSpace(string(out))) == 0 {
 		return "  (ps had nothing to say about it)"
