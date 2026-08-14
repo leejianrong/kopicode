@@ -84,9 +84,19 @@ type NativeCall struct {
 
 // ArgEncoding records how a call's arguments arrived on the wire.
 //
-// Both encodings are accepted and both normalise to the same object, but which
-// one a model produced is exactly the kind of per-model harness fact this
-// project exists to measure, so it is not thrown away.
+// Both encodings are accepted and both normalise to the same object, so this is
+// the record of a leniency the harness performed: unwrapping the double-encoded
+// JSON string is work done on the model's behalf, and this project measures the
+// work it does on a model's behalf rather than assuming it paid off. On the text
+// routes the encoding is a *model* fact — the model chose to copy OpenAI's
+// double-encoding into a fenced block, or not — and on the native route it is a
+// provider fact worth having for the same reason the pin is recorded.
+//
+// The engine journals it on ToolCallParsed as arg_encoding, alongside the route,
+// using [ArgEncoding.String]. As with [Route], this package does not know the
+// journal exists and must not: the coupling is a wire contract, so the strings
+// below are a compatibility surface — add to argEncodingText, never rename
+// within it.
 type ArgEncoding uint8
 
 const (
@@ -111,7 +121,13 @@ func (a ArgEncoding) String() string {
 	return fmt.Sprintf("arg_encoding(%d)", uint8(a))
 }
 
-// MarshalText encodes the argument encoding as its wire form, for the journal.
+// MarshalText encodes the argument encoding as its wire form.
+//
+// The journal carries this value as the string [ArgEncoding.String] returns, not
+// through this method — a journal payload holds no parse types. This exists so
+// that any JSON encoding of the value renders the stable name rather than an
+// integer a future reordering of the constants would silently redefine, which is
+// the same reason [Route.MarshalText] exists.
 func (a ArgEncoding) MarshalText() ([]byte, error) {
 	s, ok := argEncodingText[a]
 	if !ok {

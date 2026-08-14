@@ -23,7 +23,8 @@ import (
 //   - Arguments is json.RawMessage, so the bytes that arrived reach the
 //     extractor unaltered and parse.ArgEncoding can record whether the model
 //     sent the wire-specified JSON string or a bare object. Decoding into a
-//     string and re-encoding would erase that difference, and it is a finding.
+//     string and re-encoding would erase that difference, and it is a finding:
+//     it lands in the journal on ToolCallParsed as arg_encoding.
 //   - Streamed argument fragments are accumulated in first-seen index order,
 //     never by array position, because a provider is free to interleave them.
 //
