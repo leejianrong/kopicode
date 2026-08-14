@@ -4,6 +4,7 @@ package tools
 
 import (
 	"os/exec"
+	"strings"
 	"syscall"
 
 	"github.com/leejianrong/kopicode/internal/procgroup"
@@ -28,7 +29,23 @@ func newShellCmd(command string) *exec.Cmd {
 	// there, because what a shell may see is a policy question and this file is not
 	// where policy lives.
 	cmd := exec.Command("cmd")
-	cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: "cmd /c " + command}
+	cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: strings.Join(ShellArgv(command), " ")}
 	procgroup.Isolate(cmd)
 	return cmd
 }
+
+// ShellArgv is the argv run_shell will execute for command.
+//
+// It exists so that the engine's permission request and the process that
+// actually runs describe the same thing. permission.Action.Command is argv and
+// not a shell string on purpose — "what was consented to is unambiguous on
+// replay" — and the engine cannot build that argv without knowing which shell
+// this package picked. Spelling `cmd /c` a second time in the engine would make
+// the consent record and the process disagree the first time either side
+// changed, which is a consent for something that did not run.
+//
+// On Windows the argv is descriptive rather than executed as a vector: the
+// command line is handed to cmd.exe as one string for the reason above, and
+// this is that string split at the two points that are not part of the model's
+// command.
+func ShellArgv(command string) []string { return []string{"cmd", "/c", command} }
