@@ -27,6 +27,16 @@ quantization moves is how an ADR stops meaning anything.
 Every benchmark request carries exactly this block, and the resolved pin is journaled on
 `ProviderRequest`. A result served outside it is **discarded, not adjusted**.
 
+**Where it lives in code.** On the model's row in `internal/harness`'s registry, which is
+where ADR-0007 decision 5 puts a model's default pin — an arm being (model × harness
+configuration × provider pin). The shipped fixtures carry their own copy, because a
+fixture records the arm its traffic was taken under rather than pointing at whatever the
+binary currently prefers, and `TestRegistryPinMatchesShippedFixtures` holds the two
+together. That test is not cosmetic: the replay provider refuses traffic recorded under
+another arm's pin, so a registry that drifted from the fixtures would fail every
+mock-driven engine test, much later and looking like a mock bug. Change the value here
+first, with the date and the argument; the row and the fixtures follow.
+
 ## Two names, and they are not interchangeable
 
 The request and the response name the provider in different namespaces, and conflating
