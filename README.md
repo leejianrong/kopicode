@@ -186,6 +186,13 @@ differ in quantization, which silently invalidates any A/B result. Every benchma
 request sets `provider.order`, `allow_fallbacks: false`, and `quantizations`
 ([ADR-0005](docs/adr/0005-benchmark-and-ab-methodology.md)).
 
+Slice 1 pins `parasail/bf16` at `bf16` — the only one of the four endpoints serving
+`qwen3-coder-next` that reports a full-precision quantization, and also the cheapest of
+them, which is where the price in the table above comes from. Two of the other three
+report their quantization as `unknown`, which is a legal filter value and a worthless
+pin. [`docs/provider-pin.md`](docs/provider-pin.md) has the observed endpoint list, the
+date, and the re-check.
+
 ## Slice 1
 
 Done means both of these are true:

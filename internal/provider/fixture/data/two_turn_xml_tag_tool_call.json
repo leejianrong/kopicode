@@ -7,11 +7,11 @@
   "model_id": "qwen/qwen3-coder-next",
   "pin": {
     "order": [
-      "PROVISIONAL-PIN"
+      "parasail/bf16"
     ],
     "allow_fallbacks": false,
     "quantizations": [
-      "fp8"
+      "bf16"
     ]
   },
   "exchanges": [
@@ -29,7 +29,7 @@
           "object": "chat.completion",
           "created": 1767398400,
           "model": "qwen/qwen3-coder-next",
-          "provider": "PROVISIONAL-PIN",
+          "provider": "Parasail",
           "choices": [
             {
               "index": 0,
@@ -50,19 +50,19 @@
         "stream": [
           ": OPENROUTER PROCESSING",
           "",
-          "data: {\"id\":\"gen-0000000005-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398400,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "data: {\"id\":\"gen-0000000005-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398400,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"Parasail\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
           "",
-          "data: {\"id\":\"gen-0000000005-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398400,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Let me look at the file.\\n<tool_\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "data: {\"id\":\"gen-0000000005-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398400,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"Parasail\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Let me look at the file.\\n<tool_\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
           "",
-          "data: {\"id\":\"gen-0000000005-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398400,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"call>\\n{\\\"name\\\": \\\"read_file\\\", \\\"ar\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "data: {\"id\":\"gen-0000000005-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398400,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"Parasail\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"call>\\n{\\\"name\\\": \\\"read_file\\\", \\\"ar\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
           "",
-          "data: {\"id\":\"gen-0000000005-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398400,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"guments\\\": {\\\"path\\\": \\\"internal/gr\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "data: {\"id\":\"gen-0000000005-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398400,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"Parasail\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"guments\\\": {\\\"path\\\": \\\"internal/gr\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
           "",
-          "data: {\"id\":\"gen-0000000005-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398400,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"eet/greet.go\\\"}}\\n</tool_call>\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "data: {\"id\":\"gen-0000000005-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398400,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"Parasail\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"eet/greet.go\\\"}}\\n</tool_call>\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
           "",
-          "data: {\"id\":\"gen-0000000005-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398400,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null},\"finish_reason\":\"stop\",\"native_finish_reason\":\"stop\"}]}",
+          "data: {\"id\":\"gen-0000000005-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398400,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"Parasail\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null},\"finish_reason\":\"stop\",\"native_finish_reason\":\"stop\"}]}",
           "",
-          "data: {\"id\":\"gen-0000000005-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398400,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[],\"usage\":{\"prompt_tokens\":1288,\"completion_tokens\":38,\"total_tokens\":1326}}",
+          "data: {\"id\":\"gen-0000000005-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398400,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"Parasail\",\"choices\":[],\"usage\":{\"prompt_tokens\":1288,\"completion_tokens\":38,\"total_tokens\":1326}}",
           "",
           "data: [DONE]",
           ""
@@ -79,7 +79,7 @@
           "completion": 38,
           "total": 1326
         },
-        "served_by": "PROVISIONAL-PIN"
+        "served_by": "Parasail"
       }
     },
     {
@@ -96,7 +96,7 @@
           "object": "chat.completion",
           "created": 1767398413,
           "model": "qwen/qwen3-coder-next",
-          "provider": "PROVISIONAL-PIN",
+          "provider": "Parasail",
           "choices": [
             {
               "index": 0,
@@ -117,17 +117,17 @@
         "stream": [
           ": OPENROUTER PROCESSING",
           "",
-          "data: {\"id\":\"gen-0000000006-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398413,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "data: {\"id\":\"gen-0000000006-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398413,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"Parasail\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
           "",
-          "data: {\"id\":\"gen-0000000006-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398413,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Greet(\\\"\\\") never reaches an empty-name branch: the switch falls through to the\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "data: {\"id\":\"gen-0000000006-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398413,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"Parasail\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Greet(\\\"\\\") never reaches an empty-name branch: the switch falls through to the\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
           "",
-          "data: {\"id\":\"gen-0000000006-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398413,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" default arm and returns \\\"Hello, \\\" + name + \\\"!\\\", which renders as \\\"Hello, !\\\".\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "data: {\"id\":\"gen-0000000006-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398413,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"Parasail\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" default arm and returns \\\"Hello, \\\" + name + \\\"!\\\", which renders as \\\"Hello, !\\\".\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
           "",
-          "data: {\"id\":\"gen-0000000006-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398413,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" The fix is a case for the empty string that returns the stranger greeting.\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "data: {\"id\":\"gen-0000000006-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398413,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"Parasail\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" The fix is a case for the empty string that returns the stranger greeting.\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
           "",
-          "data: {\"id\":\"gen-0000000006-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398413,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null},\"finish_reason\":\"stop\",\"native_finish_reason\":\"stop\"}]}",
+          "data: {\"id\":\"gen-0000000006-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398413,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"Parasail\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null},\"finish_reason\":\"stop\",\"native_finish_reason\":\"stop\"}]}",
           "",
-          "data: {\"id\":\"gen-0000000006-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398413,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[],\"usage\":{\"prompt_tokens\":1699,\"completion_tokens\":96,\"total_tokens\":1795}}",
+          "data: {\"id\":\"gen-0000000006-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767398413,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"Parasail\",\"choices\":[],\"usage\":{\"prompt_tokens\":1699,\"completion_tokens\":96,\"total_tokens\":1795}}",
           "",
           "data: [DONE]",
           ""
@@ -141,7 +141,7 @@
           "completion": 96,
           "total": 1795
         },
-        "served_by": "PROVISIONAL-PIN"
+        "served_by": "Parasail"
       }
     }
   ]
