@@ -8,111 +8,74 @@ import (
 	"github.com/leejianrong/kopicode/internal/parse"
 )
 
-// TestRouteTextRoundTrip guards the wire form. The route reaches the journal,
-// and the journal is a compatibility surface from the first commit — an
-// integer that a future reordering of the constants silently redefines is
-// exactly the drift that makes an old session unreadable.
-func TestRouteTextRoundTrip(t *testing.T) {
-	routes := []struct {
-		route parse.Route
-		text  string
-	}{
-		{parse.RouteNative, "native"},
-		{parse.RouteFencedJSON, "fenced_json"},
-		{parse.RouteXMLTag, "xml_tag"},
-		{parse.RouteUnknown, "unknown"},
-	}
+// The wire form of every Route, Kind and ArgEncoding constant — the exact
+// string, the round trip, the distinctness, and the fact that a constant with no
+// wire name refuses to marshal — is guarded in wirename_internal_test.go, over a
+// table whose completeness is derived from the source with go/ast (KAN-841).
+// Enumerating them here as well was the hand-written half that let a new
+// constant land unchecked, so what remains in this file is the behaviour that is
+// not per-constant.
 
-	for _, r := range routes {
-		t.Run(r.text, func(t *testing.T) {
-			b, err := r.route.MarshalText()
-			if err != nil {
-				t.Fatalf("MarshalText() = %v", err)
-			}
-			if string(b) != r.text {
-				t.Errorf("MarshalText() = %q, want %q", b, r.text)
-			}
-			if r.route.String() != r.text {
-				t.Errorf("String() = %q, want %q", r.route, r.text)
-			}
-
-			var back parse.Route
-			if err := back.UnmarshalText(b); err != nil {
-				t.Fatalf("UnmarshalText(%q) = %v", b, err)
-			}
-			if back != r.route {
-				t.Errorf("round trip produced %v, want %v", back, r.route)
-			}
-		})
-	}
-
+// TestUnknownWireNamesAreRefused covers the input side of the compatibility
+// surface: a name this build does not know is an error, never a silent zero
+// value. RouteUnknown and KindUnspecified are the zero values, so a lenient
+// decode would turn an unreadable session into a plausible-looking one.
+func TestUnknownWireNamesAreRefused(t *testing.T) {
 	var r parse.Route
 	if err := r.UnmarshalText([]byte("smoke_signals")); err == nil {
-		t.Error("UnmarshalText accepted an unknown route")
+		t.Error("Route.UnmarshalText accepted an unknown route")
+	}
+	if r != parse.RouteUnknown {
+		t.Errorf("a refused decode left the route as %v; it must not touch the value", r)
 	}
 
+	var k parse.Kind
+	if err := k.UnmarshalText([]byte("vibes")); err == nil {
+		t.Error("Kind.UnmarshalText accepted an unknown kind")
+	}
+
+	var a parse.ArgEncoding
+	if err := a.UnmarshalText([]byte("interpretive_dance")); err == nil {
+		t.Error("ArgEncoding.UnmarshalText accepted an unknown encoding")
+	}
+}
+
+// TestRouteUnknownIsNotValid states the zero-value rule at the exported
+// boundary: an extraction that does not say which route produced it does not
+// exist.
+func TestRouteUnknownIsNotValid(t *testing.T) {
 	if parse.RouteUnknown.Valid() {
 		t.Error("RouteUnknown reports itself valid")
 	}
 }
 
-// TestRouteJSONShape checks the route serialises as its name inside a struct,
-// which is how the journal will carry it.
-func TestRouteJSONShape(t *testing.T) {
-	b, err := json.Marshal(struct {
-		Route parse.Route `json:"route"`
-	}{parse.RouteFencedJSON})
+// TestJSONShape checks each type serialises as its name inside a struct, which
+// is how a caller encoding one reaches the wire form, and decodes back from it.
+// A type that marshals through TextMarshaler and cannot be unmarshalled is a
+// one-way trip — the asymmetry KAN-841 closed on ArgEncoding.
+func TestJSONShape(t *testing.T) {
+	type envelope struct {
+		Route       parse.Route       `json:"route"`
+		Kind        parse.Kind        `json:"kind"`
+		ArgEncoding parse.ArgEncoding `json:"arg_encoding"`
+	}
+
+	want := envelope{parse.RouteFencedJSON, parse.KindInvalidJSON, parse.ArgsJSONString}
+	b, err := json.Marshal(want)
 	if err != nil {
 		t.Fatalf("Marshal() = %v", err)
 	}
-	if string(b) != `{"route":"fenced_json"}` {
-		t.Errorf("Marshal() = %s, want {\"route\":\"fenced_json\"}", b)
-	}
-}
-
-// TestKindTextRoundTrip does the same for the failure classification, which the
-// bench classifier reads.
-func TestKindTextRoundTrip(t *testing.T) {
-	kinds := []parse.Kind{
-		parse.KindNoCall,
-		parse.KindUnlabelledFence,
-		parse.KindUnfencedCall,
-		parse.KindUnclosedFence,
-		parse.KindUnclosedTag,
-		parse.KindEmptyBlock,
-		parse.KindInvalidJSON,
-		parse.KindMissingName,
-		parse.KindInvalidArguments,
-		parse.KindAmbiguousCall,
-		parse.KindUnknownTool,
-		parse.KindMissingArgument,
-		parse.KindWrongArgumentType,
-		parse.KindUnknownEnumValue,
+	const wantJSON = `{"route":"fenced_json","kind":"invalid_json","arg_encoding":"json_string"}`
+	if string(b) != wantJSON {
+		t.Errorf("Marshal() = %s, want %s", b, wantJSON)
 	}
 
-	seen := map[string]bool{}
-	for _, k := range kinds {
-		b, err := k.MarshalText()
-		if err != nil {
-			t.Fatalf("MarshalText() on %v = %v", k, err)
-		}
-		if seen[string(b)] {
-			t.Errorf("two kinds share the wire name %q", b)
-		}
-		seen[string(b)] = true
-
-		var back parse.Kind
-		if err := back.UnmarshalText(b); err != nil {
-			t.Fatalf("UnmarshalText(%q) = %v", b, err)
-		}
-		if back != k {
-			t.Errorf("round trip of %q produced %v", b, back)
-		}
+	var got envelope
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatalf("Unmarshal(%s) = %v", b, err)
 	}
-
-	var k parse.Kind
-	if err := k.UnmarshalText([]byte("vibes")); err == nil {
-		t.Error("UnmarshalText accepted an unknown kind")
+	if got != want {
+		t.Errorf("round trip produced %+v, want %+v", got, want)
 	}
 }
 

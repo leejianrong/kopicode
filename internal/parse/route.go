@@ -34,6 +34,9 @@ var routeOrder = [...]Route{RouteNative, RouteFencedJSON, RouteXMLTag}
 
 // routeText is the wire form of each route. These strings reach the journal, so
 // they are a compatibility surface: add to this map, never rename within it.
+//
+// A route added without an entry here fails wirename_internal_test.go, which
+// derives the constant set from this file rather than from a hand-written list.
 var routeText = map[Route]string{
 	RouteUnknown:    "unknown",
 	RouteNative:     "native",
