@@ -87,6 +87,11 @@ func taskkill(cmd *exec.Cmd, force bool) (string, error) {
 		args = append([]string{"/F"}, args...)
 		label = "taskkill /T /F"
 	}
+	//kopicode:allow-nodir: taskkill is addressed to a pid, not to a tree. No directory
+	// is the correct one, and the one it inherits changes nothing it does.
+	//kopicode:allow-noenv: it has to be found on the ambient PATH — this is the kill
+	// path, reached when a child has already outlived its deadline, and a built
+	// environment that omitted PATH would turn a stuck process into an orphan.
 	if err := exec.Command("taskkill", args...).Run(); err != nil {
 		return "", fmt.Errorf("taskkill on process %d: %w", cmd.Process.Pid, err)
 	}

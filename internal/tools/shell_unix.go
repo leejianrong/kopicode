@@ -20,6 +20,12 @@ import (
 // another machine. A fish or a zsh with a user's rc file loaded would make the
 // bench arm depend on whose laptop it ran on.
 func newShellCmd(command string) *exec.Cmd {
+	//kopicode:allow-nodir: this builds the command and does not run it. The working
+	// directory is the permission-resolved workspace path, which only the caller has —
+	// runShell in shell.go assigns it on the returned Cmd, before Start.
+	//kopicode:allow-noenv: same seam. childEnv() is assembled in shell.go and assigned
+	// there, because what a shell may see is a policy question and this file is not
+	// where policy lives.
 	cmd := exec.Command("/bin/sh", "-c", command)
 	procgroup.Isolate(cmd)
 	return cmd

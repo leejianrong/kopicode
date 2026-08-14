@@ -154,21 +154,32 @@ advisory: the isolated path verifies `GIT_INDEX_FILE` is set before every snapsh
 the read-only path refuses any index-writing subcommand, `status` included, because
 `status` rewrites the index while reporting.
 
-**These two rules are now enforced, not just documented.**
-`internal/arch/gitcmd_test.go` parses the whole tree and fails on any `exec.Command` or
-`exec.CommandContext` running `git` that does not assign both `Dir` and `Env` before the
-command escapes its function. It fails closed: a `Cmd` handed to a helper, or one it
-cannot follow, counts as a violation. Genuine exceptions are waived in place and need a
-reason on the line:
+**These two rules are now enforced, not just documented — and they are not about git.**
+`internal/arch/subprocess_test.go` parses the whole tree and fails on any `exec.Command`
+or `exec.CommandContext` that does not assign both `Dir` and `Env` before the command
+escapes its function. It fails closed: a `Cmd` handed to a helper, or one it cannot
+follow, counts as a violation.
+
+Git is where the incident happened, so the failure message still names `GIT_DIR` and
+`core.bare` when the program is git. The rule is the same for everything else, because
+an inherited environment changes what any subprocess does without changing anything
+visible in the command: `GOFLAGS` and `GOOS` change what `go build` produces,
+`PYTHONPATH` and `VIRTUAL_ENV` change what `python` imports, `NODE_OPTIONS` changes what
+`node` runs, and `PATH` decides which binary runs at all. The syntax gate spawns all
+three. The git half was not relaxed to make room for the rest (KAN-837).
+
+Genuine exceptions are waived in place and need a reason on the line:
 
 ```go
-//kopicode:allow-git-nodir: the ambient repository is the subject here, so the package
+//kopicode:allow-nodir: the ambient repository is the subject here, so the package
 // directory is the correct target. Read-only by construction.
 ```
 
-The two directives are separate (`allow-git-nodir`, `allow-git-noenv`) so waiving one
-does not quietly waive the other, and a waiver with no reason does not waive at all.
-Reach for one only when the ambient repository genuinely is the target.
+The two directives are separate (`allow-nodir`, `allow-noenv`) so waiving one does not
+quietly waive the other, and a waiver with no reason does not waive at all. A comment
+that starts like a waiver and is not one — the retired `allow-git-nodir` spelling, or a
+typo — fails the suite rather than silently waiving nothing. Reach for a waiver only
+when the inherited directory or environment genuinely is the right one, and say why.
 
 ## What isolation does and does not give you
 
@@ -229,8 +240,8 @@ parent's.
 
 The real defence is not a checklist anybody can forget. **Fingerprint the ambient
 repository in `TestMain`** so a leak fails the suite instead of waiting to be noticed.
-`internal/repo` does this, and `internal/arch/gitcmd_test.go` enforces the rules
-statically over the whole tree, so a git subprocess missing `Dir` or `Env` now fails a
+`internal/repo` does this, and `internal/arch/subprocess_test.go` enforces the rules
+statically over the whole tree, so a subprocess missing `Dir` or `Env` now fails a
 test rather than a repository.
 
 If your suite dirties any of the above, that is your bug and not an environment quirk.
@@ -283,7 +294,8 @@ worktree. A pool manager would not have prevented the incident that caused this
 document, because the problem was never how worktrees are handed out — it was a test
 suite whose git subprocesses could be redirected at the real repository. **Do not treat
 a lease as isolation.** `Dir` *and* `Env` on every git subprocess, the static check in
-`internal/arch/gitcmd_test.go`, and `TestMain` fingerprinting remain the actual defences.
+`internal/arch/subprocess_test.go`, and `TestMain` fingerprinting remain the actual
+defences.
 
 **What has changed: the lifecycle problem turned out to be real, and it is a different
 problem.** Running many agents against one repo produced, in a single session:
