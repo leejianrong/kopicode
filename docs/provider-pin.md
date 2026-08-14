@@ -174,6 +174,34 @@ new experiment series.
 
 Nothing in this file has been exercised against a live completion request. `provider.order`
 accepting the suffixed slug form is from OpenRouter's documentation, and the response's
-`provider` field is unverified in shape (see `wire.go`). KAN-776 makes the first real
-request, and a first live run that returns something other than `Parasail` in `provider`
-is a finding to record here, not a check to relax.
+`provider` field is unverified in shape (see `wire.go`). A first live run that returns
+something other than `Parasail` in `provider` is a finding to record here, not a check to
+relax.
+
+**KAN-776 built the client that can ask, and did not ask.** The client landed on
+2026-08-14 and every one of its tests runs against an `httptest` server, because
+`OPENROUTER_API_KEY` was not set in the environment the card was built in and nothing in
+`make ci` may spend money. So the pin is still argued from the endpoints response above
+and from documentation, and not from a completion.
+
+Asking is one command, and it costs cents:
+
+```bash
+make smoke-live          # one 16-token request against the pin; needs OPENROUTER_API_KEY
+```
+
+It prints the requested model, the model the response reported, the exact `provider`
+string with its casing, the finish reason, the usage and the whole wire transcript. Paste
+what it prints into this file, dated. Three things to look for, in order of what they
+would change:
+
+1. **The `provider` field's casing**, or its absence. ADR-0005 §2's discard rule compares
+   it, and it is compared case-insensitively precisely because nobody has seen one.
+2. **Whether `parasail/bf16` routes at all.** A suffixed slug that no endpoint matches
+   fails the request rather than falling back, which is what `allow_fallbacks: false`
+   buys — so a failure here is the pin being wrong, not the client.
+3. **The streaming tool-call delta shape**, which `make smoke-live` currently *cannot*
+   answer: `provider.Request` carries no tool catalogue yet, so there is no way to make
+   the model emit a tool call. That is the hand-authored fixtures' least-supported claim
+   (they follow OpenAI's contract and say so), and it stays unverified until the catalogue
+   lands.
