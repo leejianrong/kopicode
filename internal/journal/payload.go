@@ -163,8 +163,24 @@ type ProviderRequest struct {
 	ModelID  string      `json:"model_id"`
 	Provider ProviderPin `json:"provider"`
 	Sampling Sampling    `json:"sampling"`
-	// Tokens is the prompt accounting for this request. Completion is zero
-	// until the response lands.
+	// Tokens is the prompt accounting for this request **as the sender knew it
+	// at send time**, which in this binary is nothing: it is written zero and
+	// the authoritative figure lands on [ProviderResponse].Tokens.
+	//
+	// The comment here used to say "Completion is zero until the response
+	// lands", which implied the prompt count was knowable when the request was
+	// journaled. It is not. kopicode links no tokenizer (ADR-0001 keeps the
+	// binary dependency-free, and every model on the roadmap has a different
+	// vocabulary) and the provider reports prompt usage only in the reply, so
+	// the only number available before sending is engine.Size.EstimatedTokens —
+	// which documents itself as not a token count and must never be written
+	// here. A byte estimate recorded in a field named `tokens` is fabricated
+	// precision that a later reader has no way to tell from a measurement.
+	//
+	// The field stays, zero, because the journal is a compatibility surface
+	// from the first commit and because a provider that does state a prompt
+	// count up front is a thing that could exist. A reader summing token cost
+	// reads [ProviderResponse].Tokens and nothing else.
 	Tokens TokenCounts `json:"tokens"`
 	// Attempt is 1 for the first send and increments per retry, so a retry
 	// storm is visible rather than inferred.
