@@ -415,6 +415,18 @@ These are the product's structural promises. Hold them.
   environment genuinely is the right one carry `//kopicode:allow-nodir: <reason>` or
   `//kopicode:allow-noenv: <reason>` in place. The two are independent, a waiver with no
   reason waives nothing, and a comment that only looks like a waiver fails the suite.
+
+  **Assigning `Env` is not the same as deciding what it holds** (KAN-845). `cmd.Env =
+  os.Environ()` satisfies the assignment rule while inheriting everything, and `cmd.Env =
+  nil` is os/exec's spelling for the same thing. A third check reads the *value*, waived
+  by `//kopicode:allow-ambientenv: <reason>`, independent of the other two. It decides
+  exactly four syntactic forms — `os.Environ()`, an `append` over one, `nil`, and a local
+  variable in the same function assigned one of those — and **says nothing about any
+  other shape**, which is not a gap to be closed but the funnel: every other shape means
+  a named builder, and the name and its doc comment are the review surface. This
+  repository has four — `repo.baseEnv`, `syntax.baseEnv`, `tools.childEnv`, and
+  `passThrough`/`oracleEnv` in `internal/corpus`. Build an environment from one of those,
+  never from the one you were handed.
 - **Pin the provider on every benchmark request.** `provider.order`,
   `allow_fallbacks: false`, fixed `quantizations`, all recorded per result. An unpinned
   A/B number is not evidence.
