@@ -32,8 +32,15 @@ func defaultConfig(t *testing.T) harness.Config {
 // no configuration value changed, the *encoding* changed, and
 // harness.PreimageVersion has to move with it — otherwise two binaries write
 // different hashes for the same arm and their results silently stop pooling.
+//
+// The literal has moved once, on KAN-843, when Config.SystemPrompt went from
+// the empty placeholder to prompt_default.md. That is a configuration *value*
+// changing and not an encoding change, so PreimageVersion stayed at 1 — and no
+// result was invalidated by it, because no bench run had happened. A future
+// move needs the same two sentences: which value changed, and what it means for
+// results recorded under the old hash.
 func TestDefaultConfigHashIsStable(t *testing.T) {
-	const want = "96502aa752d90c9109159e8651ce5174c2d2ca9985410b58083080fe8e06ceef"
+	const want = "07251b5de390664a88e5c45efa0e8bbe0218a95567699fc7753b61807a67417b"
 
 	got := defaultConfig(t).Hash()
 	if got != want {

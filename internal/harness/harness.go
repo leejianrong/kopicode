@@ -130,10 +130,10 @@ type Config struct {
 	Version int
 
 	// SystemPrompt is the prompt as sent, hashed by digest (ADR-0007 decision
-	// 6). It is empty in slice 1 because there is no system prompt in this
-	// repository yet — KAN-843 writes it — and it is a field rather than an
-	// omission so that landing one moves the hash, which is correct: a prompt
-	// change is a harness change.
+	// 6). Editing it is a harness change and moves the hash, which is the
+	// point: the prompt is a per-arm value, and results either side of an edit
+	// are not comparable. [DefaultSystemPrompt] is what the shipped
+	// configuration carries.
 	SystemPrompt string
 
 	// ToolSet is the tools presented to the model, in the order they are
@@ -207,9 +207,12 @@ var configs = map[string]Config{
 		Name:    DefaultConfigName,
 		Version: 1,
 
-		// No system prompt exists yet (KAN-843). Empty is the honest value and
-		// the hash records it as such.
-		SystemPrompt: "",
+		// prompt_default.md, compiled in. Landing it moved this
+		// configuration's hash away from the empty-prompt one every earlier
+		// build wrote, and TestDefaultConfigHashIsStable's literal moved with
+		// it — see the note there. PreimageVersion did not: the encoding is
+		// unchanged, only the value.
+		SystemPrompt: DefaultSystemPrompt,
 
 		// The tool set of docs/SLICE-1.md build steps 5 and 6, in the order
 		// the model is shown them: read before write, edit before its fuzzy
