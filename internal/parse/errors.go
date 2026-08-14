@@ -94,6 +94,11 @@ const (
 	KindUnknownEnumValue
 )
 
+// kindText is the wire form of each classification. The bench classifier groups
+// by these strings and the journal records them, so they are a compatibility
+// surface on the same terms as routeText: add to this map, never rename within
+// it. A kind added without an entry fails wirename_internal_test.go, which
+// derives the constant set from this file.
 var kindText = map[Kind]string{
 	KindUnspecified:       "unspecified",
 	KindNoCall:            "no_call",

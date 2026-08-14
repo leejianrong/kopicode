@@ -136,6 +136,33 @@ func (a ArgEncoding) MarshalText() ([]byte, error) {
 	return []byte(s), nil
 }
 
+// UnmarshalText decodes the wire form produced by [ArgEncoding.MarshalText].
+//
+// It exists for the reason its counterpart does, and KAN-841 added it after
+// KAN-838 deliberately left it out as unused API. The argument against was
+// sound; what settles it the other way is that MarshalText alone makes this a
+// one-way type. encoding/json consults TextMarshaler on the way out, so any
+// struct holding an ArgEncoding — [ToolCall] does — encodes as "object", and
+// decoding that same JSON back fails with "cannot unmarshal string into Go value
+// of type parse.ArgEncoding". A value that can be written and not read is a trap
+// laid for whoever first reads back a fixture or a debug dump, and they would
+// find it while adding a *compatibility surface* under time pressure. [Route] and
+// [Kind] carry both halves for the same reason; this is not symmetry for its own
+// sake.
+//
+// An unrecognised name is an error and leaves a untouched. It must not fall back
+// to a zero value: [ArgsObject] is both the zero value and a real encoding, so a
+// lenient decode would report the wrong finding rather than none.
+func (a *ArgEncoding) UnmarshalText(b []byte) error {
+	for enc, s := range argEncodingText {
+		if s == string(b) {
+			*a = enc
+			return nil
+		}
+	}
+	return fmt.Errorf("parse: unknown argument encoding %q", b)
+}
+
 // ToolCall is one extracted call, normalised.
 type ToolCall struct {
 	// ID is the provider-assigned call id. Empty on the text routes, which
