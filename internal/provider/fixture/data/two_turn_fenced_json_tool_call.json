@@ -1,17 +1,17 @@
 {
   "format_version": 1,
   "origin": "hand_authored",
-  "origin_note": "Written by hand for KAN-772, on the same basis and with the same caveats as two_turn_native_tool_call: no live traffic exists yet, the envelope follows OpenRouter's documentation, the pin is the PROVISIONAL- placeholder KAN-775 replaces. This file additionally assumes something no documentation can settle — that the target model sometimes writes its call into the reply text instead of using the native channel. Which route a model actually reaches for is a finding (docs/SLICE-1.md §3), and this fixture is the harness being ready for the answer, not a claim about it.",
+  "origin_note": "Written by hand for KAN-772, on the same basis and with the same caveats as two_turn_native_tool_call: no live traffic exists yet, the envelope follows OpenRouter's documentation, and the pin is KAN-775's real one (parasail/bf16 at bf16, docs/provider-pin.md) applied to a body nobody recorded. This file additionally assumes something no documentation can settle — that the target model sometimes writes its call into the reply text instead of using the native channel. Which route a model actually reaches for is a finding (docs/SLICE-1.md §3), and this fixture is the harness being ready for the answer, not a claim about it.",
   "name": "two_turn_fenced_json_tool_call",
   "description": "Two turns, with the first call arriving as a ```tool fenced JSON block in the reply text rather than through tool_calls. finish_reason is stop, because the provider saw no tool call at all — which is the point: the harness, not the provider, is what notices.",
   "model_id": "qwen/qwen3-coder-next",
   "pin": {
     "order": [
-      "PROVISIONAL-PIN"
+      "parasail/bf16"
     ],
     "allow_fallbacks": false,
     "quantizations": [
-      "fp8"
+      "bf16"
     ]
   },
   "exchanges": [
@@ -29,7 +29,7 @@
           "object": "chat.completion",
           "created": 1767312000,
           "model": "qwen/qwen3-coder-next",
-          "provider": "PROVISIONAL-PIN",
+          "provider": "Parasail",
           "choices": [
             {
               "index": 0,
@@ -50,19 +50,19 @@
         "stream": [
           ": OPENROUTER PROCESSING",
           "",
-          "data: {\"id\":\"gen-0000000003-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767312000,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "data: {\"id\":\"gen-0000000003-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767312000,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"Parasail\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
           "",
-          "data: {\"id\":\"gen-0000000003-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767312000,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"I'll read the file before sa\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "data: {\"id\":\"gen-0000000003-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767312000,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"Parasail\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"I'll read the file before sa\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
           "",
-          "data: {\"id\":\"gen-0000000003-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767312000,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ying anything about it.\\n\\n```\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "data: {\"id\":\"gen-0000000003-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767312000,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"Parasail\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ying anything about it.\\n\\n```\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
           "",
-          "data: {\"id\":\"gen-0000000003-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767312000,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"tool\\n{\\\"tool\\\": \\\"read_file\\\", \\\"\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "data: {\"id\":\"gen-0000000003-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767312000,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"Parasail\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"tool\\n{\\\"tool\\\": \\\"read_file\\\", \\\"\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
           "",
-          "data: {\"id\":\"gen-0000000003-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767312000,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"arguments\\\": {\\\"path\\\": \\\"intern\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "data: {\"id\":\"gen-0000000003-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767312000,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"Parasail\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"arguments\\\": {\\\"path\\\": \\\"intern\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
           "",
-          "data: {\"id\":\"gen-0000000003-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767312000,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"al/greet/greet.go\\\"}}\\n```\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "data: {\"id\":\"gen-0000000003-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767312000,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"Parasail\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"al/greet/greet.go\\\"}}\\n```\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
           "",
-          "data: {\"id\":\"gen-0000000003-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767312000,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null},\"finish_reason\":\"stop\",\"native_finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1290,\"completion_tokens\":41,\"total_tokens\":1331}}",
+          "data: {\"id\":\"gen-0000000003-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767312000,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"Parasail\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null},\"finish_reason\":\"stop\",\"native_finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1290,\"completion_tokens\":41,\"total_tokens\":1331}}",
           "",
           "data: [DONE]",
           ""
@@ -79,7 +79,7 @@
           "completion": 41,
           "total": 1331
         },
-        "served_by": "PROVISIONAL-PIN"
+        "served_by": "Parasail"
       }
     },
     {
@@ -96,7 +96,7 @@
           "object": "chat.completion",
           "created": 1767312014,
           "model": "qwen/qwen3-coder-next",
-          "provider": "PROVISIONAL-PIN",
+          "provider": "Parasail",
           "choices": [
             {
               "index": 0,
@@ -115,15 +115,15 @@
           }
         },
         "stream": [
-          "data: {\"id\":\"gen-0000000004-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767312014,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "data: {\"id\":\"gen-0000000004-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767312014,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"Parasail\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
           "",
-          "data: {\"id\":\"gen-0000000004-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767312014,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Greet(\\\"\\\") never reaches an empty-name branch: the switch falls through to the\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "data: {\"id\":\"gen-0000000004-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767312014,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"Parasail\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Greet(\\\"\\\") never reaches an empty-name branch: the switch falls through to the\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
           "",
-          "data: {\"id\":\"gen-0000000004-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767312014,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" default arm and returns \\\"Hello, \\\" + name + \\\"!\\\", which renders as \\\"Hello, !\\\".\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "data: {\"id\":\"gen-0000000004-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767312014,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"Parasail\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" default arm and returns \\\"Hello, \\\" + name + \\\"!\\\", which renders as \\\"Hello, !\\\".\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
           "",
-          "data: {\"id\":\"gen-0000000004-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767312014,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" The fix is a case for the empty string that returns the stranger greeting.\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "data: {\"id\":\"gen-0000000004-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767312014,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"Parasail\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" The fix is a case for the empty string that returns the stranger greeting.\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
           "",
-          "data: {\"id\":\"gen-0000000004-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767312014,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"PROVISIONAL-PIN\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null},\"finish_reason\":\"stop\",\"native_finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1702,\"completion_tokens\":96,\"total_tokens\":1798}}",
+          "data: {\"id\":\"gen-0000000004-kopicodefixture\",\"object\":\"chat.completion.chunk\",\"created\":1767312014,\"model\":\"qwen/qwen3-coder-next\",\"provider\":\"Parasail\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null},\"finish_reason\":\"stop\",\"native_finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1702,\"completion_tokens\":96,\"total_tokens\":1798}}",
           "",
           "data: [DONE]",
           ""
@@ -137,7 +137,7 @@
           "completion": 96,
           "total": 1798
         },
-        "served_by": "PROVISIONAL-PIN"
+        "served_by": "Parasail"
       }
     }
   ]

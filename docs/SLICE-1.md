@@ -194,6 +194,11 @@ fixed `quantizations`. The resolved pin is journaled on `ProviderRequest`. A ben
 result whose pin does not match the experiment's declared pin is **discarded, not
 adjusted**.
 
+The slice-1 value is `provider.order: ["parasail/bf16"]` with `quantizations: ["bf16"]`,
+chosen on 2026-08-14 from the endpoints OpenRouter served for `qwen/qwen3-coder-next`.
+[`provider-pin.md`](provider-pin.md) has the evidence, the alternatives it was chosen
+over, and what would invalidate it.
+
 ### 8. One session per repo
 
 Two kopicode sessions in one working tree would interleave edits and produce two

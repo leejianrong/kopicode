@@ -77,6 +77,18 @@ func validatePin(f Fixture) error {
 		return invalid(f, "pin.quantizations is empty — the quantization is fixed per arm, and two runs at "+
 			"different quantizations are two experiments")
 	}
+	for _, q := range f.Pin.Quantizations {
+		if !quantizations[q] {
+			return invalid(f, "pin.quantizations names %q, which is not one of the values OpenRouter accepts "+
+				"in provider.quantizations — a quantization no provider serves passes every check this file "+
+				"makes and still makes the whole series unfalsifiable (docs/provider-pin.md)", q)
+		}
+	}
+	if f.Pin.Provisional() {
+		return invalid(f, "pin %v/%v still carries the %s placeholder — KAN-775 chose a real pin "+
+			"(docs/provider-pin.md), and a fixture pinned to nothing declares an arm nobody can reproduce",
+			f.Pin.Order, f.Pin.Quantizations, provisionalPrefix)
+	}
 	return nil
 }
 
