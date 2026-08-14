@@ -135,6 +135,28 @@ What is real now (2026-08-11):
   an encoding change that no configuration value explains. `internal/engine/selection.go`
   is the thin seam the two front ends reach it through, because ADR-0003's allowlist
   has three entries and widening it needs an ADR.
+- **The live OpenRouter client** (`internal/provider/client.go`, KAN-776) — one POST to
+  `/chat/completions` with `stream=true`, decoded by the *same* SSE reader the replay
+  provider drives, and driven in tests by an `httptest` server replaying the fixtures'
+  own frames. The **pin is an input**, taken from `Request.Pin` and written to the wire
+  verbatim: a client with its own copy would be a fourth place the pin is written down
+  and the first nobody checks against `docs/provider-pin.md`. The value comes from
+  `internal/harness`'s registry, which stores it as a `provider.Pin` — so the two halves
+  meet with nothing to adapt. An unpinned request is refused before it is billable. Retry is capped exponential backoff with **full**
+  jitter — `delay = uniform[0, min(cap, base·2ⁿ)]` — on 429 and 5xx and on a transport
+  failure only; a 4xx that is not 429 describes the request and is reported at once. The
+  clock and the RNG are injected, so the delays are asserted exactly rather than waited
+  out, and the attempt budget is a cap the tests drive to the end. Streaming has no
+  assembled body, so `Reply.Raw` is nil on the live path and `Stream.Transcript()` is the
+  verbatim record of what arrived — building a body out of the chunks would put a
+  re-encoding in the record under the one field whose point is that it is not one.
+  `OPENROUTER_API_KEY` lives in an `APIKey` type whose `String`, `GoString`,
+  `MarshalText`, `MarshalJSON` and `LogValue` all render `[redacted]`; `Client` has its
+  own `String` too, because fmt cannot reach an *unexported* field's Stringer and
+  `%v` on the client printed the credential in full until it did. Proven absent from the
+  journal, the blobs and the log by `internal/engine/keyleak_test.go`, with redaction
+  deliberately switched **off** — a leak test run with the journal's redactor on passes
+  whatever the client does.
 - **`cmd/kopicode/lineedit`** — the line editor behind the prompt (ADR-0004): raw
   mode via `golang.org/x/term`, history, arrows, `Ctrl-A/E/K/U`. It lives under
   `cmd/` and not `internal/` because it is presentation, and the ADR-0003 allowlist
@@ -161,10 +183,16 @@ What is real now (2026-08-11):
   `bench/_solutions/`, outside the corpus tree and behind a `_` the Go tool ignores.
 
 What does **not** exist: the engine loop (`internal/engine` holds the provider interface
-and nothing else), the tools, `FileJournal` and blob spill, the real OpenRouter client,
-the REPL itself, the bench runner. `cmd/kopicode` and
+and the context assembler, and no loop that drives them), the REPL itself, the bench
+runner. `cmd/kopicode` and
 `cmd/kopibench` are stubs that exit **4** rather than 0 — an unimplemented binary exiting
 cleanly is how a broken harness passes a smoke test.
+
+This list was wrong on four counts when KAN-776 checked it on 2026-08-14, which is what
+"trust the code over the docs" is for: `internal/tools`, `internal/syntax`,
+`internal/permission`, `FileJournal` and blob spill all exist and are tested, and the
+OpenRouter client landed with this card. Read `ls internal/` before believing a paragraph
+about what is there.
 
 Build order is [`docs/SLICE-1.md`](docs/SLICE-1.md) §Build Plan. Step 1 is done, and
 steps 2–6 are partially landed as listed above.
