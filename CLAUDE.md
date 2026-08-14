@@ -116,6 +116,25 @@ What is real now (2026-08-11):
   always an error — exhausted, out of order, another arm's pin or model — and
   `Drained()` reports replies left unconsumed, because a session that ended early
   otherwise passes every assertion about the turns it did reach.
+- **`internal/harness`** — ADR-0007 made mechanical: the built-in registry (model id →
+  harness configuration name + default provider pin), the harness configuration itself,
+  the hash on `SessionStarted`, the `.kopicode/config.toml` reader and the precedence
+  between them. `--model` and `--harness` beat the file, the file beats the built-in
+  default, and **no environment variable is in the chain at any position** — a test sets
+  six plausible spellings and requires the resolution not to move. An unrecognised id is
+  a usage error naming the supported set, exit **2**, and the front ends' integration
+  test proves the *ordering* rather than the code: a refused invocation leaves the
+  working tree byte-for-byte as it found it, so no half-session record exists for a
+  session that never started. The pin now has one source of truth in code and a test
+  holds it to the shipped fixtures, which is what stops a registry/fixture drift from
+  surfacing later as a mock-provider bug. The hash is the fragile part and is guarded
+  accordingly: the preimage is written out field by field with length prefixes,
+  `Config` may hold **no map** (Go randomises iteration order, so a ranged preimage
+  would hash differently per process and nothing would ever pool), a reflection test
+  varies every field and requires the hash to move, and a committed golden hash catches
+  an encoding change that no configuration value explains. `internal/engine/selection.go`
+  is the thin seam the two front ends reach it through, because ADR-0003's allowlist
+  has three entries and widening it needs an ADR.
 - **`cmd/kopicode/lineedit`** — the line editor behind the prompt (ADR-0004): raw
   mode via `golang.org/x/term`, history, arrows, `Ctrl-A/E/K/U`. It lives under
   `cmd/` and not `internal/` because it is presentation, and the ADR-0003 allowlist
