@@ -270,7 +270,7 @@ func (e *Engine) call(ctx context.Context, turn, attempt int) (provider.Reply, S
 	}
 
 	if _, err := e.append(ctx, turn, journal.ProviderResponse{
-		Body: journal.InlineText(string(reply.Raw)),
+		Body: responseBody(stream, reply),
 		Tokens: journal.TokenCounts{
 			Prompt:     reply.Usage.Prompt,
 			Completion: reply.Usage.Completion,
@@ -302,6 +302,35 @@ func (e *Engine) call(ctx context.Context, turn, attempt int) (provider.Reply, S
 		}
 	}
 	return reply, StopUnspecified, nil
+}
+
+// responseBody is what journal.ProviderResponse.Body records, and the two
+// sources are not interchangeable.
+//
+//   - **Replay** has an assembled body beside the frames, and [provider.Reply].Raw
+//     passes it through untouched. The record then holds the bytes the recording
+//     holds.
+//   - **A live stream has no assembled body at all.** OpenRouter never sends one,
+//     so Raw is nil there — deliberately, because building one out of the chunks
+//     would put a re-encoding in the one field whose whole point is that it is
+//     not one. What the provider did send is the frames, which
+//     [provider.Stream.Transcript] returns verbatim: keep-alive comments, blank
+//     separators and the [DONE] sentinel included.
+//
+// Journaling Raw unconditionally would record nothing at all against the real
+// client while looking perfectly correct against the mock, which is the exact
+// failure shape this repo keeps finding. Both are handled, and which one applied
+// is visible in the record: a transcript starts `data: `, an assembled body
+// starts `{`.
+//
+// Call it only after the stream is drained. Transcript's "so far" is literal —
+// the scanner reads ahead — and mid-stream it can hold more than the deltas
+// delivered.
+func responseBody(stream *provider.Stream, reply provider.Reply) journal.Text {
+	if len(reply.Raw) > 0 {
+		return journal.InlineText(string(reply.Raw))
+	}
+	return journal.InlineText(string(stream.Transcript()))
 }
 
 // providerStop tells a cancelled call from a failed one.

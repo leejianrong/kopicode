@@ -91,6 +91,14 @@ func withRepairBudget(n int) harnessOption {
 func withToolSet(names ...string) harnessOption {
 	return func(c *engine.Config) { c.Selection.Config.ToolSet = names }
 }
+
+// withProvider replaces the provider the loop drives, keeping the arm identity
+// the harness was built with. It is how a test reaches the *live* client's shape
+// — where a streamed reply carries no assembled body — which the replay provider
+// cannot produce because a recording always has one.
+func withProvider(p engine.Provider) harnessOption {
+	return func(c *engine.Config) { c.Provider = p }
+}
 func withStream(f func(provider.Delta)) harnessOption {
 	return func(c *engine.Config) { c.Stream = f }
 }
