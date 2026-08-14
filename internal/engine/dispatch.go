@@ -238,11 +238,14 @@ func (e *Engine) dispatch(ctx context.Context, turn int, ext parse.Extraction) (
 // exception.
 func (e *Engine) runTool(ctx context.Context, turn int, callID string, call parse.ToolCall) (string, bool, error) {
 	entry, ok := toolByName[call.Name]
-	if !ok {
-		// Unreachable with a catalogue that matches the dispatch table, which
-		// TestCatalogueCoversEveryTool holds. Reaching it means the two
-		// disagree, which is a harness defect and is journaled as one: SLICE-1
-		// §9 reads a ToolCallFailed as `harness`.
+	if !ok || !e.offered[call.Name] {
+		// Two ways in, and both are refusals rather than surprises. The name
+		// may be one no tool answers — unreachable with a catalogue matching
+		// the dispatch table, which TestCatalogueCoversEveryTool holds. Or it
+		// may be a tool this binary can run and *this arm does not present*,
+		// which must not run either: the harness config hash records which
+		// tools the model was given, and a dispatcher that ignored the tool set
+		// would make that record decorative.
 		detail := fmt.Sprintf("no tool named %q; this harness offers: %s",
 			call.Name, strings.Join(e.cfg.Catalogue.Names(), ", "))
 		if _, err := e.append(ctx, turn, journal.ToolCallFailed{

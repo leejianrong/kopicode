@@ -17,8 +17,8 @@ import (
 // subagents, no planner, no second loop. What ends it:
 //
 //   - The model replies in prose and asks for no tool. That is the clean stop.
-//   - The turn cap is reached ([Config.MaxTurns]).
-//   - Reported token usage reaches the budget ([Config.TokenBudget]).
+//   - The turn cap is reached (Selection.Config.MaxTurns).
+//   - Reported token usage reaches the budget (Selection.Config.TokenBudget).
 //   - The context is cancelled.
 //   - The provider or the harness fails.
 //
@@ -58,7 +58,7 @@ func (e *Engine) Run(ctx context.Context, prompt string) (Result, error) {
 		if err := ctx.Err(); err != nil {
 			return settle(StopCancelled, err)
 		}
-		if used >= e.cfg.MaxTurns {
+		if used >= e.cfg.Selection.Config.MaxTurns {
 			return settle(StopMaxTurns, nil)
 		}
 		if e.overBudget() {
@@ -76,12 +76,21 @@ func (e *Engine) Run(ctx context.Context, prompt string) (Result, error) {
 
 // overBudget reports whether reported usage has reached the budget.
 //
-// Reported, and nothing else. The comparison is against
-// provider.Usage summed across the session's replies — see the note on
-// [Config.TokenBudget] for why an estimate may not stand in for it, and why
-// the bound is therefore crossed rather than never reached.
+// **What "enforced" can mean for this bound, stated rather than implied.** The
+// only authoritative token count is provider.Usage on a reply, so it arrives
+// after the request that spent it. The budget is therefore a stop condition on
+// *spend to date*, checked before every provider call: once the usage the
+// provider has reported reaches it, no further request is sent and the exchange
+// stops with reason "budget_exhausted". A session can exceed the budget by at
+// most the usage of the request in flight when it was crossed.
+//
+// It is deliberately not admission control from [Size.EstimatedTokens]. That
+// method documents itself as not a token count, and refusing a request on a byte
+// estimate while journaling it as a budget decision is fabricated precision —
+// a guess wearing a measurement's clothes.
 func (e *Engine) overBudget() bool {
-	return e.cfg.TokenBudget > 0 && e.spent.Total >= e.cfg.TokenBudget
+	budget := e.cfg.Selection.Config.TokenBudget
+	return budget > 0 && e.spent.Total >= budget
 }
 
 // runTurn runs one turn, including any repair round trips inside it.
@@ -95,7 +104,7 @@ func (e *Engine) runTurn(ctx context.Context, turn int) (Stop, error) {
 	// dispatched, so nothing is dispatched until all of it parses
 	// (docs/SLICE-1.md §3). Sharing one across turns would share the budget,
 	// which is the bound quietly ceasing to be one.
-	rep := parse.NewRepairer(e.cfg.Catalogue, e.repairBudget())
+	rep := parse.NewRepairer(e.cfg.Catalogue, e.cfg.Selection.Config.RepairBudget)
 	site := callSiteID(turn)
 
 	for attempt := 1; ; attempt++ {
@@ -148,10 +157,19 @@ func (e *Engine) runTurn(ctx context.Context, turn int) (Stop, error) {
 					return StopHarnessError, err
 				}
 			}
-			// Forced verification (KAN-787) goes here: after a turn that
-			// modified files, run the project's own command, journal
-			// VerificationRun, and let a non-zero exit block a success report.
-			// Nothing in this card runs it, and nothing here pretends to.
+			// Forced verification (KAN-787) goes here, and does not exist yet.
+			// After a turn that modified files it runs the project's own
+			// command, journals VerificationRun, and blocks a success report on
+			// a non-zero exit (docs/SLICE-1.md §5).
+			//
+			// **The selection already says it is forced.** The registered
+			// harness configuration sets Verification.Forced, and that value is
+			// in the hash preimage, so today the hash claims a policy the loop
+			// does not carry out. That is a real gap and not a rounding error:
+			// until KAN-787 lands, a `model`-classified failure may be one the
+			// project's own suite would have caught. It is named here rather
+			// than hidden behind a nil check, because a silent no-op is how a
+			// promised gate stops being one.
 			return StopUnspecified, nil
 
 		case parse.EventUnspecified:
@@ -206,27 +224,24 @@ func (e *Engine) call(ctx context.Context, turn, attempt int) (provider.Reply, S
 			turn, attempt, len(left), left)
 	}
 
+	sampling := e.cfg.Selection.Config.RequestSampling()
 	req := provider.Request{
-		ModelID:  e.cfg.ModelID,
-		Pin:      e.cfg.Pin,
-		Sampling: e.cfg.Sampling,
+		ModelID:  e.cfg.Selection.ModelID,
+		Pin:      e.cfg.Selection.Pin,
+		Sampling: sampling,
 		Messages: e.asm.Messages(),
 		Turn:     turn,
 		Attempt:  attempt,
 	}
 
 	if _, err := e.append(ctx, turn, journal.ProviderRequest{
-		ModelID: e.cfg.ModelID,
-		Provider: journal.ProviderPin{
-			Order:          e.cfg.Pin.Order,
-			AllowFallbacks: e.cfg.Pin.AllowFallbacks,
-			Quantizations:  e.cfg.Pin.Quantizations,
-		},
+		ModelID:  e.cfg.Selection.ModelID,
+		Provider: journalPin(e.cfg.Selection.Pin),
 		Sampling: journal.Sampling{
-			Temperature: e.cfg.Sampling.Temperature,
-			TopP:        e.cfg.Sampling.TopP,
-			MaxTokens:   e.cfg.Sampling.MaxTokens,
-			Seed:        e.cfg.Sampling.Seed,
+			Temperature: sampling.Temperature,
+			TopP:        sampling.TopP,
+			MaxTokens:   sampling.MaxTokens,
+			Seed:        sampling.Seed,
 		},
 		// Tokens is left zero. There is no tokenizer here and the provider
 		// reports prompt usage only in the reply, so the accounting lands on

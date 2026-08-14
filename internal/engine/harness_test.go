@@ -76,10 +76,20 @@ type harness struct {
 // harnessOption tunes one harness before the engine is built.
 type harnessOption func(*engine.Config)
 
-func withMaxTurns(n int) harnessOption    { return func(c *engine.Config) { c.MaxTurns = n } }
-func withTokenBudget(n int) harnessOption { return func(c *engine.Config) { c.TokenBudget = n } }
+// The bounds live on the harness configuration, not on the engine, because
+// ADR-0007 decision 6 puts every one of them in the hash preimage: a bound the
+// loop held itself would be a bound outside the arm.
+func withMaxTurns(n int) harnessOption {
+	return func(c *engine.Config) { c.Selection.Config.MaxTurns = n }
+}
+func withTokenBudget(n int) harnessOption {
+	return func(c *engine.Config) { c.Selection.Config.TokenBudget = n }
+}
 func withRepairBudget(n int) harnessOption {
-	return func(c *engine.Config) { c.RepairBudget = n }
+	return func(c *engine.Config) { c.Selection.Config.RepairBudget = n }
+}
+func withToolSet(names ...string) harnessOption {
+	return func(c *engine.Config) { c.Selection.Config.ToolSet = names }
 }
 func withStream(f func(provider.Delta)) harnessOption {
 	return func(c *engine.Config) { c.Stream = f }
@@ -136,18 +146,14 @@ func newHarness(t *testing.T, prov *mock.Provider, files map[string]string, opts
 	snap := &stubSnapshotter{}
 
 	cfg := engine.Config{
-		SessionID:         "session-under-test",
-		ModelID:           prov.ModelID(),
-		Pin:               prov.Pin(),
-		Sampling:          provider.Sampling{Temperature: 0, TopP: 1, MaxTokens: 4096},
-		HarnessConfigHash: "sha256:test",
-		Build:             journal.BuildInfo{Version: "test", Commit: "unknown", TreeState: "unknown", Source: "unknown"},
-		CWD:               root,
-		SystemPrompt:      "You are a test harness.",
-		Provider:          prov,
-		Journal:           jrn,
-		Tools:             set,
-		Permissions:       gate,
+		SessionID:   "session-under-test",
+		Selection:   testSelection(prov),
+		Build:       journal.BuildInfo{Version: "test", Commit: "unknown", TreeState: "unknown", Source: "unknown"},
+		CWD:         root,
+		Provider:    prov,
+		Journal:     jrn,
+		Tools:       set,
+		Permissions: gate,
 		// LookPath refuses every checker, so the gate records an honest
 		// "tool_missing" instead of shelling out to the machine's real Go
 		// toolchain. What is under test here is that the gate ran and was
@@ -168,6 +174,23 @@ func newHarness(t *testing.T, prov *mock.Provider, files map[string]string, opts
 	}
 
 	return &harness{t: t, root: root, jrn: jrn, prov: prov, eng: eng, snap: snap, policy: pol}
+}
+
+// testSelection is the arm the harness runs, built from the registered default
+// so the bounds and the sampling under test are the shipped ones, with the model
+// and the pin taken from whichever recording is being replayed.
+//
+// It resolves through the real registry rather than filling a struct by hand:
+// the fields the loop reads have to be the fields KAN-805 populates, and a
+// hand-built Selection would go on compiling after that stopped being true.
+func testSelection(prov *mock.Provider) engine.Selection {
+	sel, err := engine.ResolveSelection(os.TempDir(), engine.SelectionOverrides{})
+	if err != nil {
+		panic("engine_test: resolving the default selection: " + err.Error())
+	}
+	sel.ModelID = prov.ModelID()
+	sel.Pin = prov.Pin()
+	return sel
 }
 
 // events reads the journal back, failing on any read error rather than skipping

@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/leejianrong/kopicode/internal/parse"
-	"github.com/leejianrong/kopicode/internal/tools"
 )
 
 // The argument objects the model fills in, one per tool.
@@ -80,14 +79,54 @@ type (
 	}
 )
 
-// Catalogue returns the tool schemas the repair loop consults, covering exactly
-// the tools this engine dispatches.
+// Catalogue returns the schemas for the named tools, which is what the repair
+// loop consults to tell a model the shape of the one call it got wrong.
 //
-// It satisfies parse.Tools. A nil [Config.Catalogue] gets this one; supplying a
-// different one is how a bench arm varies the descriptions a model is repaired
-// against, which is the axis ADR-0005 §7 defers the *contents* of and ADR-0007
-// decision 6 puts inside the harness config hash.
-func Catalogue() parse.Tools { return builtinCatalogue }
+// names is the harness configuration's ToolSet — the tools presented to the
+// model, and therefore the tools that exist as far as this session is concerned.
+// It is taken as an argument rather than read off a package-level set because
+// ADR-0007 decision 6 puts the tool set inside the harness config hash: a
+// catalogue that always offered everything would make an arm that presents fewer
+// tools hash differently and behave identically, which is the hash describing
+// something that is not happening.
+//
+// A name no tool answers is an error rather than a silent omission. The
+// alternative is a harness configuration that promises a tool the binary does
+// not have, discovered when a model calls it and gets a harness failure.
+func Catalogue(names []string) (parse.Tools, error) {
+	if len(names) == 0 {
+		return nil, fmt.Errorf("engine: a tool set with no tools leaves the model nothing to call")
+	}
+	c := catalogue{schemas: make(map[string]parse.Schema, len(names))}
+	for _, name := range names {
+		entry, ok := toolByName[name]
+		if !ok {
+			return nil, fmt.Errorf("engine: the harness configuration presents %q and no tool answers it; "+
+				"this binary dispatches %s", name, strings.Join(ToolNames(), ", "))
+		}
+		if _, dup := c.schemas[name]; dup {
+			return nil, fmt.Errorf("engine: the harness configuration presents %q twice", name)
+		}
+		c.names = append(c.names, name)
+		c.schemas[name] = entry.schema
+	}
+	slices.Sort(c.names)
+	return c, nil
+}
+
+// ToolNames is every tool this binary can dispatch, sorted.
+//
+// It is what a harness configuration's ToolSet is drawn from and what KAN-843's
+// system prompt and KAN-844's wire catalogue will both need. Sorted and copied,
+// so nothing downstream depends on the dispatch table's own order.
+func ToolNames() []string {
+	out := make([]string, 0, len(toolEntries))
+	for _, entry := range toolEntries {
+		out = append(out, entry.name)
+	}
+	slices.Sort(out)
+	return out
+}
 
 // catalogue is a parse.Tools over a fixed set of schemas.
 //
@@ -109,18 +148,6 @@ func (c catalogue) Schema(name string) (parse.Schema, bool) {
 
 // Names returns every tool name offered, sorted, as a fresh slice.
 func (c catalogue) Names() []string { return slices.Clone(c.names) }
-
-var builtinCatalogue = newCatalogue()
-
-func newCatalogue() catalogue {
-	c := catalogue{schemas: make(map[string]parse.Schema, len(toolEntries))}
-	for _, entry := range toolEntries {
-		c.names = append(c.names, entry.name)
-		c.schemas[entry.name] = entry.schema
-	}
-	slices.Sort(c.names)
-	return c
-}
 
 // schemaOf derives a tool's schema from its argument struct.
 //
@@ -171,8 +198,3 @@ func paramType(tool string, f reflect.StructField) parse.ParamType {
 			tool, f.Name, f.Type))
 	}
 }
-
-// AnchorVersion is the anchor contract this engine's tools render under. It is
-// re-exported so a surface can put it in a prompt and a harness config hash can
-// cover it (ADR-0006 §7) without a second import.
-const AnchorVersion = tools.AnchorVersion

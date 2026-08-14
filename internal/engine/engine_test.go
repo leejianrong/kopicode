@@ -398,7 +398,7 @@ func TestNoRepairArm(t *testing.T) {
 	}
 
 	h := scriptHarness(t, replies, oneAttemptPerTurn(2),
-		map[string]string{"greet.go": greetGo}, withRepairBudget(-1), withMaxTurns(2))
+		map[string]string{"greet.go": greetGo}, withRepairBudget(0), withMaxTurns(2))
 
 	if _, err := h.eng.Run(t.Context(), "read it"); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -719,7 +719,7 @@ func TestUnknownToolIsAHarnessFailure(t *testing.T) {
 	}
 	// The repair loop would ordinarily catch this and ask the model to fix it;
 	// disabling repair is what gets an unknown name as far as the dispatcher.
-	h := scriptHarness(t, replies, oneAttemptPerTurn(2), nil, withMaxTurns(2), withRepairBudget(-1))
+	h := scriptHarness(t, replies, oneAttemptPerTurn(2), nil, withMaxTurns(2), withRepairBudget(0))
 
 	if _, err := h.eng.Run(t.Context(), "go"); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -759,6 +759,7 @@ func TestNewRefusesAConfigurationItCannotRunSafely(t *testing.T) {
 	}
 	good := engine.Config{
 		SessionID:   "cfg",
+		Selection:   testSelection(p),
 		Provider:    p,
 		Journal:     jrn,
 		Tools:       set,
@@ -773,14 +774,20 @@ func TestNewRefusesAConfigurationItCannotRunSafely(t *testing.T) {
 	}
 
 	cases := map[string]func(*engine.Config){
-		"no session id":   func(c *engine.Config) { c.SessionID = "" },
-		"no provider":     func(c *engine.Config) { c.Provider = nil },
-		"no journal":      func(c *engine.Config) { c.Journal = nil },
-		"no tools":        func(c *engine.Config) { c.Tools = nil },
-		"no permissions":  func(c *engine.Config) { c.Permissions = nil },
-		"no syntax gate":  func(c *engine.Config) { c.Syntax = nil },
-		"negative turns":  func(c *engine.Config) { c.MaxTurns = -1 },
-		"negative budget": func(c *engine.Config) { c.TokenBudget = -1 },
+		"no session id":    func(c *engine.Config) { c.SessionID = "" },
+		"no model id":      func(c *engine.Config) { c.Selection.ModelID = "" },
+		"no harness hash":  func(c *engine.Config) { c.Selection.HarnessConfigHash = "" },
+		"no provider":      func(c *engine.Config) { c.Provider = nil },
+		"no journal":       func(c *engine.Config) { c.Journal = nil },
+		"no tools":         func(c *engine.Config) { c.Tools = nil },
+		"no permissions":   func(c *engine.Config) { c.Permissions = nil },
+		"no syntax gate":   func(c *engine.Config) { c.Syntax = nil },
+		"no turn cap":      func(c *engine.Config) { c.Selection.Config.MaxTurns = 0 },
+		"negative turns":   func(c *engine.Config) { c.Selection.Config.MaxTurns = -1 },
+		"negative budget":  func(c *engine.Config) { c.Selection.Config.TokenBudget = -1 },
+		"negative repairs": func(c *engine.Config) { c.Selection.Config.RepairBudget = -1 },
+		"empty tool set":   func(c *engine.Config) { c.Selection.Config.ToolSet = nil },
+		"unknown tool":     func(c *engine.Config) { c.Selection.Config.ToolSet = []string{"teleport"} },
 	}
 	for name, breakIt := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -817,7 +824,8 @@ func TestRunBeforeStartIsRefused(t *testing.T) {
 	t.Cleanup(func() { _ = jrn.Close() })
 
 	eng, err := engine.New(engine.Config{
-		SessionID: "lifecycle", Provider: p, Journal: jrn, Tools: set,
+		SessionID: "lifecycle", Selection: testSelection(p),
+		Provider: p, Journal: jrn, Tools: set,
 		Permissions: gate, Syntax: &syntax.Gate{Root: set.Root.Path()},
 	})
 	if err != nil {

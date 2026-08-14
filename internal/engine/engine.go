@@ -14,16 +14,6 @@ import (
 	"github.com/leejianrong/kopicode/internal/tools"
 )
 
-// DefaultMaxTurns is the turn cap a [Config] that leaves MaxTurns zero gets.
-//
-// Twenty, because the frozen corpus is specified as tasks an agent can finish
-// "in ≤20 turns" (docs/SLICE-1.md §Build Plan step 15) and a cap below the
-// corpus's own bound would fail tasks the harness is meant to pass. It is a
-// harness-configuration value (ADR-0007 decision 6 puts the cap in the hash
-// preimage), so a bench arm sets it explicitly and this default is only what a
-// caller gets for not choosing.
-const DefaultMaxTurns = 20
-
 // Snapshotter records the working tree after a turn that changed it.
 //
 // It is an interface, declared at the consumer, for the reason [Provider] is:
@@ -51,18 +41,18 @@ type Config struct {
 	// engine draws no randomness at all).
 	SessionID string
 
-	// ModelID, Pin and Sampling are the arm's provider-facing identity. They go
-	// on every request and on SessionStarted.
-	ModelID  string
-	Pin      provider.Pin
-	Sampling provider.Sampling
-
-	// HarnessConfigHash identifies the harness configuration this session ran
-	// under (ADR-0007 decision 6). The engine does not compute it: the preimage
-	// includes the system prompt, the tool set as presented to the model and
-	// the bounds below, and the value is resolved from the model id before the
-	// engine is built.
-	HarnessConfigHash string
+	// Selection is the resolved arm: model id, provider pin, harness
+	// configuration and the hash SessionStarted records. It is produced by
+	// [ResolveSelection] before the engine is built (ADR-0007), and everything
+	// the loop needs from it is read off it rather than restated here.
+	//
+	// **Every bound the loop runs under comes from Selection.Config**, not from
+	// a constant in this package: the turn cap, the token budget, the repair
+	// budget, the sampling parameters and the system prompt are all in the
+	// harness config hash preimage, so a bound the loop held itself would be a
+	// bound *outside* the arm — two runs differing in it would compare as
+	// identical, which is the hash describing something that is not happening.
+	Selection Selection
 
 	// Build identifies the binary, which the hash deliberately excludes, so
 	// that two incomparable builds cannot pool as one arm (ADR-0007 decision
@@ -74,46 +64,6 @@ type Config struct {
 	// a repository.
 	CWD      string
 	RepoHead string
-
-	// SystemPrompt opens every request. It is an input: there is no system
-	// prompt in this repo yet and writing one here would be inventing a
-	// per-arm value, because ADR-0007 decision 6 puts the prompt's digest
-	// inside the harness config hash. KAN-843 writes it.
-	SystemPrompt string
-
-	// MaxTurns bounds one call to [Engine.Run]. Zero means [DefaultMaxTurns];
-	// negative is a configuration error, because an unbounded loop is the
-	// failure mode the cap exists to prevent. Reaching it stops the exchange
-	// and journals SessionEnded with reason "max_turns", which SLICE-1 §9
-	// classifies as a `harness` failure.
-	MaxTurns int
-
-	// TokenBudget bounds a session's total reported token usage. Zero means
-	// unbounded; negative is a configuration error.
-	//
-	// **What "enforced" can mean here, stated rather than implied.** The only
-	// authoritative token count is provider.Usage on a reply, so it arrives
-	// after the request that spent it. This is therefore a *stop condition on
-	// spend to date*, checked before every provider call: once the usage the
-	// provider has reported reaches the budget, no further request is sent and
-	// the exchange stops with reason "budget_exhausted". A session can exceed
-	// the budget by at most the usage of the request in flight when it was
-	// crossed. It is deliberately **not** admission control from
-	// [Size.EstimatedTokens] — that method documents itself as not a token
-	// count, and refusing a request on a byte estimate while journaling it as a
-	// budget decision is fabricated precision.
-	TokenBudget int
-
-	// RepairBudget is how many repair round trips one reply gets before the
-	// call fails and the turn continues with the failure as an observation
-	// (docs/SLICE-1.md §3). Zero means [parse.DefaultBudget]; **negative
-	// disables repair**, which is the arm that measures what repair buys.
-	//
-	// The asymmetry with MaxTurns is deliberate: zero repairs is a legitimate
-	// experiment and zero turns is not, so zero means "the default" here and
-	// the deliberate no-repair arm has to say so with -1 rather than by
-	// leaving a field unset.
-	RepairBudget int
 
 	// Provider is the model provider. Required.
 	Provider Provider
@@ -142,9 +92,14 @@ type Config struct {
 	Snapshots Snapshotter
 
 	// Catalogue is what the repair loop consults to say what a call got wrong.
-	// Nil means [Catalogue] — the schemas for the tools this engine
-	// dispatches. Supplying one is how a bench arm varies the descriptions the
-	// model is repaired against.
+	// Nil means [Catalogue] over Selection.Config.ToolSet, which is what a
+	// session should almost always use: the tools the arm presents.
+	//
+	// It is overridable because the descriptions a model is repaired against
+	// are a harness axis ADR-0005 §7 defers the contents of. Overriding it does
+	// **not** widen what the loop will dispatch — Selection.Config.ToolSet
+	// decides that on its own, so a catalogue offering more cannot smuggle a
+	// tool into an arm that does not present it.
 	//
 	// This is **not** the tool catalogue as rendered on the wire.
 	// provider.Request carries no tool definitions and this card does not add
@@ -188,6 +143,12 @@ type Engine struct {
 	cfg Config
 	asm *Assembler
 
+	// offered is the tool set the arm presents, as a membership test. It is
+	// what the dispatcher checks, so a tool this binary can run but this arm
+	// does not present cannot be reached — the hash says which tools the model
+	// was given, and that has to be true rather than decorative.
+	offered map[string]bool
+
 	started bool
 	ended   bool
 
@@ -214,6 +175,23 @@ func New(cfg Config) (*Engine, error) {
 	case cfg.SessionID == "":
 		return nil, fmt.Errorf("%w: SessionID is required, and is injected rather than "+
 			"generated so a replay reproduces the journal byte for byte", ErrConfig)
+	case cfg.Selection.ModelID == "":
+		return nil, fmt.Errorf("%w: Selection carries no model id; resolve the arm with "+
+			"ResolveSelection before building an engine (ADR-0007)", ErrConfig)
+	case cfg.Selection.HarnessConfigHash == "":
+		return nil, fmt.Errorf("%w: Selection carries no harness config hash; a session whose arm "+
+			"cannot be identified pools with nothing (ADR-0007 decision 6)", ErrConfig)
+	case cfg.Selection.Config.MaxTurns <= 0:
+		return nil, fmt.Errorf("%w: the harness configuration's MaxTurns is %d; an unbounded loop is "+
+			"the failure the cap exists to prevent, and a default supplied here would be a bound "+
+			"outside the hash", ErrConfig, cfg.Selection.Config.MaxTurns)
+	case cfg.Selection.Config.TokenBudget < 0:
+		return nil, fmt.Errorf("%w: the harness configuration's TokenBudget is %d; zero means unbounded",
+			ErrConfig, cfg.Selection.Config.TokenBudget)
+	case cfg.Selection.Config.RepairBudget < 0:
+		return nil, fmt.Errorf("%w: the harness configuration's RepairBudget is %d; zero is the "+
+			"no-repair arm and is how the experiment measures what repair buys",
+			ErrConfig, cfg.Selection.Config.RepairBudget)
 	case cfg.Provider == nil:
 		return nil, fmt.Errorf("%w: Provider is required", ErrConfig)
 	case cfg.Journal == nil:
@@ -226,34 +204,32 @@ func New(cfg Config) (*Engine, error) {
 	case cfg.Syntax == nil:
 		return nil, fmt.Errorf("%w: Syntax is required; a gate that did not run must not read as a pass "+
 			"(docs/adr/0006-hash-anchored-edits-and-failure-attribution.md §4)", ErrConfig)
-	case cfg.MaxTurns < 0:
-		return nil, fmt.Errorf("%w: MaxTurns %d is negative; zero means %d and an unbounded loop is "+
-			"the failure the cap exists to prevent", ErrConfig, cfg.MaxTurns, DefaultMaxTurns)
-	case cfg.TokenBudget < 0:
-		return nil, fmt.Errorf("%w: TokenBudget %d is negative; zero means unbounded", ErrConfig, cfg.TokenBudget)
 	}
 
-	if cfg.MaxTurns == 0 {
-		cfg.MaxTurns = DefaultMaxTurns
+	// The tool set is validated even when a catalogue is supplied, because it
+	// is the tool set and not the catalogue that decides what the loop will
+	// dispatch.
+	offered := make(map[string]bool, len(cfg.Selection.Config.ToolSet))
+	for _, name := range cfg.Selection.Config.ToolSet {
+		offered[name] = true
+	}
+	cat, err := Catalogue(cfg.Selection.Config.ToolSet)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrConfig, err)
 	}
 	if cfg.Catalogue == nil {
-		cfg.Catalogue = Catalogue()
+		cfg.Catalogue = cat
 	}
 
-	return &Engine{cfg: cfg, asm: NewAssembler(cfg.SystemPrompt)}, nil
+	return &Engine{
+		cfg:     cfg,
+		asm:     NewAssembler(cfg.Selection.Config.SystemPrompt),
+		offered: offered,
+	}, nil
 }
 
-// repairBudget maps Config.RepairBudget onto parse's, where negative already
-// means zero.
-func (e *Engine) repairBudget() int {
-	if e.cfg.RepairBudget == 0 {
-		return parse.DefaultBudget
-	}
-	if e.cfg.RepairBudget < 0 {
-		return 0
-	}
-	return e.cfg.RepairBudget
-}
+// Selection reports the arm this engine is running.
+func (e *Engine) Selection() Selection { return e.cfg.Selection }
 
 // Session reports the session this engine records.
 func (e *Engine) Session() journal.Session { return e.cfg.Journal.Session() }
@@ -274,13 +250,11 @@ func (e *Engine) Start(ctx context.Context) error {
 	_, err := e.append(ctx, 0, journal.SessionStarted{
 		CWD:      e.cfg.CWD,
 		RepoHead: e.cfg.RepoHead,
-		ModelID:  e.cfg.ModelID,
-		Provider: journal.ProviderPin{
-			Order:          e.cfg.Pin.Order,
-			AllowFallbacks: e.cfg.Pin.AllowFallbacks,
-			Quantizations:  e.cfg.Pin.Quantizations,
-		},
-		HarnessConfigHash: e.cfg.HarnessConfigHash,
+		ModelID:  e.cfg.Selection.ModelID,
+		Provider: journalPin(e.cfg.Selection.Pin),
+		// Copied, never recomputed: one session has one arm, and two events
+		// disagreeing about which would be worse than either.
+		HarnessConfigHash: e.cfg.Selection.HarnessConfigHash,
 		Build:             e.cfg.Build,
 	})
 	if err != nil {
@@ -318,6 +292,16 @@ func (e *Engine) Close(ctx context.Context) error {
 	})
 	e.ended = true
 	return err
+}
+
+// journalPin maps the pin onto the journal's declaration of the same shape. The
+// two packages agree on a wire contract rather than on an import.
+func journalPin(p provider.Pin) journal.ProviderPin {
+	return journal.ProviderPin{
+		Order:          p.Order,
+		AllowFallbacks: p.AllowFallbacks,
+		Quantizations:  p.Quantizations,
+	}
 }
 
 // append writes one event, wrapping the failure so a journal that broke is

@@ -84,7 +84,17 @@ func TestCatalogueCoversEveryTool(t *testing.T) {
 		}
 	}
 
-	cat := engine.Catalogue()
+	if diff := slices.Compare(names, engine.ToolNames()); diff != 0 {
+		t.Errorf("engine dispatches %v; internal/tools declares %v\n"+
+			"a tool the engine cannot dispatch cannot be presented, and one it dispatches "+
+			"without the tool set naming it is a tool outside the harness config hash",
+			engine.ToolNames(), names)
+	}
+
+	cat, err := engine.Catalogue(names)
+	if err != nil {
+		t.Fatalf("building a catalogue over every tool: %v", err)
+	}
 	for _, name := range names {
 		schema, ok := cat.Schema(name)
 		if !ok {
@@ -108,6 +118,15 @@ func TestCatalogueCoversEveryTool(t *testing.T) {
 	// is a finding rather than something resolved silently.
 	if _, ok := cat.Schema("read_fil"); ok {
 		t.Error("the catalogue resolved a misspelled tool name")
+	}
+
+	// A harness configuration promising a tool the binary does not have is a
+	// startup error, not a surprise the first time a model calls it.
+	if _, err := engine.Catalogue([]string{"read_file", "teleport"}); err == nil {
+		t.Error("a tool set naming a tool nothing dispatches was accepted")
+	}
+	if _, err := engine.Catalogue(nil); err == nil {
+		t.Error("an empty tool set was accepted; it leaves the model nothing to call")
 	}
 }
 
@@ -133,7 +152,7 @@ func (p permissiveTools) Names() []string { return slices.Clone(p.names) }
 // outcome — a ToolCallFailed naming an unknown tool is exactly what a model
 // would get.
 func TestEveryCatalogueToolDispatches(t *testing.T) {
-	names := engine.Catalogue().Names()
+	names := engine.ToolNames()
 	if len(names) < 7 {
 		t.Fatalf("positive control failed: the catalogue offers %d tools (%v)", len(names), names)
 	}
@@ -169,5 +188,43 @@ func TestEveryCatalogueToolDispatches(t *testing.T) {
 				t.Errorf("the catalogue offers %q and no tool answers it", name)
 			}
 		})
+	}
+}
+
+// TestArmPresentsOnlyItsToolSet holds the other direction, which is the one the
+// hash depends on.
+//
+// ADR-0007 decision 6 puts the tool set in the harness config hash preimage. A
+// loop that dispatched whatever it could run would make an arm presenting fewer
+// tools hash differently and behave identically — the hash describing something
+// that is not happening, which is the failure it exists to prevent.
+func TestArmPresentsOnlyItsToolSet(t *testing.T) {
+	call := func(t *testing.T, tool string, set []string) []journal.ToolCallFailed {
+		t.Helper()
+		replies := []scriptedReply{
+			{calls: []wireCall{nativeCall("call-1", tool, `{"path":"greet.go"}`)},
+				usage: wireUsage{Prompt: 1, Completion: 1, Total: 2}},
+			{text: "done.", usage: wireUsage{Prompt: 2, Completion: 1, Total: 3}},
+		}
+		h := scriptHarness(t, replies, oneAttemptPerTurn(2), map[string]string{"greet.go": greetGo},
+			withMaxTurns(2), withRepairBudget(0), withToolSet(set...))
+		if _, err := h.eng.Run(t.Context(), "go"); err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		return payloadsOf[journal.ToolCallFailed](t, h.events())
+	}
+
+	// Positive control: with read_file presented, the same call runs.
+	if failed := call(t, "read_file", []string{"read_file", "grep"}); len(failed) != 0 {
+		t.Fatalf("positive control failed: read_file was presented and still failed: %+v", failed)
+	}
+
+	failed := call(t, "read_file", []string{"grep"})
+	if len(failed) != 1 {
+		t.Fatalf("got %d ToolCallFailed events, want 1: an arm that does not present read_file "+
+			"must not run it", len(failed))
+	}
+	if failed[0].Tool != "read_file" {
+		t.Errorf("failed tool = %q, want %q", failed[0].Tool, "read_file")
 	}
 }
