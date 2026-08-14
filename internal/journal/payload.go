@@ -208,6 +208,36 @@ type ToolCallParsed struct {
 	// Route is the extractor that won: "native", "fenced_json" or "xml".
 	// Which route a model actually uses is a finding, not a detail.
 	Route string `json:"route"`
+	// ArgEncoding is how the arguments arrived before Args was normalised,
+	// written as the wire string of the parse package's ArgEncoding —
+	// parse.ToolCall.ArgEncoding.String().
+	//
+	// Args above is always a compact object, because accepting the wire's
+	// double-encoded JSON *string* and unwrapping it is a leniency the harness
+	// performs. This project journals its leniencies: SLICE-1 §4 requires every
+	// fuzzy-mode edit be recorded "because fuzzy fallback rate per model is
+	// itself a finding", and this is the same fact one layer up. A model that
+	// writes OpenAI's double-encoding into a fenced block has said something
+	// about what the harness prompt has to meet it with, and a normalisation
+	// nobody records is a harness gain nobody can attribute.
+	//
+	// It is not derived at read time from ToolCallRequested.Raw, for the same
+	// reason Route is not: re-deriving tells you what today's extractor thinks,
+	// not what the extractor that ran thought, which is exactly backwards for an
+	// A/B that varies the harness.
+	//
+	// Empty means "written before this field existed" and is distinct from
+	// every real value. That is why it is not omitempty and why the zero value
+	// is not spelled "object": parse.ArgsObject is the zero of its own type, so
+	// a field that elided it would make "arguments arrived as an object" and
+	// "nobody recorded this" the same bytes.
+	//
+	// A plain string rather than a typed value, for the reason given on
+	// ToolCallRepaired.Classification: internal/parse must not import this
+	// package and this package must not import it, so the coupling is a
+	// documented wire contract instead of a dependency edge. The vocabulary
+	// lives in internal/parse; do not re-list it here.
+	ArgEncoding string `json:"arg_encoding"`
 }
 
 func (ToolCallParsed) Type() Type { return TypeToolCallParsed }

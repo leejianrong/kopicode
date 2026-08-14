@@ -230,7 +230,9 @@ type Reply struct {
 // Note what it does not do: Arguments is passed through as the bytes that
 // arrived. A mapping that unquoted the wire's JSON string and re-encoded it
 // would hand the extractor a value that no longer says which encoding the model
-// used, and parse.ArgEncoding exists precisely to record that.
+// used, and parse.ArgEncoding exists precisely to record that — it reaches the
+// session record as journal.ToolCallParsed's arg_encoding, so normalising here
+// would not lose a debug detail, it would silently zero a measured field.
 func (r Reply) Message() parse.Message {
 	msg := parse.Message{Content: r.Content}
 	for _, tc := range r.ToolCalls {

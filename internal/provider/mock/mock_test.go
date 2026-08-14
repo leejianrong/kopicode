@@ -353,16 +353,19 @@ func journalFragment(t *testing.T, p *mock.Provider, f fixture.Fixture) string {
 
 		if ext, err := parse.Extract(reply.Message()); err == nil {
 			for _, c := range ext.Calls() {
-				// Note for KAN-789: parse.ArgEncoding says it exists "for the
-				// journal", and journal.ToolCallParsed has nowhere to put it.
-				// Whichever card wires extraction into the loop has to add the
-				// field or drop the claim; the encoding a model used is a
-				// per-model finding, so adding it looks right.
+				// KAN-838 gave ToolCallParsed the arg_encoding field this
+				// projection had nowhere to put, and this is the mapping the
+				// engine loop (KAN-789) owes: journal the encoding the model
+				// used alongside the route that carried it, via String() and
+				// not a typed value, because no journal payload holds a parse
+				// type. A projection that dropped it would leave the field
+				// nothing ever sets, which is worse than not having it.
 				emit(ex.Turn, journal.ToolCallParsed{
-					CallID: c.ID,
-					Tool:   c.Name,
-					Args:   c.Arguments,
-					Route:  ext.Route().String(),
+					CallID:      c.ID,
+					Tool:        c.Name,
+					Args:        c.Arguments,
+					Route:       ext.Route().String(),
+					ArgEncoding: c.ArgEncoding.String(),
 				})
 			}
 		}
