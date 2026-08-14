@@ -109,19 +109,81 @@ func runVersion(t *testing.T, name string, buildFlags ...string) string {
 
 	build := exec.Command("go", args...)
 	build.Dir = root
-	build.Env = os.Environ()
+	build.Env = toolchainEnv()
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("go %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
 
 	run := exec.Command(bin, "--version")
 	run.Dir = t.TempDir()
-	run.Env = os.Environ()
+	run.Env = processEnv()
 	out, err := run.CombinedOutput()
 	if err != nil {
 		t.Fatalf("%s --version: %v\n%s", bin, err, out)
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// toolchainPassThrough is what `go build` needs to find itself and its caches.
+// Everything else is dropped, and the drops are the whole point of the list.
+//
+// This test's entire subject is the artefact `go build` produced, so a variable
+// that changes the artefact changes the answer while the command still reads
+// correctly. GOFLAGS is the sharp one: it can carry -ldflags, which would
+// override the very flags under test, and -tags, which changes what compiles.
+// GOOS and GOARCH decide what the binary even is, and a developer with
+// GOOS=windows exported would produce something the second half of runVersion
+// then tries to execute.
+//
+// internal/corpus keeps an almost identical list for its oracles. It is
+// duplicated rather than shared because internal/build must import nothing from
+// this module — internal/arch's TestBuildPackageIsALeaf walks these test files
+// too, and that leaf property is what lets both front ends import this package
+// for --version at all.
+var toolchainPassThrough = []string{
+	"PATH", "HOME", "TMPDIR", "TEMP", "TMP",
+	"GOROOT", "GOPATH", "GOCACHE", "GOMODCACHE", "GOPROXY",
+	// GOTOOLCHAIN decides which compiler runs. It is passed through rather
+	// than pinned because the `go test` process that got here resolved it the
+	// same way, and forcing a different answer would test a build nobody makes.
+	"GOTOOLCHAIN",
+	// Windows needs these to start a process at all.
+	"SystemRoot", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "ComSpec",
+}
+
+// processStartPassThrough is the smaller set: what an operating system needs to
+// start a process, and nothing else.
+var processStartPassThrough = []string{
+	"PATH", "TEMP", "TMP",
+	"SystemRoot", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "ComSpec",
+}
+
+// toolchainEnv is the environment the `go build` runs in.
+//
+// GOFLAGS is set empty rather than merely omitted. An allowlist keeps an
+// inherited GOFLAGS out, but `go env -w GOFLAGS=…` writes it to a file the
+// toolchain reads on its own, which no allowlist over the environment can
+// reach; an explicit empty value in the environment overrides that file.
+func toolchainEnv() []string {
+	return append(envFrom(toolchainPassThrough), "GOFLAGS=")
+}
+
+// processEnv is what the freshly built binary runs under. It reports its
+// identity from linker-injected variables and debug.ReadBuildInfo and reads no
+// environment variable to do it, so anything beyond starting the process would
+// be inherited for no reason.
+func processEnv() []string {
+	return envFrom(processStartPassThrough)
+}
+
+func envFrom(names []string) []string {
+	env := make([]string, 0, len(names)+1)
+	for _, name := range names {
+		if value, ok := os.LookupEnv(name); ok {
+			env = append(env, name+"="+value)
+		}
+	}
+	return env
 }
 
 func moduleRoot(t *testing.T) string {

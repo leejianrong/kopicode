@@ -175,11 +175,22 @@ Genuine exceptions are waived in place and need a reason on the line:
 // directory is the correct target. Read-only by construction.
 ```
 
-The two directives are separate (`allow-nodir`, `allow-noenv`) so waiving one does not
-quietly waive the other, and a waiver with no reason does not waive at all. A comment
-that starts like a waiver and is not one — the retired `allow-git-nodir` spelling, or a
-typo — fails the suite rather than silently waiving nothing. Reach for a waiver only
-when the inherited directory or environment genuinely is the right one, and say why.
+The directives are separate (`allow-nodir`, `allow-noenv`, `allow-ambientenv`) so waiving
+one does not quietly waive another, and a waiver with no reason does not waive at all. A
+comment that starts like a waiver and is not one — the retired `allow-git-nodir`
+spelling, or a typo — fails the suite rather than silently waiving nothing. Reach for a
+waiver only when the inherited directory or environment genuinely is the right one, and
+say why.
+
+**Assigning `Env` is not enough either** (KAN-845). `cmd.Env = os.Environ()` passes the
+assignment rule and inherits the whole environment, `GIT_DIR` included; `cmd.Env = nil`
+is os/exec's spelling for the same thing. A third check reads the value, waived by
+`//kopicode:allow-ambientenv: <reason>`. It decides only what it can see soundly —
+`os.Environ()`, an `append` over one, `nil`, and a local variable in the same function
+assigned one of those — and deliberately says nothing about a helper's return value.
+That is the point: build your environment in a named function that says what it strips or
+admits, as `repo.baseEnv`, `syntax.baseEnv`, `tools.childEnv` and `internal/corpus`'s
+`passThrough` allowlist each do, and start from one of those rather than from `os.Environ()`.
 
 ## What isolation does and does not give you
 
