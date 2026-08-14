@@ -106,6 +106,13 @@ func TestEveryFixtureLoadsAndValidates(t *testing.T) {
 // live. The one defence that survives contact with a future reader is that the
 // synthetic ones say so in the file, so KAN-774's recorder can replace them and
 // nobody quotes one as evidence about the provider.
+//
+// This test used to also require a hand-authored fixture's pin to be the
+// PROVISIONAL- placeholder, on the grounds that a synthetic file carrying a
+// plausible slug would present a decision the project had not made. KAN-775 made
+// the decision (docs/provider-pin.md), so the requirement inverted and moved:
+// [fixture.Validate] now refuses a placeholder in *any* fixture, recorded or not,
+// which is strictly stronger than asserting it here over the synthetic ones.
 func TestEveryFixtureIsMarkedWithItsOrigin(t *testing.T) {
 	synthetic := 0
 	for _, f := range loadAll(t) {
@@ -119,11 +126,6 @@ func TestEveryFixtureIsMarkedWithItsOrigin(t *testing.T) {
 			synthetic++
 			if !strings.Contains(f.OriginNote, "hand") {
 				t.Errorf("origin_note does not say the fixture was written by hand:\n%s", f.OriginNote)
-			}
-			if !f.Pin.Provisional() {
-				t.Errorf("pin %v is not marked provisional; KAN-775 chooses the real slug and "+
-					"quantization, and a hand-authored fixture carrying a plausible one presents a "+
-					"decision this project has not made", f.Pin.Order)
 			}
 		})
 	}

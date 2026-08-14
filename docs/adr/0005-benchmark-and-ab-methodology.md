@@ -59,6 +59,12 @@ quantization, model id and all sampling parameters are recorded in the journal's
 `ProviderRequest` event, and a result whose pin does not match the experiment's
 declared pin is discarded, not adjusted.
 
+*Which* provider and quantization is an operational value rather than a decision of
+record, and lives in [`docs/provider-pin.md`](../provider-pin.md) with the observed
+traffic it was chosen from and the date of the look. It is not amended here, because a
+value that changes when a provider retires an endpoint does not belong in a document
+that is supposed to stay true.
+
 **3. A mock/replay provider is part of slice 1.** It serves recorded
 `ProviderResponse` events from the journal. Harness plumbing — parse-and-repair,
 edit application, loop termination, permission gating, context assembly — is tested

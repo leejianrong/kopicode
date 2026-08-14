@@ -80,8 +80,13 @@ What is real now (2026-08-11):
   on every wire field saying whether it was verified against OpenRouter's docs. The
   streaming tool-call delta shape is the one OpenRouter documents nowhere; the fixtures
   follow OpenAI's contract and say so. A recording (KAN-774) replaces a hand-authored
-  fixture rather than joining it. The pin values are the `PROVISIONAL-` placeholder —
-  KAN-775 chooses the real slug and quantization.
+  fixture rather than joining it. The pin is real as of KAN-775 —
+  `provider.order: ["parasail/bf16"]`, `quantizations: ["bf16"]`, argued from observed
+  traffic in [`docs/provider-pin.md`](docs/provider-pin.md) — and the validator now
+  **refuses** both the old `PROVISIONAL-` placeholder and a quantization outside the
+  vocabulary OpenRouter documents, so an invented pin fails a test rather than a
+  benchmark. The pin being real does not make the bodies real: they are still
+  hand-authored, and the fixtures say so.
 - **`internal/repo`** — turn snapshots via git shadow refs (ADR-0002 §3), write
   only; restore and fork are slice 2. `git add -A` into a throwaway
   `GIT_INDEX_FILE`, `write-tree`, `commit-tree`, `update-ref
@@ -209,8 +214,12 @@ Toolchain: Go **1.26.5** at `~/.local/go`, with `golangci-lint`, `gopls` and `gi
 in `~/go/bin`. Both are on `PATH` via `~/.bashrc`.
 
 **`make bench` spends real money.** It is never in `ci` and never in the hook. Roughly
-$2 per full corpus run at current `qwen/qwen3-coder-next` pricing. `make bench-smoke` is
-the free equivalent and is what gates a PR.
+$2 per full corpus run at current `qwen/qwen3-coder-next` pricing — the pinned endpoint's
+prices were re-checked on 2026-08-14 and are unchanged ($0.12/$0.80 per million tokens),
+so the figure still rests on the numbers it was written against. It is an estimate and not
+a measurement: no bench run has happened, and the first one's reported usage replaces it.
+See [`docs/provider-pin.md`](docs/provider-pin.md). `make bench-smoke` is the free
+equivalent and is what gates a PR.
 
 `OPENROUTER_API_KEY` is read from the environment. It must never appear in the journal,
 in a blob, in a log line, or in a test fixture.
@@ -400,6 +409,8 @@ fixtures come from actual runs and get refreshed when the provider changes.
 - [`docs/SLICE-1.md`](docs/SLICE-1.md) — the current slice: scope, build plan,
   acceptance criteria, risks
 - [`docs/adr/`](docs/adr/) — decisions of record, 0001–0007
+- [`docs/provider-pin.md`](docs/provider-pin.md) — which provider and quantization every
+  benchmark request pins, the observed traffic it was chosen from, and the date
 - [`README.md`](README.md) — the thesis, where the harness gains are, model table
 - `../agentic-harness-ideas.md` — strategy notes and the still-open questions (sandbox
   model, context management, whether cheap-A/B replay reopens durability)

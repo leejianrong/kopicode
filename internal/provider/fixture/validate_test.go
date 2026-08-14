@@ -93,6 +93,20 @@ func TestValidateRejects(t *testing.T) {
 			want:   "pin.quantizations",
 		},
 		{
+			name: "a quantization OpenRouter does not accept",
+			why: "the pin's failure mode is a plausible invention, not a typo: a quantization no provider " +
+				"serves passes every self-consistency check and makes the series unfalsifiable",
+			mutate: func(f *fixture.Fixture) { f.Pin.Quantizations = []string{"q4_k_m"} },
+			want:   "not one of the values OpenRouter accepts",
+		},
+		{
+			name: "the pin is still the placeholder",
+			why: "KAN-775 chose a real pin; a fixture pinned to nothing declares an arm nobody can " +
+				"reproduce, and ADR-0005 §2 discards every result under it",
+			mutate: func(f *fixture.Fixture) { f.Pin.Order = []string{"PROVISIONAL-PIN"} },
+			want:   "placeholder",
+		},
+		{
 			name: "response header off the allowlist",
 			why:  "recorded headers are allowlisted, because the header nobody excluded is the one with the key",
 			mutate: func(f *fixture.Fixture) {

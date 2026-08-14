@@ -151,10 +151,11 @@ type Fixture struct {
 	// replayed session can be checked against the pin the experiment declares
 	// rather than assumed to match it.
 	//
-	// The values in the shipped fixtures are provisional: which provider slug
-	// and quantization kopicode actually pins is KAN-775's decision and has not
-	// been made. The mechanism is what this card delivers; the value is a
-	// placeholder and says so in the file.
+	// KAN-775 chose the value the shipped fixtures carry — `parasail/bf16` at
+	// `bf16`, from the endpoints OpenRouter served for qwen/qwen3-coder-next on
+	// 2026-08-14. The evidence and the reasoning are in docs/provider-pin.md,
+	// and that file is where a changed pin gets argued and dated; this package
+	// only refuses one that could not have been a pin at all.
 	Pin Pin `json:"pin"`
 
 	// Exchanges are the request/response pairs in the order they happened.
@@ -178,12 +179,25 @@ type Pin struct {
 	Quantizations []string `json:"quantizations"`
 }
 
-// Provisional reports whether the pin is a placeholder rather than a real
-// routing choice. KAN-775 owns the real values; until it lands, a fixture that
-// pretended to have one would be inventing a project decision.
+// Provisional reports whether the pin still carries the placeholder that stood
+// in before KAN-775 chose a provider.
+//
+// The marker's meaning inverted when the decision landed. While there was no
+// pin, a fixture carrying a plausible slug would have been inventing a project
+// decision, so the placeholder was *required* and the suite checked for it. Now
+// that docs/provider-pin.md holds a real one, a placeholder is the thing that
+// must not survive: a fixture pinned to nothing declares an arm nobody can
+// reproduce, and ADR-0005 §2 discards results whose pin does not match the
+// declared pin — which a placeholder trivially never does. [Validate] refuses
+// it.
 func (p Pin) Provisional() bool {
 	for _, slug := range p.Order {
 		if strings.HasPrefix(slug, provisionalPrefix) {
+			return true
+		}
+	}
+	for _, q := range p.Quantizations {
+		if strings.HasPrefix(q, provisionalPrefix) {
 			return true
 		}
 	}
@@ -193,7 +207,41 @@ func (p Pin) Provisional() bool {
 // provisionalPrefix marks a pin value nobody has chosen yet. It is deliberately
 // not a plausible provider slug: a fixture carrying "together" or "deepinfra"
 // would read as a decision this project has not made.
+//
+// It is kept rather than deleted with the placeholder it named, because the
+// same situation recurs on the next model: a fixture may be written before the
+// arm it belongs to has been pinned, and the marker is how that fixture says so
+// out loud instead of guessing. What changed is that such a fixture no longer
+// loads.
 const provisionalPrefix = "PROVISIONAL-"
+
+// quantizations is the vocabulary OpenRouter accepts in provider.quantizations,
+// verified against its provider-routing documentation on 2026-08-14.
+//
+// This exists because the failure mode a pin invites is not a typo — it is a
+// *plausible invention*. ADR-0005 §2 discards a result whose pin does not match
+// the experiment's declared pin, and the comparison is between a declaration and
+// itself, so a quantization no provider serves passes every internal check and
+// silently makes the whole series unfalsifiable. Holding the field to a closed
+// documented set is the cheapest place to catch that.
+//
+// "unknown" is on the list because OpenRouter really accepts it: some providers
+// do not report what they serve. It is a legal filter and a poor pin, and
+// docs/provider-pin.md says why that ruled two endpoints out.
+var quantizations = map[string]bool{
+	"int4":    true,
+	"int8":    true,
+	"fp4":     true,
+	"mxfp4":   true,
+	"nvfp4":   true,
+	"fp6":     true,
+	"fp8":     true,
+	"mxfp8":   true,
+	"fp16":    true,
+	"bf16":    true,
+	"fp32":    true,
+	"unknown": true,
+}
 
 // Exchange is one request and the response it drew.
 type Exchange struct {
