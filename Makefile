@@ -172,6 +172,20 @@ test: ## Fast tests: no infra, mock provider only — the inner loop
 test-all: ## The FULL suite, as CI runs it
 	go test -race -count=1 -tags=integration ./...
 
+# The one test that reaches openrouter.ai. Behind the `live` build tag so that
+# neither `test` nor `test-all` can pick it up, which is what keeps the default
+# suite hermetic and free. It sends one 16-token request against the pinned
+# endpoint — cents, not dollars — and prints what came back, including the exact
+# casing of the response's `provider` field, which OpenRouter documents nowhere
+# and docs/provider-pin.md has to record rather than guess.
+#
+# -v because the output is the point: this target exists to produce evidence, not
+# a pass.
+.PHONY: smoke-live
+smoke-live: ## ONE live request against the pinned provider — spends a few cents
+	@[ -n "$$OPENROUTER_API_KEY" ] || { echo "OPENROUTER_API_KEY is unset"; exit 1; }
+	go test -v -race -count=1 -tags=live -run TestLiveCompletion ./internal/provider/
+
 .PHONY: cover
 cover: ## Fast tests with a coverage profile
 	go test -short -race -count=1 -coverprofile=coverage.txt ./...

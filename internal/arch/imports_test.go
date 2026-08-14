@@ -4,6 +4,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -180,8 +181,112 @@ func TestEngineDoesNotImportSurfaces(t *testing.T) {
 // not make journal depend on the taxonomy it is supposed to outlive — an old
 // session must stay readable after parse renames a Kind, which it cannot do if
 // the reader compiles against the new one.
-var wireContractPairs = [][2]string{
-	{"internal/parse", "internal/journal"},
+// internal/provider is the second pair, for the same reason and with one
+// difference. The wire format, the journal and the fixtures declare the pin, the
+// token counts and the sampling parameters three times over, and each says in
+// its doc comment that this is deliberate — "this package must not import the
+// journal (the engine journals; packages return data)". KAN-776 added a client
+// to that package, which is the moment the temptation becomes concrete: a thing
+// that makes provider calls wants to record them.
+//
+// The difference is test files. internal/provider's shape_test.go imports the
+// journal on purpose — it is the third party that holds the three declarations
+// to each other, exactly as internal/provider/mock's test is — so banning the
+// import there would delete the check that keeps the shapes from drifting. So
+// this pair is enforced over product code only, and
+// TestTheWireContractWalkerDistinguishesTestFiles below asserts that the
+// distinction is real rather than assumed.
+var wireContractPairs = []wireContractPair{
+	{a: "internal/parse", b: "internal/journal", includeTests: true},
+	{a: "internal/provider", b: "internal/journal", includeTests: false},
+}
+
+// wireContractPair is two packages that share a vocabulary of strings and must
+// not share a dependency edge.
+type wireContractPair struct {
+	a, b string
+	// includeTests extends the ban to _test.go files. It is on where the
+	// vocabulary is the whole coupling (parse and journal have no legitimate
+	// third-party test between them) and off where a test is the mechanism that
+	// holds the two shapes equal.
+	includeTests bool
+}
+
+// packageImports returns the module-internal imports of the Go files directly in
+// dir, keyed by file. Unlike internalImports it does not descend.
+//
+// The distinction matters: internal/provider has sub-packages, and one of them —
+// internal/provider/mock — legitimately imports the journal. A recursive scan
+// would report that as a violation of the parent's rule and there would be no
+// way to state the rule at all.
+func packageImports(t *testing.T, dir string, includeTests bool) map[string][]string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("reading %s: %v", dir, err)
+	}
+
+	found := map[string][]string{}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") {
+			continue
+		}
+		if !includeTests && strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		path := filepath.Join(dir, name)
+		f, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+		if err != nil {
+			t.Fatalf("parsing %s: %v", path, err)
+		}
+		for _, spec := range f.Imports {
+			p, err := strconv.Unquote(spec.Path.Value)
+			if err != nil {
+				t.Fatalf("unquoting an import in %s: %v", path, err)
+			}
+			if strings.HasPrefix(p, modulePath+"/internal/") {
+				found[path] = append(found[path], p)
+			}
+		}
+	}
+	return found
+}
+
+// TestTheWireContractWalkerDistinguishesTestFiles is the positive control for
+// the product-code-only pair above.
+//
+// internal/provider's own test imports the journal — that is the shape-agreement
+// test, and it is supposed to. So the walker must find that import when it is
+// asked to include test files and must not find it when it is not. A walker that
+// returned nothing either way would let TestWireContractPairsDoNotImportEachOther
+// pass over a product file that imported the journal on every line.
+func TestTheWireContractWalkerDistinguishesTestFiles(t *testing.T) {
+	dir := filepath.Join(repoRoot(t), "internal", "provider")
+	banned := modulePath + "/internal/journal"
+
+	var withTests bool
+	for _, imports := range packageImports(t, dir, true) {
+		for _, imp := range imports {
+			if imp == banned {
+				withTests = true
+			}
+		}
+	}
+	if !withTests {
+		t.Fatalf("the walker found no import of %s under internal/provider even with test files "+
+			"included, but shape_test.go imports it — the traversal is broken and the guard below "+
+			"is asserting nothing", banned)
+	}
+
+	for file, imports := range packageImports(t, dir, false) {
+		for _, imp := range imports {
+			if imp == banned {
+				t.Fatalf("%s is a product file importing %s; the walker's test-file filter is not "+
+					"doing what the guard below assumes", file, banned)
+			}
+		}
+	}
 }
 
 // TestWireContractPairsDoNotImportEachOther guards that rule statically.
@@ -196,7 +301,7 @@ func TestWireContractPairsDoNotImportEachOther(t *testing.T) {
 	// cannot see those imports it cannot see a violation either, and the checks
 	// below would pass over anything.
 	control := map[string]bool{}
-	for _, imports := range internalImports(t, filepath.Join(repoRoot(t), "internal", "provider", "mock")) {
+	for _, imports := range packageImports(t, filepath.Join(repoRoot(t), "internal", "provider", "mock"), true) {
 		for _, imp := range imports {
 			control[imp] = true
 		}
@@ -210,11 +315,12 @@ func TestWireContractPairsDoNotImportEachOther(t *testing.T) {
 	}
 
 	for _, pair := range wireContractPairs {
-		for i, pkg := range pair {
-			banned := modulePath + "/" + pair[1-i]
+		sides := [2]string{pair.a, pair.b}
+		for i, pkg := range sides {
+			banned := modulePath + "/" + sides[1-i]
 			dir := filepath.Join(repoRoot(t), filepath.FromSlash(pkg))
 
-			for file, imports := range internalImports(t, dir) {
+			for file, imports := range packageImports(t, dir, pair.includeTests) {
 				rel, err := filepath.Rel(repoRoot(t), file)
 				if err != nil {
 					rel = file
@@ -230,7 +336,7 @@ func TestWireContractPairsDoNotImportEachOther(t *testing.T) {
 							"readable after the taxonomy on the other side is renamed\n"+
 							"see CLAUDE.md \"Boundaries that must not be crossed\" and the comment on\n"+
 							"journal.ToolCallRepaired.Classification",
-						rel, imp, pkg, pair[1-i],
+						rel, imp, pkg, sides[1-i],
 					)
 				}
 			}
