@@ -2,6 +2,7 @@ package provider
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -108,6 +109,7 @@ type Stream struct {
 	scan    *bufio.Scanner
 	closer  io.Closer
 	raw     json.RawMessage
+	wire    bytes.Buffer
 	acc     accumulator
 	pending []Delta
 	current Delta
@@ -119,10 +121,16 @@ type Stream struct {
 
 // NewSSEStream reads a streamed reply from an SSE body.
 //
-// raw is the assembled response body the reply should be journaled under. A
-// live client has to produce it; the replay provider passes the recorded body
-// through, so the journal records the bytes the provider sent rather than a
-// re-encoding of them. It may be nil, and [Reply].Raw is then nil.
+// raw is the *assembled* response body the reply should be journaled under —
+// one JSON completion object. The replay provider has one recorded beside the
+// frames and passes it through, so a replayed journal records the bytes the
+// provider sent rather than a re-encoding of them.
+//
+// A live streaming client has none, and passes nil. That is not an omission and
+// it is not fixed by assembling one: OpenRouter never sent an assembled body, so
+// building one out of the chunks would put a re-encoding in the record under a
+// field whose whole point is that it is not one. What the provider did send is
+// the frames, which is what [Stream.Transcript] returns.
 //
 // body is closed by [Stream.Close] when it is an io.Closer, which is what stops
 // a cancelled stream from leaking the response.
@@ -130,14 +138,34 @@ func NewSSEStream(ctx context.Context, body io.Reader, raw json.RawMessage) *Str
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	scan := bufio.NewScanner(body)
-	scan.Buffer(make([]byte, 0, 64*1024), maxFrameBytes)
 
-	s := &Stream{ctx: ctx, scan: scan, raw: raw}
+	s := &Stream{ctx: ctx, raw: raw}
+	// Tee before the scanner, not after it: bufio.Scanner strips the line
+	// terminators, so frames rebuilt from its tokens would be a reconstruction
+	// of the wire and not the wire. Reading through the tee costs one copy of
+	// the reply, which the journal was going to hold anyway.
+	scan := bufio.NewScanner(io.TeeReader(body, &s.wire))
+	scan.Buffer(make([]byte, 0, 64*1024), maxFrameBytes)
+	s.scan = scan
+
 	if c, ok := body.(io.Closer); ok {
 		s.closer = c
 	}
 	return s
+}
+
+// Transcript returns the bytes read from the provider so far, verbatim.
+//
+// For a streamed reply this is what [Reply].Raw is for an assembled one: the
+// record of what actually arrived, suitable for journal.ProviderResponse.Body,
+// with nothing re-encoded and nothing dropped — keep-alive comments, blank
+// separators and the [DONE] sentinel included.
+//
+// "So far" is literal. The scanner reads ahead, so mid-stream this can hold more
+// than has been delivered as deltas; after the stream is drained it is the whole
+// body. It is empty for a stream built by [NewBodyStream], which read no wire.
+func (s *Stream) Transcript() []byte {
+	return append([]byte(nil), s.wire.Bytes()...)
 }
 
 // NewBodyStream serves a reply that was not streamed: one assembled body,
