@@ -162,6 +162,82 @@ func TestEngineDoesNotImportSurfaces(t *testing.T) {
 	}
 }
 
+// wireContractPairs are packages that agree on a set of strings and must not
+// agree on a dependency edge.
+//
+// internal/journal records classifications internal/parse produces — the
+// extraction route, the failure kind, and the argument encoding — as plain
+// strings, and both sides say in their doc comments that this is deliberate:
+// "internal/parse must not import this package and this package must not import
+// it, so the coupling is a documented wire contract instead of a dependency
+// edge" (journal.ToolCallRepaired.Classification). Until KAN-838 that rule was
+// prose on both sides and enforced on neither.
+//
+// The direction that matters most is parse importing journal, because it is the
+// tempting one: a package that produces events wants to emit them. The engine
+// journals; packages return data (CLAUDE.md, "Boundaries that must not be
+// crossed"). The reverse direction is banned too, so that "just for a test" does
+// not make journal depend on the taxonomy it is supposed to outlive — an old
+// session must stay readable after parse renames a Kind, which it cannot do if
+// the reader compiles against the new one.
+var wireContractPairs = [][2]string{
+	{"internal/parse", "internal/journal"},
+}
+
+// TestWireContractPairsDoNotImportEachOther guards that rule statically.
+//
+// It covers test files as well as product code. Reading the other package's
+// types to check the shapes line up is fine; importing is not, and a
+// `parse_test` that imported journal would compile, pass, and quietly turn a
+// wire contract into a dependency.
+func TestWireContractPairsDoNotImportEachOther(t *testing.T) {
+	// Positive control. internal/provider/mock's test legitimately imports both
+	// — it is the third party that maps one onto the other — so if the walker
+	// cannot see those imports it cannot see a violation either, and the checks
+	// below would pass over anything.
+	control := map[string]bool{}
+	for _, imports := range internalImports(t, filepath.Join(repoRoot(t), "internal", "provider", "mock")) {
+		for _, imp := range imports {
+			control[imp] = true
+		}
+	}
+	for _, pkg := range []string{"internal/parse", "internal/journal"} {
+		if !control[modulePath+"/"+pkg] {
+			t.Fatalf("positive control failed: the import walker did not find %s under "+
+				"internal/provider/mock, which does import it — the traversal is broken and "+
+				"the guard below is asserting nothing", pkg)
+		}
+	}
+
+	for _, pair := range wireContractPairs {
+		for i, pkg := range pair {
+			banned := modulePath + "/" + pair[1-i]
+			dir := filepath.Join(repoRoot(t), filepath.FromSlash(pkg))
+
+			for file, imports := range internalImports(t, dir) {
+				rel, err := filepath.Rel(repoRoot(t), file)
+				if err != nil {
+					rel = file
+				}
+				for _, imp := range imports {
+					if imp != banned {
+						continue
+					}
+					t.Errorf(
+						"%s imports %s\n"+
+							"%s and %s share a vocabulary of strings, not a dependency edge:\n"+
+							"the engine journals, packages return data, and an old session has to stay\n"+
+							"readable after the taxonomy on the other side is renamed\n"+
+							"see CLAUDE.md \"Boundaries that must not be crossed\" and the comment on\n"+
+							"journal.ToolCallRepaired.Classification",
+						rel, imp, pkg, pair[1-i],
+					)
+				}
+			}
+		}
+	}
+}
+
 func allowedList() []string {
 	out := make([]string, 0, len(frontEndAllowed))
 	for k := range frontEndAllowed {

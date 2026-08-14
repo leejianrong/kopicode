@@ -84,6 +84,11 @@ func fixtures() map[journal.Type]journal.Payload {
 			Tool:   "read_file",
 			Args:   json.RawMessage(`{"path":"internal/parse/parse.go"}`),
 			Route:  "fenced_json",
+			// Deliberately the non-zero encoding. "object" is what
+			// parse.ArgsObject stringifies to and is also what a fixture would
+			// carry by accident, so a round trip that lost the field would
+			// still look right.
+			ArgEncoding: "json_string",
 		},
 		journal.TypeToolCallRepaired: journal.ToolCallRepaired{
 			CallID:         "call_1",
