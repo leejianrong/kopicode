@@ -14,12 +14,15 @@ import (
 // number that appears in this report and nowhere else would be a claim nobody
 // can check.
 //
-// Three things it will not do. It does not omit the reclamation counts, because
+// Four things it will not do. It does not omit the reclamation counts, because
 // silent cleanup and silent accumulation look identical from outside and the
 // whole card is that sentence. It does not omit the unclassified bucket, because
-// a classifier that has not run must not read as one that found nothing. And it
-// does not clip an oracle's output — that goes to the run directory, whole,
-// where the report points at it.
+// a classifier that has not run must not read as one that found nothing. It
+// does not omit an empty bucket either — ADR-0006 §3 asks for `unattributed`'s
+// size on every result, and a bucket printed only when it is non-zero says the
+// same nothing whether it is empty or uncomputed. And it does not clip an
+// oracle's output — that goes to the run directory, whole, where the report
+// points at it.
 func WriteReport(w io.Writer, r *RunResult) error {
 	var b strings.Builder
 
@@ -46,6 +49,8 @@ func WriteReport(w io.Writer, r *RunResult) error {
 	b.WriteString("\n")
 	writeTasks(&b, r)
 	b.WriteString("\n")
+	writeBuckets(&b, r.Buckets())
+	b.WriteString("\n")
 	writeReclamation(&b, r.Reclamation)
 
 	_, err := io.WriteString(w, b.String())
@@ -65,7 +70,7 @@ func writeTasks(b *strings.Builder, r *RunResult) {
 	for _, t := range r.Tasks {
 		fmt.Fprintf(b, "  %-*s  %-6s  %-16s  %5d  %8d  %9s  %s\n",
 			width, t.TaskID, verdict(t), orDash(t.Stop), t.Turns,
-			t.Tokens.Total, round(t.Duration), bucketLabel(t.Bucket))
+			t.Tokens.Total, round(t.Duration), bucketLabel(t))
 	}
 
 	for _, t := range r.Tasks {
@@ -116,14 +121,52 @@ func writeReclamation(b *strings.Builder, c Reclamation) {
 	}
 }
 
+// writeBuckets is SLICE-1 §9's attribution, tallied.
+//
+// It is printed on every run, in full, with every count present at every size.
+// The `unattributed` line is the one ADR-0006 §3 requires by name — "report its
+// size every time" — and it is a line of its own rather than a column in the
+// tally so that a reader skimming a report cannot miss the number the ADR says
+// is a quality signal in its own right.
+//
+// The denominator is the failing tasks, because that is what is being
+// attributed. A run in which nothing failed prints the header and the
+// `unattributed` line anyway: "no failures" and "nobody classified the
+// failures" must not render as the same silence.
+func writeBuckets(b *strings.Builder, c BucketCounts) {
+	fmt.Fprintf(b, "  attribution over %d failed task(s): harness %d, unattributed %d, "+
+		"model %d, unclassified %d\n", c.Failed, c.Harness, c.Unattributed, c.Model, c.Unclassified)
+	fmt.Fprintf(b, "  unattributed = %d — sessions that used the fuzzy edit fallback at any "+
+		"point (ADR-0006 §3).\n", c.Unattributed)
+	b.WriteString("    It does not detect a misapplied edit, it refuses to launder one, so it " +
+		"absorbs\n    some real model failures. Its size is stated on every run, zero included.\n")
+
+	if c.Harness > 0 {
+		fmt.Fprintf(b, "  %d failure(s) classified `harness`. The slice-1 bar is zero "+
+			"(docs/SLICE-1.md §Test Plan)\n", c.Harness)
+	}
+	if c.Unclassified > 0 {
+		fmt.Fprintf(b, "  %d failure(s) were NOT attributed: no classifier ran, or the one that "+
+			"did could not read the record. This is not a clean bill of health\n", c.Unclassified)
+	}
+}
+
 // bucketLabel prints the unclassified bucket rather than leaving the column
 // blank. An empty cell reads as "nothing to report"; this one means "nobody has
 // looked yet", and the two are opposite claims.
-func bucketLabel(b Bucket) string {
-	if b == BucketUnclassified {
+//
+// A task that passed prints neither. Attribution is failure attribution
+// (ADR-0006 §3 taints "any failing session"), so a passing row has nothing to
+// attribute and "unclassified" there would read as the classifier having been
+// skipped.
+func bucketLabel(t TaskResult) string {
+	if t.Passed {
+		return "n/a"
+	}
+	if t.Bucket == BucketUnclassified {
 		return "unclassified"
 	}
-	return string(b)
+	return string(t.Bucket)
 }
 
 func verdict(t TaskResult) string {

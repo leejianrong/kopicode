@@ -36,6 +36,27 @@
 //   - and the counts are in [RunResult.Reclamation], because silent cleanup and
 //     silent accumulation look identical from outside.
 //
+// # Failure attribution, and the order the rules are applied in
+//
+// A failing task is charged to one of SLICE-1 §9's three buckets by
+// [Attribution], derived from journal events and never judged. A session can
+// trip several rules at once and §9 does not say which wins, so the order is
+// decided here:
+//
+//  0. nothing to attribute  — the oracle passed, or the task was cancelled
+//  1. harness               — a defect this project owns
+//  2. unattributed          — the fuzzy edit fallback was used at any point
+//  3. model                 — everything else
+//
+// `harness` outranks `unattributed` because the two make opposite-strength
+// claims: one says we know the failure was ours, the other says nobody can
+// tell. Letting the taint swallow a known harness failure would move it out of
+// the only bucket with an acceptance bar of zero, which is the flattering
+// direction. `unattributed` outranks `model` because ADR-0006 §3 says so — the
+// taint applies at any point, whatever the session's stop, precisely because
+// the misapplication it exists for produces a clean one. [Attribution] carries
+// the full argument and [BucketCounts] the tally the report prints.
+//
 // # This is not a security boundary
 //
 // Model-authored shell runs in a worktree, not a container. The temp HOME
