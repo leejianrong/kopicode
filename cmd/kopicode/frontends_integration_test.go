@@ -46,11 +46,31 @@ const defaultModelID = "qwen/qwen3-coder-next"
 type frontEnd struct {
 	name string
 	pkg  string
+	// verb is the subcommand an ordinary invocation needs, empty when the
+	// binary takes flags on their own.
+	//
+	// kopibench requires `run` (KAN-796): one invocation of it is one arm over
+	// the whole corpus, and on the live provider that spends money, so a bare
+	// `kopibench` must not be a request to do anything. What this file is about
+	// — that both binaries resolve the arm the same way, and refuse an unknown
+	// one before they touch anything — is unaffected, so the verb is data
+	// rather than a second copy of every case.
+	verb string
 }
 
 var frontEnds = []frontEnd{
 	{name: "kopicode", pkg: "./cmd/kopicode"},
-	{name: "kopibench", pkg: "./cmd/kopibench"},
+	{name: "kopibench", pkg: "./cmd/kopibench", verb: "run"},
+}
+
+// argv is the front end's ordinary invocation: its verb, if it has one, then
+// the flags. `--version` deliberately does not go through it — that is asked of
+// the binary itself and not of a command.
+func (f frontEnd) argv(args ...string) []string {
+	if f.verb == "" {
+		return args
+	}
+	return append([]string{f.verb}, args...)
 }
 
 func TestModelSelectionOnBothFrontEnds(t *testing.T) {
@@ -60,7 +80,7 @@ func TestModelSelectionOnBothFrontEnds(t *testing.T) {
 
 			t.Run("an unknown model from the flag is a usage error", func(t *testing.T) {
 				dir := repoDir(t)
-				res := run(t, bin, dir, nil, "--model", "qwen/qwen3-coder-nxt")
+				res := run(t, bin, dir, nil, fe.argv("--model", "qwen/qwen3-coder-nxt")...)
 
 				if res.code != exitUsage {
 					t.Errorf("exit code = %d, want %d (usage). stderr:\n%s", res.code, exitUsage, res.stderr)
@@ -82,7 +102,7 @@ func TestModelSelectionOnBothFrontEnds(t *testing.T) {
 				writeConfig(t, dir, "model = \"qwen/not-a-model\"\n")
 
 				before := treeOf(t, dir)
-				res := run(t, bin, dir, nil)
+				res := run(t, bin, dir, nil, fe.argv()...)
 				if res.code != exitUsage {
 					t.Fatalf("exit code = %d, want %d. stderr:\n%s", res.code, exitUsage, res.stderr)
 				}
@@ -110,20 +130,24 @@ func TestModelSelectionOnBothFrontEnds(t *testing.T) {
 				writeConfig(t, dir, "model = \"qwen/not-a-model\"\n")
 
 				// The config file alone refuses.
-				if res := run(t, bin, dir, nil); res.code != exitUsage {
+				if res := run(t, bin, dir, nil, fe.argv()...); res.code != exitUsage {
 					t.Errorf("with a bad model in the config file, exit code = %d, want %d. stderr:\n%s",
 						res.code, exitUsage, res.stderr)
 				}
 
-				// The flag overrides it, and the run gets as far as the
-				// unimplemented loop.
-				res := run(t, bin, dir, nil, "--model", defaultModelID)
+				// The flag overrides it, and the run gets past resolution — far
+				// enough to fail on something else. *What* it then fails on
+				// differs per binary and changes as each is built out, so what
+				// is asserted here is the distinction this case is about: exit
+				// 4 rather than the exit 2 the config file alone produced, with
+				// the binary saying why.
+				res := run(t, bin, dir, nil, fe.argv("--model", defaultModelID)...)
 				if res.code != exitHarness {
 					t.Errorf("with --model overriding the config file, exit code = %d, want %d. stderr:\n%s",
 						res.code, exitHarness, res.stderr)
 				}
-				if !strings.Contains(res.stderr, "not implemented") {
-					t.Errorf("stderr does not say the binary is unimplemented:\n%s", res.stderr)
+				if !strings.Contains(res.stderr, fe.name+":") {
+					t.Errorf("stderr does not say which binary stopped or why:\n%s", res.stderr)
 				}
 			})
 
@@ -132,14 +156,14 @@ func TestModelSelectionOnBothFrontEnds(t *testing.T) {
 				// flag parsing must not turn an unimplemented binary into a
 				// clean exit 0, which is how a broken harness passes a smoke
 				// test.
-				res := run(t, bin, repoDir(t), nil)
+				res := run(t, bin, repoDir(t), nil, fe.argv()...)
 				if res.code != exitHarness {
 					t.Errorf("exit code = %d, want %d. stderr:\n%s", res.code, exitHarness, res.stderr)
 				}
 			})
 
 			t.Run("an unknown harness is a usage error", func(t *testing.T) {
-				res := run(t, bin, repoDir(t), nil, "--harness", "aggressive")
+				res := run(t, bin, repoDir(t), nil, fe.argv("--harness", "aggressive")...)
 				if res.code != exitUsage {
 					t.Errorf("exit code = %d, want %d. stderr:\n%s", res.code, exitUsage, res.stderr)
 				}
@@ -158,7 +182,7 @@ func TestModelSelectionOnBothFrontEnds(t *testing.T) {
 					"MODEL=qwen/not-a-model",
 					"HARNESS=aggressive",
 				}
-				res := run(t, bin, repoDir(t), env)
+				res := run(t, bin, repoDir(t), env, fe.argv()...)
 				if res.code != exitHarness {
 					t.Errorf("an environment variable changed the resolution: exit code = %d, want %d. "+
 						"stderr:\n%s", res.code, exitHarness, res.stderr)
@@ -167,7 +191,7 @@ func TestModelSelectionOnBothFrontEnds(t *testing.T) {
 
 			t.Run("--debug names the arm and where it came from", func(t *testing.T) {
 				dir := repoDir(t)
-				res := run(t, bin, dir, nil, "--debug", "--model", defaultModelID)
+				res := run(t, bin, dir, nil, fe.argv("--debug", "--model", defaultModelID)...)
 
 				for _, want := range []string{
 					"model_id=" + defaultModelID,
@@ -185,7 +209,7 @@ func TestModelSelectionOnBothFrontEnds(t *testing.T) {
 			t.Run("diagnostics are off by default", func(t *testing.T) {
 				// slog is off unless --debug, and on stderr rather than stdout
 				// because --print owns stdout (CLAUDE.md).
-				res := run(t, bin, repoDir(t), nil, "--model", defaultModelID)
+				res := run(t, bin, repoDir(t), nil, fe.argv("--model", defaultModelID)...)
 				if strings.Contains(res.stderr, "harness_config_hash") {
 					t.Errorf("diagnostics appeared without --debug:\n%s", res.stderr)
 				}
