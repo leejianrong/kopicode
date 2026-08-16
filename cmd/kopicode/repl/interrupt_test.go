@@ -43,13 +43,14 @@ func TestCtrlCMidStreamLeavesAUsableSession(t *testing.T) {
 			prompts = append(prompts, prompt)
 			turn++
 			if turn > 1 {
-				s.Stream("nothing, I was interrupted\n")
-				s.Render(repl.Event{Kind: repl.KindAssistant, Text: "nothing, I was interrupted\n"})
+				s.Render(delta("nothing, I was interrupted\n"))
+				s.Render(engine.Event{Kind: engine.EventAssistantMessage, Seq: 9,
+					Text: "nothing, I was interrupted\n"})
 				return engine.Result{Stop: engine.StopCompleted, Turns: 1}, nil
 			}
 
 			s.Progress("waiting for the model")
-			s.Stream("I will start by reading")
+			s.Render(delta("I will start by reading"))
 			close(streamed)
 
 			// The user presses Ctrl-C here, with the reply half printed. The

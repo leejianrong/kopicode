@@ -263,7 +263,7 @@ func (e *Engine) call(ctx context.Context, turn, attempt int) (provider.Reply, S
 
 	for stream.Next() {
 		if e.cfg.Stream != nil {
-			e.cfg.Stream(stream.Delta())
+			e.cfg.Stream(turn, stream.Delta())
 		}
 	}
 	reply, err := stream.Reply()

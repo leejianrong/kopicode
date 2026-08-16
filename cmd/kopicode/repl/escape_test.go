@@ -22,37 +22,11 @@ import (
 // that emits an escape ends up being the untested one.
 func busyTurn(ctx context.Context, _ string, s repl.Surface) (engine.Result, error) {
 	s.Progress("waiting for the model")
-	s.Stream("I will read ")
-	s.Stream("the file first.\n")
-	s.Render(repl.Event{Kind: repl.KindAssistant, Text: "I will read the file first.\n"})
+	for _, e := range everyKind() {
+		s.Render(e)
+	}
 
-	s.Render(repl.Event{Kind: repl.KindThinking, Text: "the anchors look stale\nre-read first"})
-	s.Render(repl.Event{Kind: repl.KindToolCall, Tool: "read_file", Detail: "internal/x.go"})
-	s.Render(repl.Event{
-		Kind: repl.KindToolResult, Tool: "read_file", Size: 4096,
-	})
-	s.Render(repl.Event{Kind: repl.KindToolRepair, Tool: "edit_file", Reason: "invalid_json"})
-	s.Render(repl.Event{Kind: repl.KindToolFailed, Reason: "unlabelled_fence"})
-	s.Render(repl.Event{Kind: repl.KindEditApplied, Path: "internal/x.go", Mode: "anchored"})
-	s.Render(repl.Event{
-		Kind: repl.KindEditRejected, Path: "internal/x.go", Reason: "anchor_drift",
-		Text: "a1b2c3d4 12| func Open(",
-	})
-	s.Render(repl.Event{
-		Kind: repl.KindSyntaxGate, Path: "internal/x.go", Checker: "gofmt -e", Ran: true, ExitCode: 1,
-	})
-	s.Render(repl.Event{Kind: repl.KindSyntaxGate, Path: "notes.txt"})
-	s.Render(repl.Event{Kind: repl.KindSnapshot, Ref: "refs/kopicode/s-1/3"})
-	s.Render(repl.Event{
-		Kind: repl.KindVerification, Command: []string{"go", "test", "./..."}, ExitCode: 0,
-	})
-	s.Render(repl.Event{Kind: repl.KindPermissionDecided, Decision: "allow", Source: "user"})
-	s.Render(repl.Event{Kind: repl.KindNotice, Text: "resumed"})
-	s.Render(repl.Event{Kind: repl.KindError, Text: "provider returned no usable reply"})
-	s.Render(repl.Event{Kind: repl.KindSessionStarted, Detail: "s-1"})
-	s.Render(repl.Event{Kind: repl.KindSessionEnded, Reason: "completed"})
-
-	if _, err := s.Ask(ctx, repl.Consent{
+	if _, err := s.Ask(ctx, engine.ConsentRequest{
 		Kind: "run_shell", Tool: "run_shell",
 		Detail: "go test ./...",
 		Reason: "model-authored shell commands always require consent",
@@ -62,6 +36,66 @@ func busyTurn(ctx context.Context, _ string, s repl.Surface) (engine.Result, err
 
 	s.Progress("")
 	return engine.Result{Stop: engine.StopCompleted, Turns: 1}, nil
+}
+
+// everyKind is one populated event of every kind the engine can emit, plus the
+// zero value.
+//
+// It is derived from engine.EventKind rather than hand-listed, by way of
+// TestEveryEventKindIsCovered below: a kind added to the engine and not added
+// here fails that test, so "piped output has no escapes" keeps being asserted
+// over *everything* the surface can print rather than over the subset somebody
+// remembered.
+func everyKind() []engine.Event {
+	return []engine.Event{
+		{Kind: engine.EventSessionStarted, Seq: 1, Detail: "s-1", Text: "qwen/qwen3-coder-next"},
+		{Kind: engine.EventUserMessage, Seq: 2, Text: "fix the parser"},
+		{Kind: engine.EventDelta, Text: "I will read ", Reason: "content"},
+		{Kind: engine.EventDelta, Text: "the file first.\n", Reason: "content"},
+		{Kind: engine.EventDelta, Text: "hmm\n", Reason: "reasoning"},
+		{Kind: engine.EventAssistantMessage, Seq: 3, Text: "I will read the file first.\n"},
+		{Kind: engine.EventThinking, Seq: 4, Text: "the anchors look stale\nre-read first"},
+		{Kind: engine.EventProviderRequest, Seq: 5, Detail: "qwen/qwen3-coder-next", ExitCode: 1, HasExitCode: true},
+		{Kind: engine.EventProviderResponse, Seq: 6, Reason: "stop", Source: "parasail/bf16", Size: 900},
+		{Kind: engine.EventToolCallRequested, Seq: 7, Detail: "kc-1", Text: "```tool\n{"},
+		{Kind: engine.EventToolCallParsed, Seq: 8, Tool: "read_file", Detail: `{"path":"internal/x.go"}`, Reason: "native"},
+		{Kind: engine.EventToolCallRepaired, Seq: 9, Reason: "invalid_json", ExitCode: 1, HasExitCode: true},
+		{Kind: engine.EventToolCallFailed, Seq: 10, Reason: "unlabelled_fence"},
+		{Kind: engine.EventToolResult, Seq: 11, Tool: "read_file", Size: 4096},
+		{Kind: engine.EventEditApplied, Seq: 12, Path: "internal/x.go", Mode: "anchored"},
+		{Kind: engine.EventEditRejected, Seq: 13, Path: "internal/x.go", Reason: "anchor_drift",
+			Text: "a1b2c3d4 12| func Open("},
+		{Kind: engine.EventSyntaxGate, Seq: 14, Path: "internal/x.go", Checker: "gofmt -e", Ran: true,
+			ExitCode: 1, HasExitCode: true},
+		{Kind: engine.EventSyntaxGate, Seq: 15, Path: "notes.txt"},
+		{Kind: engine.EventPermissionRequested, Seq: 16, Tool: "run_shell", Detail: "go test ./...", Mode: "run_shell"},
+		{Kind: engine.EventPermissionDecided, Seq: 17, Decision: "allow", Source: "user"},
+		{Kind: engine.EventTurnSnapshot, Seq: 18, Ref: "refs/kopicode/s-1/3"},
+		{Kind: engine.EventVerification, Seq: 19, Command: []string{"go", "test", "./..."}, ExitCode: 0, HasExitCode: true},
+		{Kind: engine.EventUnknown, Seq: 20, Reason: "SomethingNewer", Text: `{"a":1}`},
+		{Kind: engine.EventSessionEnded, Seq: 21, Reason: "completed", ExitCode: 0, HasExitCode: true},
+		// The zero value, which must be reported rather than dropped.
+		{},
+	}
+}
+
+// TestEveryEventKindIsCovered holds everyKind to the engine's vocabulary.
+//
+// Without it, a kind added to internal/engine would render through the default
+// case — "no rendering for ..." — and no test would notice, because the two
+// tests that matter here both drive everyKind.
+func TestEveryEventKindIsCovered(t *testing.T) {
+	seen := map[engine.EventKind]bool{}
+	for _, e := range everyKind() {
+		seen[e.Kind] = true
+	}
+
+	for k := engine.EventUnspecified; k <= engine.EventDelta; k++ {
+		if !seen[k] {
+			t.Errorf("engine.%s is not in everyKind(), so nothing asserts how the REPL prints it "+
+				"or that printing it emits no escape when piped", k)
+		}
+	}
 }
 
 // escape is any ESC byte. The criterion in docs/SLICE-1.md §Test Plan is
@@ -116,16 +150,19 @@ func TestNoEscapesWhenPiped(t *testing.T) {
 // asserted directly: the same session with and without progress calls
 // produces identical bytes.
 func TestProgressWritesNothingWhenPiped(t *testing.T) {
+	one := engine.Event{Kind: engine.EventTurnSnapshot, Seq: 1, Ref: "refs/kopicode/s/1"}
+	two := engine.Event{Kind: engine.EventTurnSnapshot, Seq: 2, Ref: "refs/kopicode/s/2"}
+
 	quiet := func(_ context.Context, _ string, s repl.Surface) (engine.Result, error) {
-		s.Render(repl.Event{Kind: repl.KindNotice, Text: "one"})
-		s.Render(repl.Event{Kind: repl.KindNotice, Text: "two"})
+		s.Render(one)
+		s.Render(two)
 		return engine.Result{Stop: engine.StopCompleted}, nil
 	}
 	noisy := func(_ context.Context, _ string, s repl.Surface) (engine.Result, error) {
 		s.Progress("thinking")
-		s.Render(repl.Event{Kind: repl.KindNotice, Text: "one"})
+		s.Render(one)
 		s.Progress("still thinking")
-		s.Render(repl.Event{Kind: repl.KindNotice, Text: "two"})
+		s.Render(two)
 		s.Progress("")
 		return engine.Result{Stop: engine.StopCompleted}, nil
 	}

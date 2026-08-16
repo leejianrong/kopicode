@@ -6,25 +6,29 @@
 // startup rather than at the first provider request, and that refusal belongs
 // to the front end.
 //
-// The REPL surface itself is in the repl sub-package, complete and tested, and
-// is not driven from here yet: assembling a session needs a constructor
-// internal/engine does not export, and ADR-0003's allowlist means a front end
-// cannot build one out of internal/journal, internal/tools, internal/permission
-// and the rest itself. Until that constructor exists this binary resolves the
-// arm and exits 4 rather than pretending — an unimplemented binary exiting
-// cleanly is how a broken harness passes a smoke test.
+// The surface itself is the repl sub-package, and this file is the ninety lines
+// that connect it to a session: resolve the arm, open the session with
+// engine.Open, hand the loop the engine's event stream to render and its
+// consent requests to ask, and map the stop onto an exit code. Everything about
+// *how* a session is assembled is the engine's, which is what ADR-0003
+// decision 3 means by driving it through its exported interface — this file
+// imports internal/engine and internal/build and nothing else from internal/.
 //
 // See docs/SLICE-1.md for the scope of the first slice and docs/adr/ for the
 // decisions this build starts from.
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 
+	"github.com/leejianrong/kopicode/cmd/kopicode/lineedit"
+	"github.com/leejianrong/kopicode/cmd/kopicode/repl"
 	"github.com/leejianrong/kopicode/internal/build"
 	"github.com/leejianrong/kopicode/internal/engine"
 )
@@ -40,7 +44,7 @@ func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 // invent, and inventing it twice is how the two front ends stop agreeing about
 // how they are invoked.
 var commands = map[string]func(args []string, stdout, stderr io.Writer) int{
-	"repl":    repl,
+	"repl":    interactive,
 	"run":     runPrint,
 	"version": version,
 }
@@ -106,8 +110,8 @@ func runPrint(_ []string, _, stderr io.Writer) int {
 	return exitHarness
 }
 
-// repl resolves the arm and would start the interactive loop.
-func repl(args []string, _, stderr io.Writer) int {
+// interactive resolves the arm and starts the REPL over a session.
+func interactive(args []string, _, stderr io.Writer) int {
 	fs := flag.NewFlagSet("kopicode", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	overrides := engine.BindSelectionFlags(fs)
@@ -144,11 +148,105 @@ func repl(args []string, _, stderr io.Writer) int {
 	// the journal).
 	slog.Debug("arm resolved", "selection", selection)
 
-	// The loop the repl package drives is built and tested; what is missing is
-	// the session it drives. See this file's package comment.
-	say(stderr, "kopicode: the REPL is not implemented yet — the engine exports no session "+
-		"constructor a front end can call (see docs/SLICE-1.md build step 13)\n")
-	return exitHarness
+	return session(stdio(stderr), engine.Options{Dir: dir, Selection: selection})
+}
+
+// streams is where the REPL reads and writes, and how it tells whether it has a
+// terminal.
+//
+// It is a parameter rather than os.Stdin and os.Stdout reached for directly, so
+// that the whole front end — resolution, session, loop, exit code — is drivable
+// from a test with the bytes captured. The two "is this a terminal" questions
+// are answered by one value: see [stdio].
+type streams struct {
+	in       io.Reader
+	out      io.Writer
+	err      io.Writer
+	terminal lineedit.Terminal
+}
+
+// stdio is the process's own streams.
+//
+// The terminal decides both halves, and they are different questions: whether
+// input can be read a key at a time, and whether output may carry escapes.
+// OSTerminal answers yes only when *both* ends are terminals, which is exactly
+// the condition for each — `kopicode > transcript` with a keyboard attached
+// must produce a file with no escapes in it.
+func stdio(stderr io.Writer) streams {
+	return streams{
+		in:       os.Stdin,
+		out:      os.Stdout,
+		err:      stderr,
+		terminal: lineedit.OSTerminal(os.Stdin, os.Stdout),
+	}
+}
+
+// session opens a session, drives the REPL over it, and reports the exit code.
+//
+// It takes the options rather than building them so that a test can supply a
+// directory and a provider endpoint; everything about *how* a session is
+// assembled is the engine's, which is the point of the constructor this calls.
+func session(std streams, opts engine.Options) int {
+	stderr := std.err
+	// The signal registration comes first and is undone last. Between these
+	// two lines SIGINT no longer terminates the process — it cancels the
+	// in-flight turn — and a binary that left it registered after the loop
+	// finished would ignore a Ctrl-C it can no longer act on.
+	interrupts, stopSignals := repl.Interrupts()
+	defer stopSignals()
+
+	// The loop and the session each need the other: the session announces its
+	// own record through the loop, and the loop's turns call the session. The
+	// two closures below tie the knot, and it is a knot rather than a cycle
+	// because neither is invoked until Loop.Run — by which point sess is set,
+	// or this function has already returned.
+	var sess *engine.Session
+
+	loop, err := repl.New(repl.Config{
+		In:          std.in,
+		Out:         std.out,
+		Interactive: std.terminal.IsInteractive(),
+		Terminal:    std.terminal,
+		Interrupts:  interrupts,
+		Turn: func(ctx context.Context, prompt string, _ repl.Surface) (engine.Result, error) {
+			return sess.Run(ctx, prompt)
+		},
+		Close: func(ctx context.Context) error { return sess.Close(ctx) },
+	})
+	if err != nil {
+		say(stderr, "kopicode: %v\n", err)
+		return exitHarness
+	}
+
+	opts.Events = loop.Render
+	opts.Consent = loop.Ask
+
+	ctx := context.Background()
+	sess, err = engine.Open(ctx, opts)
+	if err != nil {
+		// A missing credential is exit 4 and not exit 2. Exit 2 is ADR-0007
+		// decision 4's case — an id this binary does not recognise, refused
+		// before anything is opened — and stretching it to cover a machine that
+		// is not set up would make the code that means "your command line was
+		// wrong" also mean "your environment was". Nothing was opened either
+		// way; the record of that is this message.
+		if errors.Is(err, engine.ErrNoAPIKey) {
+			say(stderr, "kopicode: %s is not set, so there is no provider to talk to\n", engine.APIKeyEnv)
+			return exitHarness
+		}
+		say(stderr, "kopicode: %v\n", err)
+		return exitHarness
+	}
+	// The session id and the model are already on screen: the record's own
+	// SessionStarted said them, and the surface renders it. What the record
+	// cannot say is where it is, so that is the one line added here.
+	loop.Notice("record: " + sess.Path())
+
+	stop, err := loop.Run(ctx)
+	if err != nil {
+		say(stderr, "kopicode: %v\n", err)
+	}
+	return stop.ExitCode()
 }
 
 // setupLogging puts engine diagnostics on stderr under --debug and discards

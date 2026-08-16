@@ -8,66 +8,21 @@ import (
 	"strings"
 
 	"github.com/leejianrong/kopicode/cmd/kopicode/lineedit"
+	"github.com/leejianrong/kopicode/internal/engine"
 )
 
-// Consent is a permission request as the surface needs it.
+// The request and the answer are the engine's types, not this package's.
 //
-// The fields are permission.Request's, copied: Kind is its Kind.String()
-// ("run_shell", "write_outside_root"), Reason is the sentence naming the rule
-// that fired, Detail is the thing being consented to, and Resolved is the
-// absolute symlink-followed path a write targets.
-//
-// It is a separate declaration rather than the engine's own type for the
-// reason internal/permission's doc comment gives: the engine decides *that*
-// consent is required and what a decision means, never how it is asked, and a
-// surface that imported the decision type would be one edit away from
-// deciding.
-//
-// Resolved is shown rather than the model's spelling, and that is the whole
-// point of the field: consenting to "../../etc/hosts" and consenting to
-// "/etc/hosts" are different acts, and only one of them is legible.
-type Consent struct {
-	Kind     string
-	Tool     string
-	Detail   string
-	Reason   string
-	Resolved string
-}
-
-// Answer is what the user said.
-type Answer uint8
-
-const (
-	// AnswerDeny refuses. It is the zero value, so every path that fails to
-	// reach a positive answer denies — including a dropped return value.
-	AnswerDeny Answer = iota
-	// AnswerAllow permits this action and only this one.
-	AnswerAllow
-	// AnswerAllowSession permits this action and later ones with the same
-	// kind and the same detail. Exact match and nothing wider; the scope is
-	// the gate's, and it is stated in the prompt so the user knows what they
-	// are agreeing to.
-	AnswerAllowSession
-)
-
-// String returns the journal wire value the engine records for this answer:
-// "deny", "allow" or "allow_session".
-func (a Answer) String() string {
-	switch a {
-	case AnswerDeny:
-		return "deny"
-	case AnswerAllow:
-		return "allow"
-	case AnswerAllowSession:
-		return "allow_session"
-	default:
-		return fmt.Sprintf("answer(%d)", uint8(a))
-	}
-}
+// [engine.ConsentRequest] and [engine.ConsentAnswer] exist precisely so a
+// surface can be asked without importing internal/permission, and declaring a
+// third pair here would be a translation table between two vocabularies that
+// already agree — the kind of duplication that stays correct until the day it
+// does not. What this file owns is how the question *looks*, which is the whole
+// of the surface's half (internal/permission's package doc).
 
 // ErrNoConsent is returned when the question could not be put to anybody: the
 // input ended, the turn was cancelled, or the terminal broke. The [Answer] is
-// [AnswerDeny] in every such case.
+// [engine.ConsentDeny] in every such case.
 //
 // An unanswerable question is not a yes. That is the one rule this function
 // has, and it is why the error and the deny always travel together.
@@ -86,9 +41,9 @@ var ErrNoConsent = errors.New("repl: consent could not be obtained")
 // it is a signal that cancels the turn's context, and the check after the read
 // catches it. In neither case can an interrupted turn be the turn that gets
 // consent.
-func (l *Loop) Ask(ctx context.Context, c Consent) (Answer, error) {
+func (l *Loop) Ask(ctx context.Context, c engine.ConsentRequest) (engine.ConsentAnswer, error) {
 	if err := ctx.Err(); err != nil {
-		return AnswerDeny, fmt.Errorf("%w: %w", ErrNoConsent, err)
+		return engine.ConsentDeny, fmt.Errorf("%w: %w", ErrNoConsent, err)
 	}
 
 	l.Progress("")
@@ -97,12 +52,12 @@ func (l *Loop) Ask(ctx context.Context, c Consent) (Answer, error) {
 
 	answer, err := l.readAnswer(c)
 	if err != nil {
-		return AnswerDeny, err
+		return engine.ConsentDeny, err
 	}
 	if cerr := ctx.Err(); cerr != nil {
 		// Answered, but the turn it belonged to is gone. Honouring it would
 		// run the command the user just interrupted.
-		return AnswerDeny, fmt.Errorf("%w: %w", ErrNoConsent, cerr)
+		return engine.ConsentDeny, fmt.Errorf("%w: %w", ErrNoConsent, cerr)
 	}
 	return answer, nil
 }
@@ -110,7 +65,7 @@ func (l *Loop) Ask(ctx context.Context, c Consent) (Answer, error) {
 // renderRequest prints the question. One block, no box drawing, no cursor
 // movement: it scrolls like everything else and can be selected and pasted
 // into a bug report.
-func (l *Loop) renderRequest(c Consent) {
+func (l *Loop) renderRequest(c engine.ConsentRequest) {
 	l.out.line(l.out.bold("[perm] "+orUnknown(c.Tool)) + " needs your consent")
 	if c.Detail != "" {
 		l.out.line("       " + label(c.Kind) + ": " + c.Detail)
@@ -146,7 +101,7 @@ const consentPrompt = "allow? [y]es / [N]o / [a]lways for this exact request: "
 // be a loop a piped session cannot leave, and re-prompting a human who typed
 // something else is how a considered "no" becomes an accidental "yes" three
 // keystrokes later.
-func (l *Loop) readAnswer(c Consent) (Answer, error) {
+func (l *Loop) readAnswer(c engine.ConsentRequest) (engine.ConsentAnswer, error) {
 	l.ed.SetPrompt(consentPrompt)
 	defer l.ed.SetPrompt(l.prompt)
 
@@ -155,13 +110,13 @@ func (l *Loop) readAnswer(c Consent) (Answer, error) {
 	switch {
 	case errors.Is(err, lineedit.ErrInterrupted):
 		l.tag("perm", "denied: interrupted")
-		return AnswerDeny, fmt.Errorf("%w: interrupted", ErrNoConsent)
+		return engine.ConsentDeny, fmt.Errorf("%w: interrupted", ErrNoConsent)
 	case errors.Is(err, io.EOF):
 		l.tag("perm", "denied: no input to ask")
-		return AnswerDeny, fmt.Errorf("%w: %w", ErrNoConsent, io.EOF)
+		return engine.ConsentDeny, fmt.Errorf("%w: %w", ErrNoConsent, io.EOF)
 	case err != nil:
 		l.tag("perm", "denied: "+err.Error())
-		return AnswerDeny, fmt.Errorf("%w: %w", ErrNoConsent, err)
+		return engine.ConsentDeny, fmt.Errorf("%w: %w", ErrNoConsent, err)
 	}
 
 	answer := interpret(reply)
@@ -171,13 +126,13 @@ func (l *Loop) readAnswer(c Consent) (Answer, error) {
 
 // interpret maps a typed reply onto an answer. Anything that is not an
 // affirmative is a refusal, including an empty line and including a typo.
-func interpret(reply string) Answer {
+func interpret(reply string) engine.ConsentAnswer {
 	switch strings.ToLower(strings.TrimSpace(reply)) {
 	case "y", "yes":
-		return AnswerAllow
+		return engine.ConsentAllow
 	case "a", "always":
-		return AnswerAllowSession
+		return engine.ConsentAllowSession
 	default:
-		return AnswerDeny
+		return engine.ConsentDeny
 	}
 }
