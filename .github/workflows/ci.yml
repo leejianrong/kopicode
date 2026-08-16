@@ -72,24 +72,30 @@ jobs:
           cache: true
       - run: make xbuild
 
-  # bench-smoke is deliberately NOT wired up yet. `make bench-smoke` exists and is
-  # documented, but the runner and corpus are slice-1 build steps 15-17, so the job
-  # would be red from day one — and a CI check that is always red trains everyone to
-  # ignore CI. Add this job in the PR that lands the corpus:
+  # Zero tokens: the mock provider replays recorded traffic, so this reaches no
+  # network and costs nothing. `make bench` is the paid target and is never in CI.
   #
-  #   bench-smoke:
-  #     name: Bench smoke (mock provider, zero tokens)
-  #     runs-on: ubuntu-latest
-  #     steps:
-  #       - uses: actions/checkout@v5
-  #       - uses: actions/setup-go@v6
-  #         with: { go-version-file: go.mod, cache: true }
-  #       - name: Configure git for worktrees
-  #         run: |
-  #           git config --global user.email ci@example.com
-  #           git config --global user.name  CI
-  #           git config --global init.defaultBranch main
-  #       - run: make bench-smoke
+  # The gate is that the corpus RAN — every task was put a question and every
+  # worktree reclaimed — not that any task passed. The mock fixture solves nothing,
+  # so all ten oracles fail; a failing oracle is data, not a failing command, and
+  # the runner exits 0.
+  bench-smoke:
+    name: Bench smoke (mock provider, zero tokens)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      # The runner forks a worktree per task and snapshots turns, so git needs an
+      # identity to commit with — same reason as the full suite's fixtures.
+      - name: Configure git for worktrees
+        run: |
+          git config --global user.email ci@example.com
+          git config --global user.name  CI
+          git config --global init.defaultBranch main
+      - run: make bench-smoke
 
   secrets:
     name: Secret scan

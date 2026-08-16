@@ -38,10 +38,16 @@ type turnScript func(ctx context.Context, prompt string, s repl.Surface) (engine
 // completed is the ordinary turn: the model said something and stopped.
 func completed(text string) turnScript {
 	return func(_ context.Context, _ string, s repl.Surface) (engine.Result, error) {
-		s.Stream(text)
-		s.Render(repl.Event{Kind: repl.KindAssistant, Text: text})
+		s.Render(delta(text))
+		s.Render(engine.Event{Kind: engine.EventAssistantMessage, Seq: 1, Text: text})
 		return engine.Result{Stop: engine.StopCompleted, Turns: 1}, nil
 	}
+}
+
+// delta is a fragment of the reply as it arrives: the one event with no record
+// behind it, which is why its Seq is zero.
+func delta(text string) engine.Event {
+	return engine.Event{Kind: engine.EventDelta, Text: text, Reason: "content"}
 }
 
 func newHarness(t *testing.T, input string, interactive bool, scripts ...turnScript) *harness {

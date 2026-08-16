@@ -12,11 +12,11 @@ import (
 
 // ask runs one turn that puts c to the user, with reply already typed, and
 // returns the answer, what the user saw, and the error.
-func ask(t *testing.T, typed string, ctxFn func(context.Context) context.Context, c repl.Consent) (repl.Answer, string, error) {
+func ask(t *testing.T, typed string, ctxFn func(context.Context) context.Context, c engine.ConsentRequest) (engine.ConsentAnswer, string, error) {
 	t.Helper()
 
 	var out strings.Builder
-	var answer repl.Answer
+	var answer engine.ConsentAnswer
 	var askErr error
 
 	loop, err := repl.New(repl.Config{
@@ -40,7 +40,7 @@ func ask(t *testing.T, typed string, ctxFn func(context.Context) context.Context
 	return answer, out.String(), askErr
 }
 
-var shellRequest = repl.Consent{
+var shellRequest = engine.ConsentRequest{
 	Kind:   "run_shell",
 	Tool:   "run_shell",
 	Detail: "go test ./...",
@@ -51,17 +51,17 @@ func TestConsentAnswers(t *testing.T) {
 	tests := []struct {
 		name  string
 		typed string
-		want  repl.Answer
+		want  engine.ConsentAnswer
 	}{
-		{"y allows once", "y\n", repl.AnswerAllow},
-		{"yes allows once", "yes\n", repl.AnswerAllow},
-		{"case does not matter", "Y\n", repl.AnswerAllow},
-		{"a allows for the session", "a\n", repl.AnswerAllowSession},
-		{"always allows for the session", "always\n", repl.AnswerAllowSession},
-		{"n denies", "n\n", repl.AnswerDeny},
-		{"enter denies", "\n", repl.AnswerDeny},
-		{"whitespace denies", "   \n", repl.AnswerDeny},
-		{"a typo denies", "yeah ok\n", repl.AnswerDeny},
+		{"y allows once", "y\n", engine.ConsentAllow},
+		{"yes allows once", "yes\n", engine.ConsentAllow},
+		{"case does not matter", "Y\n", engine.ConsentAllow},
+		{"a allows for the session", "a\n", engine.ConsentAllowSession},
+		{"always allows for the session", "always\n", engine.ConsentAllowSession},
+		{"n denies", "n\n", engine.ConsentDeny},
+		{"enter denies", "\n", engine.ConsentDeny},
+		{"whitespace denies", "   \n", engine.ConsentDeny},
+		{"a typo denies", "yeah ok\n", engine.ConsentDeny},
 	}
 
 	for _, tc := range tests {
@@ -83,8 +83,8 @@ func TestConsentAnswers(t *testing.T) {
 func TestAnUnanswerableQuestionIsNotAYes(t *testing.T) {
 	t.Run("input ended", func(t *testing.T) {
 		got, out, err := ask(t, "", nil, shellRequest)
-		if got != repl.AnswerDeny {
-			t.Errorf("answer = %v, want %v", got, repl.AnswerDeny)
+		if got != engine.ConsentDeny {
+			t.Errorf("answer = %v, want %v", got, engine.ConsentDeny)
 		}
 		if !errors.Is(err, repl.ErrNoConsent) {
 			t.Errorf("err = %v, want it to wrap %v", err, repl.ErrNoConsent)
@@ -101,9 +101,9 @@ func TestAnUnanswerableQuestionIsNotAYes(t *testing.T) {
 			return c
 		}
 		got, out, err := ask(t, "y\n", cancelled, shellRequest)
-		if got != repl.AnswerDeny {
+		if got != engine.ConsentDeny {
 			t.Errorf("answer = %v, want %v — a turn the user just interrupted must not be "+
-				"the turn that gets consent", got, repl.AnswerDeny)
+				"the turn that gets consent", got, engine.ConsentDeny)
 		}
 		if !errors.Is(err, repl.ErrNoConsent) {
 			t.Errorf("err = %v, want it to wrap %v", err, repl.ErrNoConsent)
@@ -137,7 +137,7 @@ func TestTheQuestionSaysWhatIsBeingConsentedTo(t *testing.T) {
 // consenting to "/etc/hosts" are different acts, and only one of them is
 // legible — which is why permission.Request carries the resolved path at all.
 func TestAWriteShowsTheResolvedPath(t *testing.T) {
-	_, out, _ := ask(t, "n\n", nil, repl.Consent{
+	_, out, _ := ask(t, "n\n", nil, engine.ConsentRequest{
 		Kind:     "write_outside_root",
 		Tool:     "write_file",
 		Detail:   "../../etc/hosts",
@@ -157,13 +157,13 @@ func TestAWriteShowsTheResolvedPath(t *testing.T) {
 // PermissionDecided.Decision from what the surface returns, so the vocabulary
 // has to match the one that event documents.
 func TestTheAnswerStringsAreTheJournalsWireValues(t *testing.T) {
-	for answer, want := range map[repl.Answer]string{
-		repl.AnswerDeny:         "deny",
-		repl.AnswerAllow:        "allow",
-		repl.AnswerAllowSession: "allow_session",
+	for answer, want := range map[engine.ConsentAnswer]string{
+		engine.ConsentDeny:         "deny",
+		engine.ConsentAllow:        "allow",
+		engine.ConsentAllowSession: "allow_session",
 	} {
 		if got := answer.String(); got != want {
-			t.Errorf("Answer(%d).String() = %q, want %q", uint8(answer), got, want)
+			t.Errorf("ConsentAnswer(%d).String() = %q, want %q", uint8(answer), got, want)
 		}
 	}
 }
@@ -172,9 +172,9 @@ func TestTheAnswerStringsAreTheJournalsWireValues(t *testing.T) {
 // still fails closed, which is the property internal/permission holds for the
 // Outcome and this side has to hold for the Answer.
 func TestDenyIsTheZeroAnswer(t *testing.T) {
-	var zero repl.Answer
-	if zero != repl.AnswerDeny {
-		t.Errorf("the zero Answer is %v, want %v", zero, repl.AnswerDeny)
+	var zero engine.ConsentAnswer
+	if zero != engine.ConsentDeny {
+		t.Errorf("the zero Answer is %v, want %v", zero, engine.ConsentDeny)
 	}
 }
 

@@ -100,7 +100,9 @@ func withProvider(p engine.Provider) harnessOption {
 	return func(c *engine.Config) { c.Provider = p }
 }
 func withStream(f func(provider.Delta)) harnessOption {
-	return func(c *engine.Config) { c.Stream = f }
+	return func(c *engine.Config) {
+		c.Stream = func(_ int, d provider.Delta) { f(d) }
+	}
 }
 
 // withCWD pins the directory SessionStarted records.

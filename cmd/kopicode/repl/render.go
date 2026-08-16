@@ -4,148 +4,35 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/leejianrong/kopicode/internal/engine"
 )
 
-// Kind is what an [Event] is about.
+// This file is the whole of what the REPL prints, and it prints one thing: the
+// engine's event stream.
 //
-// The vocabulary is the journal's, deliberately: with three exceptions at the
-// bottom, every kind here corresponds to exactly one payload type in
-// internal/journal, and the adapter that drives the engine builds an Event by
-// copying fields off the payload it just saw. That is what makes "everything
-// the REPL prints is derived from journal events" a checkable claim rather
-// than an intention (ADR-0002 decision 2).
+// [engine.Event] is derived from the journal at the moment each event is
+// recorded — the append happens first and only what the record accepted is
+// announced — so a line here is a rendering of the session record rather than a
+// second account of it (ADR-0002 decision 2). There is no other source: the
+// surface adds only what it knows about *itself*, which is the four notices
+// halfway down this file, and each says so where it is declared.
+
+// Render prints one event from the engine's stream.
 //
-//	Kind                    journal payload
-//	KindSessionStarted      SessionStarted
-//	KindUser                UserMessage
-//	KindAssistant           AssistantMessage
-//	KindThinking            ThinkingBlock
-//	KindToolCall            ToolCallParsed  (and ToolCallRequested)
-//	KindToolRepair          ToolCallRepaired
-//	KindToolFailed          ToolCallFailed
-//	KindToolResult          ToolResult
-//	KindEditApplied         EditApplied
-//	KindEditRejected        EditRejected
-//	KindSyntaxGate          SyntaxGateRun
-//	KindPermissionDecided   PermissionDecided
-//	KindSnapshot            TurnSnapshot
-//	KindVerification        VerificationRun
-//	KindSessionEnded        SessionEnded
-//
-// Three kinds have no journal payload behind them and are marked as such
-// where they are declared: [KindNotice] and [KindError] are the surface
-// talking about itself, and [KindTurnStopped] renders an [engine.Stop], which
-// is a summary of events the loop already wrote rather than an event of its
-// own.
-//
-// PermissionRequested has no kind because it is not rendered as a line: it is
-// rendered as a question, by [Loop.Ask].
-type Kind uint8
-
-const (
-	// KindUnspecified is the zero value. Rendering one is a bug in the
-	// caller, and it is printed as such rather than silently dropped.
-	KindUnspecified Kind = iota
-
-	KindSessionStarted
-	KindUser
-	KindAssistant
-	KindThinking
-	KindToolCall
-	KindToolRepair
-	KindToolFailed
-	KindToolResult
-	KindEditApplied
-	KindEditRejected
-	KindSyntaxGate
-	KindPermissionDecided
-	KindSnapshot
-	KindVerification
-	KindSessionEnded
-
-	// KindNotice is the surface talking about itself. No journal payload.
-	KindNotice
-	// KindError is the surface reporting its own failure. No journal payload.
-	KindError
-	// KindTurnCancelled is a turn the user interrupted. No journal payload —
-	// and that absence is KAN-857, which this package cannot close from
-	// here: see the note on [Loop.runTurn] in repl.go and the card.
-	KindTurnCancelled
-	// KindTurnStopped renders an engine.Stop other than completed or
-	// cancelled. No journal payload; it summarises the record.
-	KindTurnStopped
-)
-
-// Event is one thing to print, with the fields a journal payload supplies.
-//
-// It is a flat struct rather than a union of per-kind types because it is
-// copied *from* a union of per-kind types and immediately rendered to a line:
-// a second tagged union here would be a translation table with nothing in it,
-// and the field names below are the payload field names so the copy is
-// checkable by eye.
-//
-// Fields not relevant to a kind are left zero.
-type Event struct {
-	Kind Kind
-
-	// Text is the message body: the assistant's prose, the thinking block,
-	// the notice, the error, the detail of a failure.
-	Text string
-	// Tool is the tool name as the model called it.
-	Tool string
-	// Path is the file an edit or a syntax check was about.
-	Path string
-	// Detail is the short form of what happened: a command line, an
-	// argument summary, a session id.
-	Detail string
-	// Reason is why: a rejection reason, a stop reason, a policy reason.
-	Reason string
-	// Mode is an edit's "anchored" or "fuzzy". A fuzzy edit is shown as
-	// such because the session it is in is classified unattributed, and a
-	// surface that hid the mode would hide the reason (SLICE-1 §4).
-	Mode string
-	// Ref is a snapshot's shadow ref.
-	Ref string
-	// Command is a verification command's argv.
-	Command []string
-	// Decision and Source are a permission outcome: "allow"/"deny"/
-	// "allow_session", and "user"/"policy".
-	Decision string
-	Source   string
-	// Checker is the syntax gate's command, empty when none was available.
-	Checker string
-	// Ran reports whether the syntax gate actually ran. A gate that did not
-	// run must not read as a pass (ADR-0006 §4), so it is rendered
-	// differently rather than omitted.
-	Ran bool
-	// ExitCode is a process exit code, valid when HasExitCode is set.
-	ExitCode    int
-	HasExitCode bool
-	// Size is a payload size in bytes, for output that is summarised rather
-	// than printed. Nothing here truncates anything: the full value is in
-	// the journal, whole, and this is a pointer to it.
-	Size int64
-}
-
-// Stream prints model text as it arrives, verbatim.
-func (l *Loop) Stream(text string) {
-	if text == "" {
-		return
-	}
-	l.streamed.WriteString(text)
-	l.out.text(text)
-}
-
-// Progress paints a status on the current line only. "" clears it.
-func (l *Loop) Progress(status string) { l.out.setProgress(status) }
-
-// Render prints one event.
-func (l *Loop) Render(e Event) {
+// It is [Surface.Render], and it is also what the wiring gives
+// engine.Options.Events. Those are the same object by design: a turn that
+// prints and a session announcing its own record are one surface, and two would
+// interleave.
+func (l *Loop) Render(e engine.Event) {
 	switch e.Kind {
-	case KindAssistant:
-		l.renderAssistant(e.Text)
+	case engine.EventDelta:
+		l.delta(e)
 
-	case KindUser:
+	case engine.EventAssistantMessage:
+		l.assistant(e.Text)
+
+	case engine.EventUserMessage:
 		// On a terminal the user has already read what they typed, and the
 		// terminal echoed it. Piped, nothing echoed it and the transcript
 		// would be a monologue, so the record's copy is printed.
@@ -153,78 +40,112 @@ func (l *Loop) Render(e Event) {
 			l.out.line("> " + e.Text)
 		}
 
-	case KindThinking:
+	case engine.EventThinking:
 		for _, ln := range splitLines(e.Text) {
 			l.out.line(l.out.dim("  " + ln))
 		}
 
-	case KindSessionStarted:
-		l.tag("session", "started "+e.Detail)
+	case engine.EventSessionStarted:
+		l.tag("session", strings.TrimSpace(e.Detail+" on "+e.Text))
 
-	case KindToolCall:
-		l.tag("tool", e.Tool+" "+e.Detail)
+	case engine.EventProviderRequest:
+		// Not a line. One per turn plus one per repair would bury the events
+		// that matter, and what a user wants from it is the waiting — which is
+		// the progress indicator's job, on the current line, never scrollback.
+		l.Progress("waiting for " + e.Detail)
 
-	case KindToolRepair:
-		l.tag("repair", fmt.Sprintf("%s: %s", orUnknown(e.Tool), e.Reason))
+	case engine.EventProviderResponse:
+		l.Progress("")
 
-	case KindToolFailed:
+	case engine.EventToolCallRequested:
+		// Also not a line: it is the raw text of a call that did not parse, and
+		// the repair or the failure that follows says what was wrong. The raw
+		// text stays in the record for whoever is measuring the parser.
+
+	case engine.EventToolCallParsed:
+		l.tag("tool", strings.TrimSpace(e.Tool+" "+e.Detail))
+
+	case engine.EventToolCallRepaired:
+		l.tag("repair", fmt.Sprintf("attempt %d: %s", e.ExitCode, e.Reason))
+
+	case engine.EventToolCallFailed:
 		l.tag("tool", fmt.Sprintf("%s failed: %s", orUnknown(e.Tool), e.Reason))
 
-	case KindToolResult:
+	case engine.EventToolResult:
 		l.tag("tool", e.Tool+": "+resultSummary(e))
 
-	case KindEditApplied:
+	case engine.EventEditApplied:
 		l.tag("edit", fmt.Sprintf("%s applied (%s)", e.Path, e.Mode))
 
-	case KindEditRejected:
+	case engine.EventEditRejected:
 		l.tag("edit", fmt.Sprintf("%s rejected: %s", e.Path, e.Reason))
 		l.indent(e.Text)
 
-	case KindSyntaxGate:
+	case engine.EventSyntaxGate:
 		l.tag("syntax", syntaxSummary(e))
 
-	case KindPermissionDecided:
+	case engine.EventPermissionRequested:
+		// The question is [Loop.Ask], and by the time this lands it has already
+		// been asked: the gate journals the request and then blocks on the
+		// answer. Rendering it here would put it on screen twice.
+
+	case engine.EventPermissionDecided:
 		l.tag("perm", fmt.Sprintf("%s (%s)", e.Decision, e.Source))
 
-	case KindSnapshot:
+	case engine.EventTurnSnapshot:
 		l.tag("snap", e.Ref)
 
-	case KindVerification:
+	case engine.EventVerification:
 		l.tag("verify", fmt.Sprintf("%s exit %d", strings.Join(e.Command, " "), e.ExitCode))
 
-	case KindSessionEnded:
-		l.tag("session", "ended: "+e.Reason)
+	case engine.EventSessionEnded:
+		l.tag("session", fmt.Sprintf("ended: %s (exit %d)", e.Reason, e.ExitCode))
 
-	case KindTurnCancelled:
-		l.tag("cancelled", "turn interrupted; the session is still open")
+	case engine.EventUnknown:
+		// The journal's compatibility promise, carried to the screen. A build
+		// that cannot name the type can still say that something happened and
+		// what it was called, which beats silently skipping a line of the
+		// record.
+		l.tag("event", e.Reason+": written by a newer build, kept whole in the record")
 
-	case KindTurnStopped:
-		l.tag("stopped", e.Text)
-
-	case KindNotice:
-		l.tag("note", e.Text)
-
-	case KindError:
-		l.out.line(l.out.bold("[error] ") + e.Text)
-
-	case KindUnspecified:
+	case engine.EventUnspecified:
 		fallthrough
 	default:
-		// Loud rather than dropped. An event nobody rendered is a fact the
-		// journal holds and the user was not told, which is the one thing
-		// this surface exists not to do.
-		l.out.line(fmt.Sprintf("[error] repl: no rendering for event kind %d", uint8(e.Kind)))
+		// Loud rather than dropped. An event the journal holds and the user was
+		// never told about is the one failure this surface exists to prevent.
+		l.Fail(fmt.Sprintf("repl: no rendering for %s", e.Kind))
 	}
 }
 
-// renderAssistant prints the message the journal recorded, minus whatever
-// [Loop.Stream] already put on the screen.
+// delta prints a fragment of the reply as it arrives.
 //
-// See the package comment. The streamed bytes are an optimistic prefix of the
-// record; when they are a prefix, only the remainder is printed, and when they
-// are not, the record is printed in full behind a marker because the record is
-// what the session actually was.
-func (l *Loop) renderAssistant(text string) {
+// The text is remembered as well as printed, because it is a *prediction* —
+// see [Loop.assistant].
+func (l *Loop) delta(e engine.Event) {
+	if e.Text == "" {
+		return
+	}
+	if e.Reason == "reasoning" {
+		// Reasoning is not the answer, and the journal keeps the two apart. It
+		// is printed dim and deliberately not remembered, so it cannot be
+		// mistaken for a prefix of the message that is coming.
+		l.out.text(l.out.dim(e.Text))
+		return
+	}
+	l.streamed.WriteString(e.Text)
+	l.out.text(e.Text)
+}
+
+// assistant prints the message the journal recorded, minus whatever already
+// reached the screen as deltas.
+//
+// The streamed bytes are an optimistic prefix of the record: when they are a
+// prefix only the remainder is printed, and when they are not, the record is
+// printed in full behind a marker, because the record is what the session
+// actually was. Either way what the user has read is exactly what the journal
+// holds — which is what lets this surface stream at all without keeping a
+// second account of the reply.
+func (l *Loop) assistant(text string) {
 	streamed := l.streamed.String()
 	l.streamed.Reset()
 
@@ -241,11 +162,48 @@ func (l *Loop) renderAssistant(text string) {
 	l.out.flushLine()
 }
 
+// The four methods below are the only things this surface prints that are not
+// derived from the record. Each is about the surface itself rather than about
+// the session.
+
+// Notice prints something the surface wants to say.
+func (l *Loop) Notice(text string) { l.tag("note", text) }
+
+// Fail prints a failure of the surface, or one the session could not record.
+func (l *Loop) Fail(text string) { l.out.line(l.out.bold("[error] ") + text) }
+
+// Cancelled reports an interrupted turn.
+//
+// It is not derived from the journal because there is nothing to derive it
+// from: a turn cancelled mid-stream leaves a ProviderRequest with no
+// ProviderResponse, which is an absence rather than a record (KAN-857). This
+// line is the surface saying what it saw the user do. When that card lands and
+// a cancellation is a real event, this becomes a case in [Loop.Render] and this
+// method goes away.
+func (l *Loop) Cancelled() {
+	l.tag("cancelled", "turn interrupted; the session is still open")
+}
+
+// Stopped reports a turn that ended for a reason other than a clean stop.
+//
+// It renders an [engine.Stop], which summarises events the loop already wrote
+// rather than being one of its own; the SessionEnded that eventually carries
+// the same reason is the record's version.
+func (l *Loop) Stopped(stop engine.Stop, detail string) {
+	if detail == "" {
+		detail = stop.Reason()
+	}
+	l.tag("stopped", detail)
+}
+
+// Progress paints a status on the current line only. "" clears it.
+func (l *Loop) Progress(status string) { l.out.setProgress(status) }
+
 // tag writes one tagged line: "[tool] read_file: ok".
 //
 // The tag is a fixed, greppable, ASCII prefix. Not a unicode glyph and not a
-// colour alone — a piped session has neither, and a line whose meaning
-// survives only in the terminal is a line the transcript lost.
+// colour alone — a piped session has neither, and a line whose meaning survives
+// only in the terminal is a line the transcript lost.
 func (l *Loop) tag(tag, rest string) {
 	l.out.line(l.out.dim("["+tag+"] ") + rest)
 }
@@ -260,11 +218,11 @@ func (l *Loop) indent(text string) {
 // resultSummary renders a tool result: what happened, and how much output the
 // journal is holding.
 //
-// It summarises the *size* and never the content. Nothing is truncated here
-// because nothing is printed here: the full output is in the record, whole,
-// and a surface that pasted 64 KiB of test output into the scrollback would be
+// It summarises the size and never the content. Nothing is truncated here
+// because nothing is printed here: the full output is in the record, whole, and
+// a surface that pasted 64 KiB of test output into the scrollback would be
 // unusable rather than more honest.
-func resultSummary(e Event) string {
+func resultSummary(e engine.Event) string {
 	var parts []string
 	switch e.Reason {
 	case "":
@@ -288,8 +246,8 @@ func resultSummary(e Event) string {
 }
 
 // syntaxSummary renders the post-edit language check, keeping "did not run"
-// distinct from "passed".
-func syntaxSummary(e Event) string {
+// distinct from "passed" (ADR-0006 §4).
+func syntaxSummary(e engine.Event) string {
 	if !e.Ran {
 		return e.Path + ": no checker available, not run"
 	}
