@@ -121,17 +121,36 @@ func (w *Worktrees) Counts() Reclamation {
 // --keep-worktrees is documented as "inspect before you re-run": the next run
 // reclaims what it kept.
 //
-// The count is git's own, taken from a dry run rather than inferred, so a
-// report saying "reclaimed 3" is reporting three things git said it removed.
+// The admin count is *measured* rather than parsed: the registrations are
+// listed either side of the prune and the difference is what git actually
+// removed. An earlier version counted the lines of
+// `worktree prune --verbose --dry-run`, which cost a red CI run — the count came
+// back zero on the runner's git while the prune itself worked. A number that
+// disagrees with what happened is worse than no number, because the whole point
+// of reporting the reclamation is that it can be checked.
 func (w *Worktrees) Reclaim(ctx context.Context) error {
-	admin, err := w.pruneAdmin(ctx)
+	before, err := w.registered(ctx)
 	if err != nil {
 		return err
 	}
-
-	stale, err := w.registeredUnderBase(ctx)
+	if _, err := runGit(ctx, w.repo, "worktree", "prune"); err != nil {
+		return fmt.Errorf("bench: pruning worktree registrations: %w", err)
+	}
+	after, err := w.registered(ctx)
 	if err != nil {
 		return err
+	}
+	admin := len(difference(before, after))
+
+	// What is left registered under this package's own base directory is a
+	// previous run's checkout, still on disk. Nothing outside the base is ever
+	// considered: a developer's worktree and another agent's lease are out of
+	// reach by construction.
+	var stale []string
+	for _, path := range after {
+		if underDir(w.base, path) {
+			stale = append(stale, path)
+		}
 	}
 
 	var failed []string
@@ -157,31 +176,9 @@ func (w *Worktrees) Reclaim(ctx context.Context) error {
 	return nil
 }
 
-// pruneAdmin runs `git worktree prune` and reports how many registrations it
-// removed. The dry run is what supplies the count; git's real prune says
-// nothing at all unless asked verbosely, and parsing a verbose real run would
-// mean the number and the action came from two different commands anyway.
-func (w *Worktrees) pruneAdmin(ctx context.Context) (int, error) {
-	out, err := runGit(ctx, w.repo, "worktree", "prune", "--verbose", "--dry-run")
-	if err != nil {
-		return 0, fmt.Errorf("bench: listing prunable worktrees: %w", err)
-	}
-	n := len(gitLines(out))
-
-	if _, err := runGit(ctx, w.repo, "worktree", "prune"); err != nil {
-		return 0, fmt.Errorf("bench: pruning worktree registrations: %w", err)
-	}
-	return n, nil
-}
-
-// registeredUnderBase lists the worktrees git knows about whose path is inside
-// [Base], sorted so a failure message is stable.
-//
-// The containment test is on cleaned absolute paths and is a path-component
-// comparison, not a string prefix: a sibling directory named
-// "bench/worktrees-old" must not be mistaken for something this package owns
-// and deleted.
-func (w *Worktrees) registeredUnderBase(ctx context.Context) ([]string, error) {
+// registered lists the worktree paths git knows about, sorted so a failure
+// message is stable across runs.
+func (w *Worktrees) registered(ctx context.Context) ([]string, error) {
 	out, err := runGit(ctx, w.repo, "worktree", "list", "--porcelain")
 	if err != nil {
 		return nil, fmt.Errorf("bench: listing worktrees: %w", err)
@@ -189,16 +186,27 @@ func (w *Worktrees) registeredUnderBase(ctx context.Context) ([]string, error) {
 
 	var found []string
 	for _, line := range gitLines(out) {
-		path, ok := strings.CutPrefix(line, "worktree ")
-		if !ok {
-			continue
-		}
-		if underDir(w.base, path) {
+		if path, ok := strings.CutPrefix(line, "worktree "); ok {
 			found = append(found, path)
 		}
 	}
 	sort.Strings(found)
 	return found, nil
+}
+
+// difference returns the entries of a that are not in b.
+func difference(a, b []string) []string {
+	inB := make(map[string]bool, len(b))
+	for _, s := range b {
+		inB[s] = true
+	}
+	var only []string
+	for _, s := range a {
+		if !inB[s] {
+			only = append(only, s)
+		}
+	}
+	return only
 }
 
 // Add creates a worktree named for the task, detached at commit, and returns
