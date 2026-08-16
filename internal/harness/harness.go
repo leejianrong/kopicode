@@ -246,9 +246,10 @@ var configs = map[string]Config{
 
 		Verification: Verification{
 			Forced: true,
-			// Slice 1 discovers the command; a repository that names one in
-			// .kopicode/config.toml is docs/SLICE-1.md §5's other half and
-			// changes this to VerificationConfigured, and therefore the hash.
+			// The registered default is discovery. [Resolve] amends it to
+			// [VerificationConfigured] for a repository whose
+			// .kopicode/config.toml names a `verify` command, which moves the
+			// hash — see the note there, and docs/SLICE-1.md §5.
 			Source: VerificationDiscovered,
 		},
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/leejianrong/kopicode/internal/journal"
 	"github.com/leejianrong/kopicode/internal/parse"
@@ -43,8 +44,14 @@ func (e *Engine) Run(ctx context.Context, prompt string) (Result, error) {
 	settle := func(stop Stop, cause error) (Result, error) {
 		e.stop = stop
 		e.detail = ""
-		if cause != nil {
+		switch {
+		case cause != nil:
 			e.detail = cause.Error()
+		case stop == StopVerificationFailed:
+			// The one nil-error stop that has something to say. Without this,
+			// SessionEnded would record "verification_failed" and nothing about
+			// which command said so.
+			e.detail = e.unverified
 		}
 		return Result{Stop: stop, Turns: used, Tokens: e.spent}, cause
 	}
@@ -124,7 +131,13 @@ func (e *Engine) runTurn(ctx context.Context, turn int) (Stop, error) {
 		switch out.Event() {
 		case parse.EventNone:
 			// The model answered in prose. Nothing was malformed and nothing
-			// is owed a repair: this is the clean stop.
+			// is owed a repair: this is the clean stop — unless the project's
+			// own verification command has rejected the tree the model is
+			// declaring finished, in which case it is not a clean anything
+			// (docs/SLICE-1.md §5).
+			if e.unverified != "" {
+				return StopVerificationFailed, nil
+			}
 			return StopCompleted, nil
 
 		case parse.EventToolCallRepaired:
@@ -156,20 +169,10 @@ func (e *Engine) runTurn(ctx context.Context, turn int) (Stop, error) {
 				if err := e.snapshot(ctx, turn); err != nil {
 					return StopHarnessError, err
 				}
+				if stop, err := e.verify(ctx, turn); stop != StopUnspecified {
+					return stop, err
+				}
 			}
-			// Forced verification (KAN-787) goes here, and does not exist yet.
-			// After a turn that modified files it runs the project's own
-			// command, journals VerificationRun, and blocks a success report on
-			// a non-zero exit (docs/SLICE-1.md §5).
-			//
-			// **The selection already says it is forced.** The registered
-			// harness configuration sets Verification.Forced, and that value is
-			// in the hash preimage, so today the hash claims a policy the loop
-			// does not carry out. That is a real gap and not a rounding error:
-			// until KAN-787 lands, a `model`-classified failure may be one the
-			// project's own suite would have caught. It is named here rather
-			// than hidden behind a nil check, because a silent no-op is how a
-			// promised gate stops being one.
 			return StopUnspecified, nil
 
 		case parse.EventUnspecified:
@@ -385,6 +388,64 @@ func (e *Engine) journalUnparsed(ctx context.Context, turn int, site string, rep
 		})
 		return err
 	}
+}
+
+// verify runs forced verification after a turn that could have changed the tree
+// and journals what it produced.
+//
+// It returns [StopUnspecified] to mean "the loop continues", which is the
+// outcome for a pass, for a failure, and for a verification that could not run.
+// A failure does not end the exchange: docs/SLICE-1.md §5 says the failure
+// becomes the next turn's observation, so the model is shown the suite's output
+// and gets to fix it. What a failure does is set [Engine.unverified], which is
+// what the prose stop consults before it is allowed to call itself completed.
+//
+// **Verification is skipped entirely when the arm does not force it.**
+// Selection.Config.Verification.Forced is in the harness config hash, so a run
+// that verified under a configuration saying it does not would be an arm doing
+// something the value identifying it denies.
+//
+// The full output is journaled whether it passed or failed. A passing run is the
+// evidence that the tree was verified at all, and a record that held only the
+// failures could not tell "it passed" from "nobody looked".
+func (e *Engine) verify(ctx context.Context, turn int) (Stop, error) {
+	if !e.cfg.Selection.Config.Verification.Forced {
+		return StopUnspecified, nil
+	}
+
+	res, verr := e.cfg.Verify.Run(ctx)
+	if _, err := e.append(ctx, turn, journal.VerificationRun{
+		Command: res.Command,
+		Source:  string(res.Source),
+		// Never 0 for a run that did not happen: internal/verify guarantees -1,
+		// and this copies rather than recomputes so the two cannot disagree.
+		ExitCode: res.ExitCode,
+		Output:   journal.InlineText(res.Output),
+	}); err != nil {
+		return StopHarnessError, err
+	}
+	if verr != nil {
+		// The only error internal/verify returns is a cancellation, and the
+		// result beside it has already been recorded above.
+		return StopCancelled, fmt.Errorf("engine: verification on turn %d: %w", turn, verr)
+	}
+
+	switch {
+	case res.Blocks():
+		// A sentence, not the whole suite output: this ends up on
+		// SessionEnded.Detail, and the output itself is already on the
+		// VerificationRun event above. One record, said once.
+		e.unverified = fmt.Sprintf("`%s` exited %d", strings.Join(res.Command, " "), res.ExitCode)
+		// The failure travels back as the next turn's observation. Every tool
+		// call is already answered at this point, so this lands as a user turn.
+		if err := e.observe(res.Output); err != nil {
+			return StopHarnessError, err
+		}
+	case res.Ran():
+		// A passing run answers an outstanding rejection; nothing else does.
+		e.unverified = ""
+	}
+	return StopUnspecified, nil
 }
 
 // snapshot records the working tree after a turn that ran a tool able to change
