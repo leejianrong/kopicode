@@ -202,6 +202,13 @@ type Engine struct {
 	// "completed".
 	stop   Stop
 	detail string
+
+	// cancelPhase is what was in flight when this exchange first observed a
+	// cancelled context, and "" until one is. It is reset by every [Engine.Run],
+	// because a session that cancels one turn and completes the next must not
+	// describe the second interruption with the first one's phase. cancel.go
+	// owns the vocabulary and the reason first-observation wins.
+	cancelPhase string
 }
 
 // New checks a configuration and returns the engine it describes. It journals

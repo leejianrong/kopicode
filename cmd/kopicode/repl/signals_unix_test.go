@@ -50,6 +50,12 @@ func TestARealSIGINTCancelsTheTurn(t *testing.T) {
 			case <-time.After(10 * time.Second):
 				t.Error("SIGINT did not cancel the turn within 10s")
 			}
+			// What the engine does when it observes the cancelled context: it
+			// journals a TurnCancelled and announces it through the event stream
+			// this loop renders (KAN-857). The `[cancelled]` line below is that
+			// event being rendered, not the surface's own account of it.
+			s.Render(engine.Event{Kind: engine.EventTurnCancelled, Seq: 4, Turn: 1,
+				Reason: "provider_stream", Text: ctx.Err().Error()})
 			return engine.Result{Stop: engine.StopCancelled, Turns: 1}, ctx.Err()
 		},
 	})

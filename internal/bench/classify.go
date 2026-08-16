@@ -53,6 +53,16 @@ var ErrNoRecord = errors.New("the session record could not be read")
 // — charging either to a bucket would put rows into a tally that is supposed to
 // count failures. Both come back [BucketUnclassified].
 //
+// **A cancellation is read off the record** — a [journal.TurnCancelled], or a
+// [journal.SessionEnded] whose Reason is "cancelled" — and not only off
+// [TaskResult.Stop]. Stop is the runner's in-memory summary of the same fact and
+// the runner overwrites it with a harness error when teardown fails, so a task
+// the operator interrupted could be charged to `harness` because reclaiming its
+// worktree then failed. KAN-857 put the cancellation in the journal for exactly
+// this: a bucket decided from a summary is a bucket decided from something that
+// can be lost. Stop is still consulted first, because a task abandoned before it
+// ever opened a session has no record for the rule to read.
+//
 // **`harness` beats `unattributed`.** The two buckets make opposite-strength
 // claims: `harness` says we know the failure was ours, `unattributed` says
 // nobody can tell. Letting the fuzzy taint swallow a max-turns cap or a tool
@@ -112,7 +122,9 @@ var _ Classifier = Attribution{}
 // record, and a passing task whose journal a later cleanup removed must not
 // start reporting an error.
 func (Attribution) Classify(ctx context.Context, r TaskResult) (Bucket, error) {
-	// Rule 0. Nothing failed, or nothing was answered.
+	// Rule 0, from the result alone: nothing failed, or the runner abandoned the
+	// task before there was a session to read. The record's own account of a
+	// cancellation is consulted below, once it has been read.
 	if r.Passed || r.Stop == engine.StopCancelled.Reason() {
 		return BucketUnclassified, nil
 	}
@@ -135,6 +147,13 @@ func (Attribution) Classify(ctx context.Context, r TaskResult) (Bucket, error) {
 	}
 
 	switch {
+	case sig.cancelled:
+		// Rule 0 again, this time from the record. It outranks `harness` for the
+		// reason rule 0 exists: an abandoned task was never answered, so there
+		// is no failure to attribute — and the harness signal most likely to
+		// appear beside a cancellation is the teardown the cancellation
+		// interrupted.
+		return BucketUnclassified, nil
 	case harness || sig.harness:
 		return BucketHarness, nil
 	case sig.fuzzy:
@@ -199,6 +218,10 @@ func oracleFailed(o OracleResult) bool {
 type signals struct {
 	harness bool
 	fuzzy   bool
+	// cancelled is the record saying a turn or the session was interrupted.
+	// Separate from the other two because it is not a bucket: it is rule 0, and
+	// it says there is nothing here to attribute at all.
+	cancelled bool
 }
 
 // readSignals walks a session's journal once and reports what the rules found.
@@ -291,6 +314,12 @@ func apply(sig *signals, prev *journal.Type, payload journal.Payload) {
 	case journal.EditRejected:
 		if p.Mode == tools.ModeFuzzy {
 			sig.fuzzy = true
+		}
+	case journal.TurnCancelled:
+		sig.cancelled = true
+	case journal.SessionEnded:
+		if p.Reason == engine.StopCancelled.Reason() {
+			sig.cancelled = true
 		}
 	}
 	*prev = payload.Type()

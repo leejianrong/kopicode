@@ -201,6 +201,41 @@ func TestAFuzzyEditIsVisible(t *testing.T) {
 	}
 }
 
+// TestACancellationIsRenderedFromTheRecord.
+//
+// Until KAN-857 the `[cancelled]` line came from a Loop.Cancelled method saying
+// what the *surface* saw the user do, because a cancelled turn left nothing in
+// the journal to derive a line from. It is a journal event now, so it renders
+// through Render like everything else — and it can say what the interruption
+// caught, which the surface never knew.
+func TestACancellationIsRenderedFromTheRecord(t *testing.T) {
+	cases := map[string]string{
+		"provider_stream":   "while the reply was arriving",
+		"tool_call":         "while a tool was running",
+		"verification":      "while verification was running",
+		"between_steps":     "turn interrupted;",
+		"some_future_phase": "during some_future_phase",
+	}
+
+	for phase, want := range cases {
+		t.Run(phase, func(t *testing.T) {
+			got := render(t, func(s repl.Surface) {
+				s.Render(engine.Event{Kind: engine.EventTurnCancelled, Seq: 6, Turn: 2,
+					Reason: phase, Text: "context canceled"})
+			})
+			if !strings.Contains(got, "[cancelled]") {
+				t.Errorf("no [cancelled] line:\n%q", got)
+			}
+			if !strings.Contains(got, want) {
+				t.Errorf("the line does not say %q:\n%q", want, got)
+			}
+			if !strings.Contains(got, "the session is still open") {
+				t.Errorf("the line does not say the session survived:\n%q", got)
+			}
+		})
+	}
+}
+
 // TestToolOutputIsSummarisedBySizeAndNeverPasted. Nothing is truncated here
 // because nothing is printed here: the whole output is in the journal, and the
 // line points at how much of it there is.

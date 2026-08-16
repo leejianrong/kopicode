@@ -54,11 +54,21 @@ import (
 //	{"kind":"session_started","seq":1,"detail":"<session id>","text":"<model id>","reason":"<harness hash>"}
 //	{"kind":"user_message","seq":2,"turn":1,"text":"fix the failing test","size":20}
 //	{"kind":"tool_call_parsed","seq":5,"turn":1,"tool":"write_file","detail":"{\"path\": ...}","reason":"native"}
+//	{"kind":"turn_cancelled","seq":8,"turn":1,"text":"context canceled","reason":"provider_stream"}
 //	{"kind":"session_ended","seq":9,"reason":"completed","exit_code":0}
 //
 // Zero fields are omitted, so a line carries only what its kind populates. Which
 // fields a kind populates is [engine.Event]'s documentation and not repeated
 // here — repeating it is how the two would come to disagree.
+//
+// **A `turn_cancelled` line is the one that says a turn was interrupted.** It
+// carries a turn of 1 or more and `reason` is the phase — what was in flight
+// when the loop first saw the cancelled context, from journal.TurnCancelled. A
+// consumer must not read "the stream stopped" as a cancellation: a killed
+// process and a truncated pipe stop the stream too, and this line is what tells
+// the three apart. A cancellation that also ended the *session* is followed by
+// `session_ended` with `"reason":"cancelled"` and turn 0; one the user typed
+// through in the REPL is not.
 //
 // Three fields need stating because their zero value is meaningful and omission
 // would therefore lie:

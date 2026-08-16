@@ -43,6 +43,7 @@ const (
 	EventPermissionDecided
 	EventTurnSnapshot
 	EventVerification
+	EventTurnCancelled
 	EventSessionEnded
 
 	// EventUnknown is an event this build has no typed payload for, preserved
@@ -84,6 +85,7 @@ var eventKindText = map[EventKind]string{
 	EventPermissionDecided:   "permission_decided",
 	EventTurnSnapshot:        "turn_snapshot",
 	EventVerification:        "verification",
+	EventTurnCancelled:       "turn_cancelled",
 	EventSessionEnded:        "session_ended",
 	EventUnknown:             "unknown",
 	EventDelta:               "delta",
@@ -150,7 +152,7 @@ type Event struct {
 	// id, a consent target.
 	Detail string
 	// Reason is why: a rejection reason, a stop reason, a policy rule, a tool
-	// result's error kind.
+	// result's error kind, a cancellation's phase.
 	Reason string
 	// Mode is an edit's "anchored" or "fuzzy". Journaled on every edit because
 	// one fuzzy edit classifies the whole session unattributed (SLICE-1 §4), so
@@ -346,6 +348,11 @@ func eventOf(ev journal.Event) Event {
 		base.Source = p.Source
 		base.ExitCode, base.HasExitCode = p.ExitCode, true
 		base.Text, base.Size = text(p.Output)
+
+	case journal.TurnCancelled:
+		base.Kind = EventTurnCancelled
+		base.Reason = p.Phase
+		base.Text, base.Size = text(p.Detail)
 
 	case journal.SessionEnded:
 		base.Kind = EventSessionEnded

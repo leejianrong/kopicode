@@ -72,8 +72,18 @@ func everyKind() []engine.Event {
 		{Kind: engine.EventPermissionDecided, Seq: 17, Decision: "allow", Source: "user"},
 		{Kind: engine.EventTurnSnapshot, Seq: 18, Ref: "refs/kopicode/s-1/3"},
 		{Kind: engine.EventVerification, Seq: 19, Command: []string{"go", "test", "./..."}, ExitCode: 0, HasExitCode: true},
-		{Kind: engine.EventUnknown, Seq: 20, Reason: "SomethingNewer", Text: `{"a":1}`},
-		{Kind: engine.EventSessionEnded, Seq: 21, Reason: "completed", ExitCode: 0, HasExitCode: true},
+		// Every phase, plus one this build does not know: the renderer names an
+		// unrecognised phase rather than dropping it, and that branch is a place
+		// an escape could enter through the record.
+		{Kind: engine.EventTurnCancelled, Seq: 20, Turn: 3, Reason: "provider_stream",
+			Text: "context canceled"},
+		{Kind: engine.EventTurnCancelled, Seq: 21, Turn: 3, Reason: "tool_call", Text: "context canceled"},
+		{Kind: engine.EventTurnCancelled, Seq: 22, Turn: 3, Reason: "verification", Text: "context canceled"},
+		{Kind: engine.EventTurnCancelled, Seq: 23, Turn: 3, Reason: "between_steps", Text: "context canceled"},
+		{Kind: engine.EventTurnCancelled, Seq: 24, Turn: 3, Reason: "some_future_phase",
+			Text: "context deadline exceeded"},
+		{Kind: engine.EventUnknown, Seq: 25, Reason: "SomethingNewer", Text: `{"a":1}`},
+		{Kind: engine.EventSessionEnded, Seq: 26, Reason: "completed", ExitCode: 0, HasExitCode: true},
 		// The zero value, which must be reported rather than dropped.
 		{},
 	}

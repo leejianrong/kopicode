@@ -98,6 +98,9 @@ func (l *Loop) Render(e engine.Event) {
 	case engine.EventVerification:
 		l.tag("verify", fmt.Sprintf("%s exit %d", strings.Join(e.Command, " "), e.ExitCode))
 
+	case engine.EventTurnCancelled:
+		l.tag("cancelled", cancelSummary(e))
+
 	case engine.EventSessionEnded:
 		l.tag("session", fmt.Sprintf("ended: %s (exit %d)", e.Reason, e.ExitCode))
 
@@ -162,7 +165,34 @@ func (l *Loop) assistant(text string) {
 	l.out.flushLine()
 }
 
-// The four methods below are the only things this surface prints that are not
+// cancelSummary renders an interrupted turn: what the user did, and what it
+// caught in flight.
+//
+// The phase comes from the record — journal.TurnCancelled.Phase — rather than
+// from anything this package observed. Until KAN-857 there was a Loop.Cancelled
+// method here saying "turn interrupted" from what the *surface* saw, because a
+// cancelled turn left a ProviderRequest with no ProviderResponse and there was
+// nothing in the journal to derive a line from. There is now, so this is a
+// rendering of the record like every other line in this file.
+func cancelSummary(e engine.Event) string {
+	what := ""
+	switch e.Reason {
+	case "provider_stream":
+		what = " while the reply was arriving"
+	case "tool_call":
+		what = " while a tool was running"
+	case "verification":
+		what = " while verification was running"
+	case "between_steps":
+	default:
+		// A phase written by a newer build. Named rather than dropped, for the
+		// same reason EventUnknown is rendered at all.
+		what = " during " + e.Reason
+	}
+	return "turn interrupted" + what + "; the session is still open"
+}
+
+// The three methods below are the only things this surface prints that are not
 // derived from the record. Each is about the surface itself rather than about
 // the session.
 
@@ -171,18 +201,6 @@ func (l *Loop) Notice(text string) { l.tag("note", text) }
 
 // Fail prints a failure of the surface, or one the session could not record.
 func (l *Loop) Fail(text string) { l.out.line(l.out.bold("[error] ") + text) }
-
-// Cancelled reports an interrupted turn.
-//
-// It is not derived from the journal because there is nothing to derive it
-// from: a turn cancelled mid-stream leaves a ProviderRequest with no
-// ProviderResponse, which is an absence rather than a record (KAN-857). This
-// line is the surface saying what it saw the user do. When that card lands and
-// a cancellation is a real event, this becomes a case in [Loop.Render] and this
-// method goes away.
-func (l *Loop) Cancelled() {
-	l.tag("cancelled", "turn interrupted; the session is still open")
-}
 
 // Stopped reports a turn that ended for a reason other than a clean stop.
 //

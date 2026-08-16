@@ -563,6 +563,61 @@ func TestTheStreamIsOneJSONObjectPerLine(t *testing.T) {
 	}
 }
 
+// TestACancellationReachesTheStream.
+//
+// KAN-857's line on this surface, asserted on the projection rather than end to
+// end: `headless` runs on context.Background() and a test has no way to cancel
+// it, so causing a real interruption here would mean inventing a seam for it.
+// The real cancellation is caused and asserted where it happens — internal/
+// engine's TestAMidStreamCancellationIsOnTheRecordOnDisk drives one and reads
+// the journal off disk. What is left to hold here is that the event survives the
+// projection: the kind, the turn, the phase and the detail all reach the line,
+// and none of them is dropped by an `omitempty` that made sense for another
+// kind.
+func TestACancellationReachesTheStream(t *testing.T) {
+	r := recordOf(engine.Event{
+		Kind:   engine.EventTurnCancelled,
+		Seq:    8,
+		Turn:   2,
+		Reason: "provider_stream",
+		Text:   "engine: provider reply turn 2 attempt 1: context canceled",
+		Size:   57,
+	})
+
+	line, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("encoding the line: %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(line, &got); err != nil {
+		t.Fatalf("decoding %s: %v", line, err)
+	}
+
+	want := map[string]any{
+		"kind":   "turn_cancelled",
+		"seq":    float64(8),
+		"turn":   float64(2),
+		"reason": "provider_stream",
+		"text":   "engine: provider reply turn 2 attempt 1: context canceled",
+		"size":   float64(57),
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s = %v, want %v — in %s", k, got[k], v, line)
+		}
+	}
+	// The turn is the whole of "which turn was interrupted", and a turn of 0 is
+	// what `omitempty` produces for an event outside any turn. Dropping it here
+	// would make a cancelled turn indistinguishable from a cancelled session.
+	if _, ok := got["turn"]; !ok {
+		t.Errorf("the line carries no turn: %s", line)
+	}
+	if _, ok := got["exit_code"]; ok {
+		t.Errorf("a cancellation has no exit code and the line invented one: %s", line)
+	}
+}
+
 // writeVerifyConfig gives the fixture directory a .kopicode/config.toml naming
 // its own verification command, so the test does not depend on what discovery
 // would infer from an otherwise empty tree.
