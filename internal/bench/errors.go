@@ -35,6 +35,42 @@ var (
 	ErrNegativeCount = errors.New("contingency table cell is negative")
 )
 
+// Sentinels the runner refuses on. They are separate from the scoring ones
+// above because they answer a different question: the scorer refuses to *score*
+// an input it cannot pair, and these refuse to *run* at all.
+//
+// Every one of them is a refusal before any provider request is made. A
+// benchmark that discovers its corpus has drifted, or that it cannot create a
+// worktree, after N tasks have been billed has spent money to learn something
+// it could have checked for free.
+var (
+	// ErrNoWorkingDir reports a subprocess with no working directory named.
+	// Git walks upward until it finds a repository, so a command with no
+	// directory operates on one nobody chose.
+	ErrNoWorkingDir = errors.New("no working directory")
+
+	// ErrReclaim reports a worktree that could not be removed. It is an error
+	// rather than a warning because the disk it holds is the failure this card
+	// exists to prevent, and a run that quietly accumulates looks exactly like
+	// a run that cleaned up.
+	ErrReclaim = errors.New("worktree could not be reclaimed")
+
+	// ErrCorpusDrift reports a corpus whose contents at the frozen commit do
+	// not match the corpus the run was pointed at. Results are only comparable
+	// within one frozen corpus (ADR-0005 §Consequences), so this is a refusal
+	// rather than a warning.
+	ErrCorpusDrift = errors.New("the corpus at the frozen commit is not the corpus that was loaded")
+
+	// ErrNotConfigured reports a Runner missing something it cannot invent.
+	ErrNotConfigured = errors.New("runner is not configured")
+
+	// ErrTaskPanic reports a task whose session panicked. The panic is
+	// recovered per task so the remaining tasks still run and every worktree is
+	// still reclaimed; the fact travels on the result, where SLICE-1 §9 charges
+	// it to the harness.
+	ErrTaskPanic = errors.New("task panicked")
+)
+
 // Error is a scoring failure, with enough detail to fix the input.
 //
 // Tasks lists every offending task id rather than the first one found, and the
