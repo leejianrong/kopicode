@@ -87,6 +87,15 @@ func TestCancellationMidTurnKillsTheShellProcessGroup(t *testing.T) {
 	if !strings.Contains(strings.ToLower(result.Output.Inline), "cancel") {
 		t.Errorf("the tool result does not say the run was cancelled:\n%s", result.Output.Inline)
 	}
+	// And the cancellation's own event says what it caught. The loop notices its
+	// cancelled context again at the next checkpoint, which is a step later and
+	// would record "between_steps" — where the loop was standing rather than
+	// what the user interrupted. First observation wins (KAN-857).
+	cancelled := sole[journal.TurnCancelled](t, evs)
+	if cancelled.Phase != "tool_call" {
+		t.Errorf("phase = %q, want %q — a shell was running and its process group was killed",
+			cancelled.Phase, "tool_call")
+	}
 	ended := sole[journal.SessionEnded](t, evs)
 	if ended.Reason != "cancelled" {
 		t.Errorf("session ended %q, want \"cancelled\"", ended.Reason)

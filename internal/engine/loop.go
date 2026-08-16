@@ -41,6 +41,18 @@ func (e *Engine) Run(ctx context.Context, prompt string) (Result, error) {
 	}
 
 	used := 0
+
+	// The phase is per exchange: a REPL session that cancels turn 1, runs turn 2
+	// to completion and cancels turn 5 must not record turn 5 as interrupted
+	// wherever turn 1 was.
+	e.cancelPhase = ""
+
+	// at is the turn events belong to, which is not e.turn: the loop increments
+	// that only once a turn actually starts, and the user's message — and a
+	// cancellation that lands before the first provider call — belong to the
+	// turn about to run rather than to the one that already finished.
+	at := e.turn + 1
+
 	settle := func(stop Stop, cause error) (Result, error) {
 		e.stop = stop
 		e.detail = ""
@@ -53,16 +65,28 @@ func (e *Engine) Run(ctx context.Context, prompt string) (Result, error) {
 			// which command said so.
 			e.detail = e.unverified
 		}
+		if stop == StopCancelled {
+			if err := e.journalCancellation(ctx, at, cause); err != nil {
+				// A record that could not say the turn was interrupted is a
+				// broken record, and the loop reports its own breakage rather
+				// than returning a tidy cancellation over a journal that lost
+				// it. Every other journal failure in this file ends the exchange
+				// the same way.
+				stop, cause = StopHarnessError, err
+				e.stop, e.detail = stop, cause.Error()
+			}
+		}
 		return Result{Stop: stop, Turns: used, Tokens: e.spent}, cause
 	}
 
 	e.asm.AppendUser(prompt)
-	if _, err := e.append(ctx, e.turn+1, journal.UserMessage{Text: journal.InlineText(prompt)}); err != nil {
+	if _, err := e.append(ctx, at, journal.UserMessage{Text: journal.InlineText(prompt)}); err != nil {
 		return settle(StopHarnessError, err)
 	}
 
 	for {
 		if err := ctx.Err(); err != nil {
+			e.noteCancelled(phaseBetweenSteps)
 			return settle(StopCancelled, err)
 		}
 		if used >= e.cfg.Selection.Config.MaxTurns {
@@ -74,6 +98,7 @@ func (e *Engine) Run(ctx context.Context, prompt string) (Result, error) {
 
 		used++
 		e.turn++
+		at = e.turn
 		stop, err := e.runTurn(ctx, e.turn)
 		if stop != StopUnspecified {
 			return settle(stop, err)
@@ -116,6 +141,7 @@ func (e *Engine) runTurn(ctx context.Context, turn int) (Stop, error) {
 
 	for attempt := 1; ; attempt++ {
 		if err := ctx.Err(); err != nil {
+			e.noteCancelled(phaseBetweenSteps)
 			return StopCancelled, err
 		}
 		if e.overBudget() {
@@ -256,7 +282,7 @@ func (e *Engine) call(ctx context.Context, turn, attempt int) (provider.Reply, S
 
 	stream, err := e.cfg.Provider.Complete(ctx, req)
 	if err != nil {
-		return provider.Reply{}, providerStop(err), fmt.Errorf(
+		return provider.Reply{}, e.noteProviderStop(err), fmt.Errorf(
 			"engine: provider call turn %d attempt %d: %w", turn, attempt, err)
 	}
 	defer func() { _ = stream.Close() }()
@@ -268,7 +294,7 @@ func (e *Engine) call(ctx context.Context, turn, attempt int) (provider.Reply, S
 	}
 	reply, err := stream.Reply()
 	if err != nil {
-		return provider.Reply{}, providerStop(err), fmt.Errorf(
+		return provider.Reply{}, e.noteProviderStop(err), fmt.Errorf(
 			"engine: provider reply turn %d attempt %d: %w", turn, attempt, err)
 	}
 
@@ -427,6 +453,7 @@ func (e *Engine) verify(ctx context.Context, turn int) (Stop, error) {
 	if verr != nil {
 		// The only error internal/verify returns is a cancellation, and the
 		// result beside it has already been recorded above.
+		e.noteCancelled(phaseVerification)
 		return StopCancelled, fmt.Errorf("engine: verification on turn %d: %w", turn, verr)
 	}
 

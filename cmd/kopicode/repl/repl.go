@@ -58,9 +58,15 @@
 // ReadLine, so while the engine works the terminal is in its ordinary line
 // discipline and SIGINT arrives through signal.Notify. The loop cancels that
 // turn's context — which is what reaches the shell tool's process group,
-// since the engine threads the context all the way down — renders the
-// cancellation, and prompts again with the session open. Cancelling a turn
-// never ends the session; only EOF, /exit, or a harness error does.
+// since the engine threads the context all the way down — and prompts again
+// with the session open. Cancelling a turn never ends the session; only EOF,
+// /exit, or a harness error does.
+//
+// The `[cancelled]` line the user reads is **not** this package's own account
+// of what it saw. The engine journals a TurnCancelled the moment it observes
+// the cancelled context and announces it through the same event stream every
+// other line here comes from, so an interruption is rendered from the record
+// like anything else (KAN-857).
 package repl
 
 import (
@@ -339,9 +345,16 @@ func (l *Loop) runTurn(ctx context.Context, prompt string) (engine.Result, error
 
 	if interrupted.Load() {
 		// The turn's own stop may be anything the loop managed to settle on
-		// before the cancellation reached it; what the user did is not in
-		// doubt, so the surface says so.
-		l.Cancelled()
+		// before the cancellation reached it; what the user did is not in doubt,
+		// so the result says so.
+		//
+		// Nothing is printed here. The engine journals a TurnCancelled the
+		// moment it observes the cancelled context and announces it through the
+		// same event stream this loop renders, so the line the user reads is a
+		// rendering of the record rather than the surface's own account of it
+		// (KAN-857). A turn that finished in the window between the signal and
+		// the cancellation reaching the loop has nothing to render, which is
+		// correct: nothing was interrupted.
 		return engine.Result{Stop: engine.StopCancelled, Turns: res.Turns, Tokens: res.Tokens}, nil
 	}
 	return res, err
@@ -374,11 +387,9 @@ func (l *Loop) renderOutcome(res engine.Result, err error) {
 	case engine.StopCompleted:
 		return
 	case engine.StopCancelled:
-		// runTurn already rendered the interruption it caused. A cancellation
-		// from elsewhere still deserves a line.
-		if err != nil {
-			l.Cancelled()
-		}
+		// The engine's TurnCancelled event has already been rendered, wherever
+		// the cancellation came from. Printing again here would put the same
+		// interruption on screen twice.
 		return
 	case engine.StopUnspecified, engine.StopMaxTurns, engine.StopBudgetExhausted,
 		engine.StopVerificationFailed, engine.StopProviderError, engine.StopHarnessError:

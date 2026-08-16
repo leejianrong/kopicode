@@ -456,6 +456,71 @@ type VerificationRun struct {
 
 func (VerificationRun) Type() Type { return TypeVerificationRun }
 
+// TurnCancelled records a turn stopped because its context was cancelled — a
+// Ctrl-C at the REPL, or a bench runner abandoning a task.
+//
+// # Why it is per turn, and not a field on SessionEnded
+//
+// A cancelled turn is not a cancelled session, and the REPL is what makes the
+// difference concrete: Ctrl-C ends the turn, the prompt comes back, the user
+// types again, and the session may close twenty minutes later as "completed".
+// SessionEnded records how the *session* finished, so on that path it says
+// nothing about the interruption at all — and a reader looking for it finds a
+// ProviderRequest with no ProviderResponse, which is an absence rather than a
+// record. ADR-0002 decision 2 makes this record the only account of the
+// session, so an absence is not an option: what the record does not say, nobody
+// can derive.
+//
+// The two therefore stay apart and are told apart by type and by the envelope.
+// A TurnCancelled always carries a turn of 1 or more and says one turn was
+// interrupted; a SessionEnded with Reason "cancelled" always carries turn 0 and
+// says the session itself did not survive it. A session where both appear was
+// interrupted and stayed interrupted; one where only the first appears was
+// interrupted and carried on.
+//
+// # Why it is enough to tell a cancellation from a crash
+//
+// A killed process, an out-of-space disk and a truncated file all end the
+// record the same way: it simply stops. This event is the positive statement
+// that makes "the record ends here" and "the turn was interrupted here"
+// different bytes rather than the same silence. A reader that finds no
+// TurnCancelled and no SessionEnded is looking at a record that was cut off.
+type TurnCancelled struct {
+	// Phase is what was in flight when the loop **first** observed the
+	// cancellation, which is not the same as where the loop happened to notice:
+	// a cancelled shell is seen by the tool result, and the loop's own
+	// checkpoint one step later would describe the checkpoint instead. First
+	// observation wins, and internal/engine is the source of truth for the
+	// vocabulary:
+	//
+	//	"provider_stream"  the model's reply was still arriving
+	//	"tool_call"        a tool was running; a shell's process group was killed
+	//	"verification"     the project's own verification command was running
+	//	"between_steps"    nothing was in flight — the loop reached a checkpoint
+	//	                   with the context already cancelled
+	//
+	// It is recorded rather than derived because deriving it means reading the
+	// last event before the gap and guessing, which is the inference this event
+	// exists to replace. It is a plain string for the reason
+	// ToolResult.ErrorKind is: internal/engine and this package share a
+	// documented wire contract, not a dependency edge.
+	Phase string `json:"phase"`
+	// Detail is the cancellation as the loop saw it: the error that ended the
+	// exchange, verbatim and still wrapped, so it ends in "context canceled" or
+	// "context deadline exceeded" and the two stay distinguishable. A user's
+	// Ctrl-C and a runner's timeout are different events and a record that
+	// rendered both as "cancelled" would lose the one a bench operator needs.
+	//
+	// It is the same string SessionEnded.Detail carries when the cancellation
+	// also ended the session, and deliberately so: the two are one fact, and a
+	// shortened copy here would be a second account of it that could disagree.
+	// It is empty when a stop settled as cancelled with no error behind it,
+	// which is honest rather than invented.
+	Detail Text `json:"detail"`
+}
+
+func (TurnCancelled) Type() Type { return TypeTurnCancelled }
+
 // SessionEnded closes the record.
 type SessionEnded struct {
 	// Reason is "completed", "cancelled", "max_turns", "budget_exhausted",

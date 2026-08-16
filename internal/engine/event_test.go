@@ -72,6 +72,7 @@ func samplePayloads() []journal.Payload {
 			Command: []string{"go", "test", "./..."}, Source: "discovered", ExitCode: 1,
 			Output: journal.InlineText("FAIL"),
 		},
+		journal.TurnCancelled{Phase: "provider_stream", Detail: journal.InlineText("context canceled")},
 		journal.SessionEnded{Reason: "completed", ExitCode: 0, Detail: journal.InlineText("")},
 		journal.UnknownPayload{EventType: "SomethingNewer", Raw: json.RawMessage(`{"a":1}`)},
 	}
@@ -173,6 +174,7 @@ func TestTheEventKindNamesAreStable(t *testing.T) {
 		engine.EventPermissionDecided:   "permission_decided",
 		engine.EventTurnSnapshot:        "turn_snapshot",
 		engine.EventVerification:        "verification",
+		engine.EventTurnCancelled:       "turn_cancelled",
 		engine.EventSessionEnded:        "session_ended",
 		engine.EventUnknown:             "unknown",
 		engine.EventDelta:               "delta",
@@ -191,15 +193,19 @@ func TestTheEventKindNamesAreStable(t *testing.T) {
 func TestAnUnknownPayloadKeepsItsNameAndItsBytes(t *testing.T) {
 	ev := journal.Event{
 		SchemaVersion: journal.SchemaVersion, SessionID: "s", Seq: 4, Turn: 1,
-		Time:    time.Unix(0, 0).UTC(),
-		Payload: journal.UnknownPayload{EventType: "TurnCancelled", Raw: json.RawMessage(`{"why":"ctrl-c"}`)},
+		Time: time.Unix(0, 0).UTC(),
+		// A type name this build genuinely does not know. It used to be
+		// "TurnCancelled", which stopped being a future type the day KAN-857
+		// registered it — an unknown-payload fixture named after a known type
+		// would still pass while testing something other than what it says.
+		Payload: journal.UnknownPayload{EventType: "SomethingNewer", Raw: json.RawMessage(`{"why":"ctrl-c"}`)},
 	}
 
 	got := engine.EventOfForTest(ev)
 	if got.Kind != engine.EventUnknown {
 		t.Errorf("kind = %s, want %s", got.Kind, engine.EventUnknown)
 	}
-	if got.Reason != "TurnCancelled" {
+	if got.Reason != "SomethingNewer" {
 		t.Errorf("Reason = %q, want the type name", got.Reason)
 	}
 	if got.Text != `{"why":"ctrl-c"}` {

@@ -61,6 +61,14 @@ func TestCtrlCMidStreamLeavesAUsableSession(t *testing.T) {
 
 			<-ctx.Done()
 			close(cancelled)
+			// The engine's own behaviour, stood in for: it journals a
+			// TurnCancelled the moment it observes the cancelled context and
+			// announces it through this very surface (KAN-857). The
+			// `[cancelled]` line asserted below is therefore a rendering of the
+			// record, which is the property this package holds for every other
+			// line it prints.
+			s.Render(engine.Event{Kind: engine.EventTurnCancelled, Seq: 8, Turn: 1,
+				Reason: "provider_stream", Text: ctx.Err().Error()})
 			return engine.Result{Stop: engine.StopCancelled, Turns: 1}, ctx.Err()
 		},
 	})

@@ -159,6 +159,10 @@ func fixtures() map[journal.Type]journal.Payload {
 			ExitCode: 0,
 			Output:   text("ok  github.com/leejianrong/kopicode  1.2s"),
 		},
+		journal.TypeTurnCancelled: journal.TurnCancelled{
+			Phase:  "provider_stream",
+			Detail: text("context canceled"),
+		},
 		journal.TypeSessionEnded: journal.SessionEnded{
 			Reason:   "completed",
 			ExitCode: 0,

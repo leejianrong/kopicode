@@ -305,6 +305,14 @@ func (e *Engine) runTool(ctx context.Context, turn int, callID string, call pars
 func (e *Engine) journalToolResult(
 	ctx context.Context, turn int, callID, tool, output string, exitCode *int, fault tools.Fault,
 ) error {
+	if fault == tools.FaultCancelled {
+		// The single funnel every tool outcome passes through, which is why the
+		// note lives here rather than at the call sites. A cancelled tool is the
+		// loop's first sight of the cancellation: the checkpoint that ends the
+		// exchange is one step further on and would record where the loop was
+		// standing rather than what the user interrupted.
+		e.noteCancelled(phaseToolCall)
+	}
 	_, err := e.append(ctx, turn, journal.ToolResult{
 		CallID:    callID,
 		Tool:      tool,

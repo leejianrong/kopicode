@@ -70,6 +70,7 @@ const (
 	TypePermissionDecided   Type = "PermissionDecided"
 	TypeTurnSnapshot        Type = "TurnSnapshot"
 	TypeVerificationRun     Type = "VerificationRun"
+	TypeTurnCancelled       Type = "TurnCancelled"
 	TypeSessionEnded        Type = "SessionEnded"
 )
 
@@ -237,6 +238,7 @@ var registry = map[Type]func([]byte) (Payload, error){
 	TypePermissionDecided:   decodeInto[PermissionDecided],
 	TypeTurnSnapshot:        decodeInto[TurnSnapshot],
 	TypeVerificationRun:     decodeInto[VerificationRun],
+	TypeTurnCancelled:       decodeInto[TurnCancelled],
 	TypeSessionEnded:        decodeInto[SessionEnded],
 }
 

@@ -254,6 +254,67 @@ func TestClassifyReadsTheStop(t *testing.T) {
 	}
 }
 
+// TestClassifyReadsACancellationOffTheRecord is KAN-857's half of rule 0.
+//
+// Before that card there was nothing in the journal to read, so a cancellation
+// could only be recognised through [bench.TaskResult].Stop — the runner's
+// in-memory summary of it. The runner overwrites Stop with a harness error when
+// tearing a task down fails, and a cancelled run is exactly when teardown is
+// most likely to fail, so the fact could be lost between the session and the
+// classifier. Now it is on the record and read from there.
+func TestClassifyReadsACancellationOffTheRecord(t *testing.T) {
+	cases := map[string]struct {
+		events []journal.Payload
+		stop   string
+		want   bench.Bucket
+	}{
+		"a cancelled turn is nothing to attribute": {
+			events: []journal.Payload{
+				journal.TurnCancelled{Phase: "provider_stream", Detail: journal.InlineText("context canceled")},
+			},
+			stop: engine.StopCompleted.Reason(),
+			want: bench.BucketUnclassified,
+		},
+		"a cancelled session is nothing to attribute": {
+			events: []journal.Payload{
+				journal.SessionEnded{Reason: engine.StopCancelled.Reason(), ExitCode: 1},
+			},
+			stop: engine.StopCompleted.Reason(),
+			want: bench.BucketUnclassified,
+		},
+		"a cancellation outranks the harness signal beside it": {
+			// The case the record exists for: the operator interrupted the run,
+			// reclaiming the worktree then failed, and the runner replaced the
+			// stop with its own breakage. Charging the task to `harness` would
+			// put a row the operator caused into the one tally with an
+			// acceptance bar of zero.
+			events: []journal.Payload{
+				journal.TurnCancelled{Phase: "tool_call", Detail: journal.InlineText("context canceled")},
+				journal.ToolResult{CallID: "c1", Tool: "run_shell", ErrorKind: tools.FaultInternal.String()},
+			},
+			stop: engine.StopHarnessError.Reason(),
+			want: bench.BucketUnclassified,
+		},
+		"a session with no cancellation is classified as before": {
+			events: []journal.Payload{
+				journal.ToolResult{CallID: "c1", Tool: "run_shell", ErrorKind: tools.FaultInternal.String()},
+			},
+			stop: engine.StopHarnessError.Reason(),
+			want: bench.BucketHarness,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			r := recordSession(t, tc.events...)
+			r.Stop = tc.stop
+			if got := classify(t, r); got != tc.want {
+				t.Errorf("bucket = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestClassifyReadsWhatTheJournalCannotHold covers the two facts about a task
 // that happen outside the session: the panic the runner recovered, and the
 // oracle's own execution.

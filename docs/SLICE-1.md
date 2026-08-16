@@ -89,7 +89,10 @@ and `fsync`ed. Shared envelope, per-type payload.
   anchors referenced, the unified diff actually applied) · `EditRejected` (reason:
   anchor drift, below floor, ambiguous) · `SyntaxGateRun` (checker, exit code, output
   ref) · `PermissionRequested` · `PermissionDecided` · `TurnSnapshot` (git ref, tree
-  sha) · `VerificationRun` (command, exit code, output ref) · `SessionEnded` (reason).
+  sha) · `VerificationRun` (command, exit code, output ref) · `TurnCancelled` (the phase
+  that was in flight — a Ctrl-C ends a *turn* and the session may still close
+  "completed", so a cancellation the session's own ending would not mention is recorded
+  here, KAN-857) · `SessionEnded` (reason).
 - **Blob spill:** any payload field over **64 KiB** is written to
   `.kopicode/blobs/<sha256>` and replaced by a ref. The threshold is arbitrary and
   tunable; what is not negotiable is that nothing is *truncated*
