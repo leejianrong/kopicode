@@ -80,6 +80,17 @@ type Selection struct {
 	// HarnessConfigHash is Config.Hash, carried so the engine does not have to
 	// recompute it per event and so two events in one session cannot disagree.
 	HarnessConfigHash string
+	// Verify is the forced-verification command .kopicode/config.toml named, or
+	// nil when it named none and discovery answers instead (docs/SLICE-1.md §5).
+	//
+	// The *command* is not in the hash and the *source* is: two repositories that
+	// name different commands are still the same arm, because the harness did the
+	// same thing in both — it ran what the repository said. A run that discovered
+	// its command is a different arm, because the harness decided rather than
+	// obeyed, and [Config.Verification.Source] carries exactly that distinction
+	// into the preimage.
+	Verify []string
+
 	// ConfigFilePath is the config file the resolution read, or "" when there
 	// was none. Diagnostics only.
 	ConfigFilePath string
@@ -172,11 +183,25 @@ func Resolve(dir string, o Overrides) (Selection, error) {
 		return Selection{}, unknownHarness(harnessName, harnessSource, file.Path)
 	}
 
+	// The registered configuration says the command is discovered, because that
+	// is what the harness does by default. A repository that names one has
+	// changed what the harness does, so it changes the configuration and
+	// therefore the hash — which is the behaviour Verification.Source was
+	// declared for, and the reason it is in the preimage at all.
+	//
+	// The hash is recomputed from the amended value rather than read off the
+	// registry: a Selection whose Config and HarnessConfigHash disagreed would be
+	// an arm identified by a value it is not.
+	if len(file.Verify) > 0 {
+		cfg.Verification.Source = VerificationConfigured
+	}
+
 	return Selection{
 		ModelID:           entry.ModelID,
 		Pin:               entry.Pin,
 		Config:            cfg,
 		HarnessConfigHash: cfg.Hash(),
+		Verify:            file.Verify,
 		ConfigFilePath:    file.Path,
 		ModelSource:       modelSource,
 		HarnessSource:     harnessSource,

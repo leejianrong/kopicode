@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -339,5 +340,65 @@ func TestSelectionLogsNoCredential(t *testing.T) {
 			t.Errorf("the slog rendering omits %q, so --debug would not say which arm ran:\n%s",
 				want, rendered)
 		}
+	}
+}
+
+// TestAConfiguredVerifyCommandChangesTheArm is the verification half of
+// docs/SLICE-1.md §5, and the reason Verification.Source is in the hash preimage
+// at all (ADR-0007 decision 6).
+//
+// A run whose verification command was discovered from a Makefile is not the
+// same arm as one where the repository named it: the harness did a different
+// thing in each case — it decided, or it obeyed — and results from the two must
+// not pool. The command itself is deliberately *not* hashed: two repositories
+// that each name their own command are still the same arm, because in both the
+// harness ran what it was told.
+func TestAConfiguredVerifyCommandChangesTheArm(t *testing.T) {
+	discovered, err := harness.Resolve(t.TempDir(), harness.Overrides{})
+	if err != nil {
+		t.Fatalf("Resolve with no config file: %v", err)
+	}
+	if discovered.Config.Verification.Source != harness.VerificationDiscovered {
+		t.Fatalf("with no config file the source is %q, want %q",
+			discovered.Config.Verification.Source, harness.VerificationDiscovered)
+	}
+	if discovered.Verify != nil {
+		t.Errorf("Selection.Verify = %v with no config file", discovered.Verify)
+	}
+
+	dir := writeConfig(t, t.TempDir(), "verify = [\"make\", \"test\"]\n")
+	configured, err := harness.Resolve(dir, harness.Overrides{})
+	if err != nil {
+		t.Fatalf("Resolve with a verify command: %v", err)
+	}
+
+	if got := configured.Config.Verification.Source; got != harness.VerificationConfigured {
+		t.Errorf("Verification.Source = %q, want %q", got, harness.VerificationConfigured)
+	}
+	if want := []string{"make", "test"}; !slices.Equal(configured.Verify, want) {
+		t.Errorf("Selection.Verify = %v, want %v", configured.Verify, want)
+	}
+	if configured.HarnessConfigHash == discovered.HarnessConfigHash {
+		t.Errorf("both arms hash to %s; a repository naming its own verification command has "+
+			"changed what the harness does, and two runs that differ in it would pool as one",
+			discovered.HarnessConfigHash)
+	}
+	if configured.HarnessConfigHash != configured.Config.Hash() {
+		t.Errorf("Selection carries hash %s for a configuration that hashes to %s; an arm "+
+			"identified by a value it is not cannot be compared with anything",
+			configured.HarnessConfigHash, configured.Config.Hash())
+	}
+
+	// Two repositories that each name a command are one arm: what is hashed is
+	// that the harness obeyed, not what it was told.
+	other := writeConfig(t, t.TempDir(), "verify = [\"npm\", \"test\"]\n")
+	otherSel, err := harness.Resolve(other, harness.Overrides{})
+	if err != nil {
+		t.Fatalf("Resolve with a different verify command: %v", err)
+	}
+	if otherSel.HarnessConfigHash != configured.HarnessConfigHash {
+		t.Errorf("two repositories that each name their own command hash differently (%s vs %s); "+
+			"the command is not in the preimage and must not be",
+			otherSel.HarnessConfigHash, configured.HarnessConfigHash)
 	}
 }
