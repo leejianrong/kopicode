@@ -12,6 +12,7 @@ import (
 	"github.com/leejianrong/kopicode/internal/repo"
 	"github.com/leejianrong/kopicode/internal/syntax"
 	"github.com/leejianrong/kopicode/internal/tools"
+	"github.com/leejianrong/kopicode/internal/verify"
 )
 
 // Snapshotter records the working tree after a turn that changed it.
@@ -85,6 +86,22 @@ type Config struct {
 	// checker exists for a language it records that honestly, so an
 	// unsupported project needs no nil here.
 	Syntax *syntax.Gate
+
+	// Verify is forced verification: the project's own test command, run after
+	// any turn that could have changed the tree (docs/SLICE-1.md §5).
+	//
+	// **Nil does not mean "skip".** It means the default verifier over
+	// Tools.Root and Selection.Verify, built in [New]. That direction is the
+	// whole point: this is a gate, and a gate whose absence reads as a pass is
+	// the failure internal/syntax's package doc argues at length about. A
+	// session that genuinely has nothing to verify gets there through
+	// internal/verify reporting that it found no command, which is on the
+	// record, rather than through a field somebody forgot.
+	//
+	// It is overridable because the timeout, the clock and the binary lookup are
+	// all things a test has to drive, and because a bench arm may want a
+	// different bound than an interactive session.
+	Verify *verify.Verifier
 
 	// Snapshots records the tree after a turn that ran a tool able to change
 	// it. Optional: nil means no TurnSnapshot events, which is what a session
@@ -161,6 +178,18 @@ type Engine struct {
 	// the only token number the budget is allowed to be decided from.
 	spent journal.TokenCounts
 
+	// unverified is the last verification's rejection, still outstanding.
+	//
+	// It is the session's memory of "the project's own command says this tree is
+	// not finished", and it is what stops the clean prose stop from being read as
+	// success (docs/SLICE-1.md §5). It is set by a verification that ran and
+	// exited non-zero, and cleared by one that ran and passed — a later passing
+	// run is the only thing that answers an earlier failing one. A verification
+	// that could not run neither sets nor clears it: it is not evidence in either
+	// direction, and letting it clear a real failure would be the harness
+	// forgiving a rejection because a timer went off.
+	unverified string
+
 	// stop and detail are what the last exchange concluded, so Close can
 	// journal a SessionEnded that says why rather than always saying
 	// "completed".
@@ -219,6 +248,18 @@ func New(cfg Config) (*Engine, error) {
 	}
 	if cfg.Catalogue == nil {
 		cfg.Catalogue = cat
+	}
+
+	// A missing verifier is filled in rather than treated as "no verification":
+	// see the field's own comment. Root and the configured command are read off
+	// what the engine was already given, so there is nothing here a surface has
+	// to know about internal/verify — which matters, because ADR-0003's
+	// allowlist does not let a front end import it.
+	if cfg.Verify == nil {
+		cfg.Verify = &verify.Verifier{
+			Root:       cfg.Tools.Root.Path(),
+			Configured: cfg.Selection.Verify,
+		}
 	}
 
 	return &Engine{
