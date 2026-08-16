@@ -86,9 +86,15 @@ func TestSmokeRunOverTheRealCorpus(t *testing.T) {
 		if tr.Tokens.Total == 0 {
 			t.Errorf("%s: no token usage recorded; the replay carries the recorded counts", tr.TaskID)
 		}
-		if tr.Bucket != bench.BucketUnclassified {
-			t.Errorf("%s: bucket = %q, want unclassified until a classifier is wired up (KAN-797)",
-				tr.TaskID, tr.Bucket)
+		// The recorded traffic reads a file no task has and then answers in
+		// prose, so every session stops cleanly, no edit is attempted, and the
+		// oracle fails. That is `model` under the mechanical rule, and it is
+		// the end-to-end proof that RunCorpus wires a classifier at all: an
+		// unclassified row here would mean the front end's own path produces
+		// unattributed failures.
+		if tr.Bucket != bench.BucketModel {
+			t.Errorf("%s: bucket = %q, want %q — the fixture stops cleanly and the oracle fails",
+				tr.TaskID, tr.Bucket, bench.BucketModel)
 		}
 		assertSessionRecorded(t, tr)
 		assertOracleLogged(t, res.OutDir, tr)
@@ -101,6 +107,17 @@ func TestSmokeRunOverTheRealCorpus(t *testing.T) {
 	if !strings.Contains(report.String(), fmt.Sprintf("created %d, removed %d, kept 0",
 		corpus.MinTasks, corpus.MinTasks)) {
 		t.Errorf("the report does not account for the worktrees:\n%s", report.String())
+	}
+	// The whole tally, and the `unattributed` line ADR-0006 §3 asks for by
+	// name, on a run where that bucket is empty.
+	for _, want := range []string{
+		fmt.Sprintf("attribution over %d failed task(s): harness 0, unattributed 0, model %d, "+
+			"unclassified 0", corpus.MinTasks, corpus.MinTasks),
+		"unattributed = 0",
+	} {
+		if !strings.Contains(report.String(), want) {
+			t.Errorf("the report does not say %q:\n%s", want, report.String())
+		}
 	}
 	t.Logf("smoke report:\n%s", report.String())
 }
