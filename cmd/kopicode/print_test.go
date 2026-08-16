@@ -553,13 +553,21 @@ func TestTheStreamIsOneJSONObjectPerLine(t *testing.T) {
 	// valid JSON over different bytes than the journal has — the trap
 	// journal.Marshal exists for. The parsed arguments carry all three.
 	//
-	// The `tool_call_requested` line on this same stream *is* escaped, and that
-	// is not this surface doing it: internal/parse builds Call.Raw with
-	// json.Marshal, so the escaping is in the record before anything derives from
-	// it. Carrying that across unchanged is the correct behaviour here — the
-	// stream is a projection of the record and not a repair of it.
+	// The `tool_call_requested` line on this same stream carries them unescaped
+	// too. It did not until KAN-884: internal/parse built Call.Raw with
+	// json.Marshal, so the escaping was already in the record before anything
+	// derived from it, and this projection carried it across unchanged —
+	// correctly, because a projection reports the record rather than repairing
+	// it. With the record fixed upstream, nothing on this stream escapes, so the
+	// assertion is over every line rather than over one substring.
 	if !strings.Contains(stdout, `echo <hi> & bye`) {
 		t.Errorf("the stream HTML-escapes what the record holds verbatim:\n%s", stdout)
+	}
+	for _, escape := range []string{"\\u003c", "\\u003e", "\\u0026"} {
+		if strings.Contains(stdout, escape) {
+			t.Errorf("the stream carries the HTML escape %s; the record holds those bytes verbatim:\n%s",
+				escape, stdout)
+		}
 	}
 }
 

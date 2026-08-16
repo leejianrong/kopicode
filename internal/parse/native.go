@@ -29,13 +29,42 @@ func extractNative(native []NativeCall) ([]ToolCall, *Error) {
 	return out, nil
 }
 
-func nativeToolCall(index int, nc NativeCall) (ToolCall, *Error) {
-	raw, marshalErr := json.Marshal(struct {
+// nativeRaw renders one native call as the JSON object that becomes its
+// [ToolCall.Raw].
+//
+// This route is the only place in the package that *builds* Raw rather than
+// slicing it out of the reply text, and it has to: the provider destructures
+// the tool_calls array off the response, and on the streaming path the
+// arguments arrive as fragments that internal/provider concatenates, so no
+// contiguous run of provider bytes survives to hand through. Re-encoding is the
+// honest second best, and then it must change nothing but the framing.
+//
+// Hence the encoder rather than json.Marshal. encoding/json rewrites `<`, `>`
+// and `&` as <, > and & by default, which is valid JSON over
+// different bytes — so a call whose arguments held a comparison, an HTML
+// fragment or a shell `&&` reached the journal's ToolCallRequested not
+// byte-identical to what the model sent, in the one field defined by being
+// byte-identical (KAN-884). It is the same trap journal.Marshal avoids on the
+// way out and provider.jsonString avoids on the way in; this package can reach
+// neither, and must not — internal/parse does not import the journal.
+func nativeRaw(index int, nc NativeCall) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(struct {
 		Index     int             `json:"index"`
 		ID        string          `json:"id,omitempty"`
 		Name      string          `json:"name"`
 		Arguments json.RawMessage `json:"arguments,omitempty"`
-	}{Index: index, ID: nc.ID, Name: nc.Name, Arguments: nc.Arguments})
+	}{Index: index, ID: nc.ID, Name: nc.Name, Arguments: nc.Arguments}); err != nil {
+		return nil, err
+	}
+	// Encode terminates the value with a newline. Raw is a value, not a line.
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
+}
+
+func nativeToolCall(index int, nc NativeCall) (ToolCall, *Error) {
+	raw, marshalErr := nativeRaw(index, nc)
 	if marshalErr != nil {
 		// Only reachable if Arguments holds invalid JSON, which is itself the
 		// failure worth reporting rather than hiding behind a marshal error.

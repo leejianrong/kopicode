@@ -213,6 +213,96 @@ func TestCallsReturnsACopy(t *testing.T) {
 	}
 }
 
+// TestRawIsNotHTMLEscaped covers all three routes with arguments carrying `<`,
+// `>` and `&` — a comparison operator, an HTML fragment, a shell `&&`.
+//
+// Raw's whole purpose is to be what the model sent, and it reaches the journal
+// as ToolCallRequested. encoding/json escapes those three characters by default,
+// so a Raw built with json.Marshal is valid JSON over different bytes than the
+// model emitted, in the one field defined by being byte-identical. That is the
+// trap journal.Marshal exists for (KAN-884), one layer upstream of the journal.
+//
+// The text routes carry a substring of the reply and so were never at risk; they
+// are asserted here anyway, because the property belongs to Raw rather than to
+// whichever route happened to produce it.
+func TestRawIsNotHTMLEscaped(t *testing.T) {
+	const args = `{"command":"grep -n '<div>' *.go && echo done > out.txt"}`
+
+	tests := []struct {
+		name  string
+		msg   parse.Message
+		route parse.Route
+		// rawIsJSON marks the routes whose Raw is a JSON object. On the text
+		// routes it is the block including its fence or its tags, which is what
+		// the model wrote and therefore not JSON.
+		rawIsJSON bool
+	}{
+		{
+			name:      "native",
+			msg:       parse.Message{ToolCalls: []parse.NativeCall{{ID: "call_1", Name: "run_shell", Arguments: raw(args)}}},
+			route:     parse.RouteNative,
+			rawIsJSON: true,
+		},
+		{
+			name:  "fenced json",
+			msg:   parse.Message{Content: "```tool\n{\"name\":\"run_shell\",\"arguments\":" + args + "}\n```"},
+			route: parse.RouteFencedJSON,
+		},
+		{
+			name:  "xml tag",
+			msg:   parse.Message{Content: "<tool_call>{\"name\":\"run_shell\",\"arguments\":" + args + "}</tool_call>"},
+			route: parse.RouteXMLTag,
+		},
+	}
+
+	// The escapes encoding/json produces by default, and the literal each one
+	// stands for.
+	escapes := map[string]string{`\u003c`: "<", `\u003e`: ">", `\u0026`: "&"}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ext, err := parse.Extract(tt.msg)
+			if err != nil {
+				t.Fatalf("Extract() = %v", err)
+			}
+			if ext.Route() != tt.route {
+				t.Fatalf("route = %s, want %s", ext.Route(), tt.route)
+			}
+
+			call := ext.Calls()[0]
+			for escape, literal := range escapes {
+				if strings.Contains(call.Raw, escape) {
+					t.Errorf("Raw HTML-escapes %q as %s; it must hold what the model sent:\n%s",
+						literal, escape, call.Raw)
+				}
+				if strings.Contains(string(call.Arguments), escape) {
+					t.Errorf("Arguments HTML-escape %q as %s:\n%s", literal, escape, call.Arguments)
+				}
+			}
+
+			// The positive half: the operators survive as themselves rather
+			// than merely not appearing in their escaped spelling.
+			const verbatim = `grep -n '<div>' *.go && echo done > out.txt`
+			if !strings.Contains(call.Raw, verbatim) {
+				t.Errorf("Raw does not carry the command verbatim:\n%s", call.Raw)
+			}
+			if !strings.Contains(string(call.Arguments), verbatim) {
+				t.Errorf("Arguments do not carry the command verbatim:\n%s", call.Arguments)
+			}
+
+			// Where Raw is JSON it must still be the JSON it claims to be: not
+			// escaping is not a licence to emit something a reader cannot
+			// decode.
+			if tt.rawIsJSON {
+				var probe map[string]json.RawMessage
+				if err := json.Unmarshal([]byte(call.Raw), &probe); err != nil {
+					t.Errorf("Raw does not decode as JSON: %v\n%s", err, call.Raw)
+				}
+			}
+		})
+	}
+}
+
 // TestArgumentsAreAlwaysAnObject is the invariant every tool downstream will
 // assume. A tool handed a JSON string where it expects an object is a harness
 // failure that would be attributed to the model.
