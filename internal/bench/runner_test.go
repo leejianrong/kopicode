@@ -522,6 +522,65 @@ func TestRunRefusesACorpusThatDriftedFromTheFrozenCommit(t *testing.T) {
 	}
 }
 
+// TestRunRefusesToReportSuccessWithFewerWorktreesThanTasks is KAN-875's defect
+// stated as a property.
+//
+// The sighting was a run that created nine worktrees for a ten-task corpus,
+// removed all nine, printed symmetric counts and exited zero. Nothing in that
+// output says a task never ran, and KAN-800's bar is zero failures classified
+// `harness` — so a run that quietly measures 90% of the corpus is the expensive
+// way to find a bug.
+//
+// Creation is broken here by a mechanism that has nothing to do with the race
+// behind the original sighting: an ordinary file sitting where the worktree
+// directory has to be. That is deliberate. The guard must not depend on knowing
+// why creation failed, because the cause of the sighting was never pinned to a
+// single mechanism.
+func TestRunRefusesToReportSuccessWithFewerWorktreesThanTasks(t *testing.T) {
+	f := newFixture(t)
+
+	base := filepath.Join(f.Root, ".kopicode", "bench", "worktrees")
+	if err := os.MkdirAll(filepath.Dir(base), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, base, "a file where the worktree directory has to be\n")
+
+	r := newRunner(t, f, &fakeAgent{})
+	res, err := r.Run(t.Context())
+	if !errors.Is(err, bench.ErrWorktreeCreate) {
+		t.Fatalf("Run: %v, want ErrWorktreeCreate; a run that created no worktrees "+
+			"must not be reportable as a run over the corpus", err)
+	}
+	if res == nil {
+		t.Fatal("Run returned no result; the tasks that did run are still worth reading")
+	}
+
+	if got := res.Reclamation.Created; got != 0 {
+		t.Errorf("Created = %d, want 0", got)
+	}
+	if got := len(res.Reclamation.CreateFailed); got != corpus.MinTasks {
+		t.Errorf("CreateFailed = %v, want all %d tasks named",
+			res.Reclamation.CreateFailed, corpus.MinTasks)
+	}
+	// Named, not counted: "9 of 10" does not say which task went unmeasured.
+	for _, id := range []string{"task-01", "task-10"} {
+		if !strings.Contains(err.Error(), id) {
+			t.Errorf("the error does not name %s: %v", id, err)
+		}
+	}
+	if !strings.Contains(res.Tasks[0].SessionErr, "creating a worktree") {
+		t.Errorf("task-01's own result does not say its worktree failed: %q", res.Tasks[0].SessionErr)
+	}
+
+	var report strings.Builder
+	if err := bench.WriteReport(&report, res); err != nil {
+		t.Fatalf("WriteReport: %v", err)
+	}
+	if !strings.Contains(report.String(), "NOT CREATED") {
+		t.Errorf("the report does not say a worktree was missing:\n%s", report.String())
+	}
+}
+
 // TestRunRefusesAnIncompleteConfiguration keeps the runner from being started
 // with a piece missing and discovering it after a worktree exists.
 func TestRunRefusesAnIncompleteConfiguration(t *testing.T) {
