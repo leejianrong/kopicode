@@ -68,9 +68,9 @@ func TestTheRecordDecidesWhatTheUserSaw(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got := render(t, func(s repl.Surface) {
 				for _, chunk := range tc.streamed {
-					s.Stream(chunk)
+					s.Render(delta(chunk))
 				}
-				s.Render(repl.Event{Kind: repl.KindAssistant, Text: tc.recorded})
+				s.Render(engine.Event{Kind: engine.EventAssistantMessage, Seq: 1, Text: tc.recorded})
 			})
 
 			if strings.Count(got, tc.want) != 1 {
@@ -88,8 +88,8 @@ func TestTheRecordDecidesWhatTheUserSaw(t *testing.T) {
 // make the terminal and the record disagree with nobody able to tell.
 func TestADivergentStreamShowsTheRecordAndSaysSo(t *testing.T) {
 	got := render(t, func(s repl.Surface) {
-		s.Stream("a guess that was wrong")
-		s.Render(repl.Event{Kind: repl.KindAssistant, Text: "what the record holds"})
+		s.Render(delta("a guess that was wrong"))
+		s.Render(engine.Event{Kind: engine.EventAssistantMessage, Seq: 1, Text: "what the record holds"})
 	})
 
 	if !strings.Contains(got, "what the record holds") {
@@ -105,9 +105,9 @@ func TestADivergentStreamShowsTheRecordAndSaysSo(t *testing.T) {
 // one's prefix, which is a silent truncation of the record.
 func TestASecondMessageDoesNotInheritTheFirstsStream(t *testing.T) {
 	got := render(t, func(s repl.Surface) {
-		s.Stream("hello")
-		s.Render(repl.Event{Kind: repl.KindAssistant, Text: "hello there"})
-		s.Render(repl.Event{Kind: repl.KindAssistant, Text: "hello again"})
+		s.Render(delta("hello"))
+		s.Render(engine.Event{Kind: engine.EventAssistantMessage, Seq: 1, Text: "hello there"})
+		s.Render(engine.Event{Kind: engine.EventAssistantMessage, Seq: 2, Text: "hello again"})
 	})
 
 	if !strings.Contains(got, "hello again") {
@@ -115,25 +115,39 @@ func TestASecondMessageDoesNotInheritTheFirstsStream(t *testing.T) {
 	}
 }
 
-func TestEveryKindRendersSomething(t *testing.T) {
-	kinds := []repl.Kind{
-		repl.KindSessionStarted, repl.KindUser, repl.KindAssistant, repl.KindThinking,
-		repl.KindToolCall, repl.KindToolRepair, repl.KindToolFailed, repl.KindToolResult,
-		repl.KindEditApplied, repl.KindEditRejected, repl.KindSyntaxGate,
-		repl.KindPermissionDecided, repl.KindSnapshot, repl.KindVerification,
-		repl.KindSessionEnded, repl.KindNotice, repl.KindError, repl.KindTurnCancelled,
-		repl.KindTurnStopped,
+// TestEveryEventTheEngineRecordsReachesTheUser.
+//
+// Three kinds are deliberately silent — a provider request paints progress, a
+// provider response clears it, and a tool-call-requested is the raw text of a
+// call whose repair says what was wrong — and a permission request is asked
+// rather than printed. Everything else must produce a line, because an event
+// the record holds and the user was never told about is the failure this
+// surface exists to prevent.
+func TestEveryEventTheEngineRecordsReachesTheUser(t *testing.T) {
+	silent := map[engine.EventKind]string{
+		engine.EventProviderRequest:     "paints progress on the current line",
+		engine.EventProviderResponse:    "clears it",
+		engine.EventToolCallRequested:   "the repair or failure that follows says what was wrong",
+		engine.EventPermissionRequested: "is asked by Loop.Ask rather than printed",
 	}
 
-	for _, k := range kinds {
-		got := render(t, func(s repl.Surface) {
-			s.Render(repl.Event{Kind: k, Text: "body", Tool: "run_shell", Path: "x.go", Reason: "why"})
-		})
-		if strings.TrimSpace(got) == "" {
-			t.Errorf("kind %d rendered nothing", uint8(k))
+	for _, e := range everyKind() {
+		if e.Kind == engine.EventUnspecified || e.Kind == engine.EventDelta {
+			continue
 		}
-		if strings.Contains(got, "no rendering for event kind") {
-			t.Errorf("kind %d fell through to the unhandled case", uint8(k))
+		got := render(t, func(s repl.Surface) { s.Render(e) })
+
+		if why, ok := silent[e.Kind]; ok {
+			if strings.Contains(got, "[") {
+				t.Errorf("engine.%s printed a line, but it %s:\n%q", e.Kind, why, got)
+			}
+			continue
+		}
+		if strings.TrimSpace(got) == "" {
+			t.Errorf("engine.%s rendered nothing", e.Kind)
+		}
+		if strings.Contains(got, "no rendering for") {
+			t.Errorf("engine.%s fell through to the unhandled case", e.Kind)
 		}
 	}
 }
@@ -143,14 +157,14 @@ func TestEveryKindRendersSomething(t *testing.T) {
 // default case reports rather than drops.
 func TestAnUnrenderedKindIsLoud(t *testing.T) {
 	got := render(t, func(s repl.Surface) {
-		s.Render(repl.Event{Kind: repl.Kind(200)})
+		s.Render(engine.Event{Kind: engine.EventKind(200)})
 	})
-	if !strings.Contains(got, "no rendering for event kind 200") {
+	if !strings.Contains(got, "no rendering for") {
 		t.Errorf("an unhandled kind was dropped silently:\n%q", got)
 	}
 
-	zero := render(t, func(s repl.Surface) { s.Render(repl.Event{}) })
-	if !strings.Contains(zero, "no rendering for event kind 0") {
+	zero := render(t, func(s repl.Surface) { s.Render(engine.Event{}) })
+	if !strings.Contains(zero, "no rendering for") {
 		t.Errorf("the zero Event was dropped silently:\n%q", zero)
 	}
 }
@@ -159,11 +173,11 @@ func TestAnUnrenderedKindIsLoud(t *testing.T) {
 // available" and "exit 0" must not render the same way.
 func TestASyntaxGateThatDidNotRunDoesNotReadAsAPass(t *testing.T) {
 	notRun := render(t, func(s repl.Surface) {
-		s.Render(repl.Event{Kind: repl.KindSyntaxGate, Path: "notes.txt"})
+		s.Render(engine.Event{Kind: engine.EventSyntaxGate, Seq: 1, Path: "notes.txt"})
 	})
 	passed := render(t, func(s repl.Surface) {
-		s.Render(repl.Event{
-			Kind: repl.KindSyntaxGate, Path: "x.go", Checker: "gofmt -e", Ran: true,
+		s.Render(engine.Event{
+			Kind: engine.EventSyntaxGate, Seq: 1, Path: "x.go", Checker: "gofmt -e", Ran: true,
 		})
 	})
 
@@ -180,7 +194,7 @@ func TestASyntaxGateThatDidNotRunDoesNotReadAsAPass(t *testing.T) {
 // "applied".
 func TestAFuzzyEditIsVisible(t *testing.T) {
 	got := render(t, func(s repl.Surface) {
-		s.Render(repl.Event{Kind: repl.KindEditApplied, Path: "x.go", Mode: "fuzzy"})
+		s.Render(engine.Event{Kind: engine.EventEditApplied, Seq: 1, Path: "x.go", Mode: "fuzzy"})
 	})
 	if !strings.Contains(got, "fuzzy") {
 		t.Errorf("a fuzzy edit was not marked as one:\n%q", got)
@@ -192,8 +206,8 @@ func TestAFuzzyEditIsVisible(t *testing.T) {
 // line points at how much of it there is.
 func TestToolOutputIsSummarisedBySizeAndNeverPasted(t *testing.T) {
 	got := render(t, func(s repl.Surface) {
-		s.Render(repl.Event{
-			Kind: repl.KindToolResult, Tool: "run_shell", Size: 70000,
+		s.Render(engine.Event{
+			Kind: engine.EventToolResult, Seq: 1, Tool: "run_shell", Size: 70000,
 			ExitCode: 1, HasExitCode: true, Reason: "task",
 		})
 	})
@@ -210,7 +224,7 @@ func TestToolOutputIsSummarisedBySizeAndNeverPasted(t *testing.T) {
 // user has already read it and the echo would be a duplicate.
 func TestThePipedTranscriptCarriesTheUsersOwnWords(t *testing.T) {
 	user := func(s repl.Surface) {
-		s.Render(repl.Event{Kind: repl.KindUser, Text: "fix the parser"})
+		s.Render(engine.Event{Kind: engine.EventUserMessage, Seq: 1, Text: "fix the parser"})
 	}
 
 	piped := render(t, user)

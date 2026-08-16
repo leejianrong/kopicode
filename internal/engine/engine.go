@@ -124,14 +124,21 @@ type Config struct {
 	Catalogue parse.Tools
 
 	// Stream, when non-nil, is called once per delta as the reply arrives, on
-	// the goroutine pulling the stream. It is the seam the REPL prints tokens
-	// through (KAN-793).
+	// the goroutine pulling the stream, with the turn the reply belongs to. It
+	// is the seam the REPL prints tokens through (KAN-793), reached from a
+	// surface through [Options.Events].
+	//
+	// The turn is passed because a delta is the one thing a surface sees that
+	// is not yet in the record, and without it the surface cannot say which
+	// turn the text it is printing belongs to — journal events carry the turn
+	// in their envelope, and a stream where only some events know is a stream
+	// a renderer has to guess about.
 	//
 	// Synchronous on purpose. A channel or a goroutine here would put the
 	// scheduler between the provider and the journal, and a byte-identical
 	// replayed journal rests on there being no such thing in any output path.
 	// A slow callback slows the turn, which is the honest trade.
-	Stream func(provider.Delta)
+	Stream func(turn int, d provider.Delta)
 }
 
 // Errors a caller can branch on.

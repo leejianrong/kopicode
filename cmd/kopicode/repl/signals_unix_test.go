@@ -38,7 +38,7 @@ func TestARealSIGINTCancelsTheTurn(t *testing.T) {
 		Out:        &out,
 		Interrupts: sig,
 		Turn: func(ctx context.Context, _ string, s repl.Surface) (engine.Result, error) {
-			s.Stream("working")
+			s.Render(delta("working"))
 			if err := syscall.Kill(syscall.Getpid(), syscall.SIGINT); err != nil {
 				t.Errorf("sending SIGINT to this process: %v", err)
 				return engine.Result{Stop: engine.StopCompleted}, nil

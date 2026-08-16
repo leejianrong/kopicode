@@ -198,6 +198,28 @@ func (r *Repo) CommonDir() string { return r.commonDir }
 // tree.
 func (r *Repo) StatePath() string { return filepath.Join(r.root, StateDir) }
 
+// Head is the commit HEAD points at, as a full sha.
+//
+// It is what journal.SessionStarted records as the tree the session ran
+// against, and that is the only field tying a record to the code it was made
+// over: the harness config hash deliberately excludes the repository, and the
+// build identity describes the binary rather than the checkout.
+//
+// A repository with no commit yet has no head, and `rev-parse HEAD` fails
+// there. Starting a session in one is an ordinary thing to do, so the error is
+// returned plainly for the caller to read as "no head" rather than dressed up
+// as a repository that could not be read.
+//
+// Read-only, and structurally so: rev-parse cannot write an index, and this
+// goes through the guarded path that would refuse it if it could.
+func (r *Repo) Head(ctx context.Context) (string, error) {
+	out, err := r.git(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // ExcludeStateDir makes git ignore .kopicode/ by appending a pattern to the
 // repository's info/exclude, creating the file if it is absent.
 //

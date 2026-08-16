@@ -85,12 +85,9 @@ import (
 // captured — and what stops the engine from acquiring an opinion about
 // presentation by accident.
 type Surface interface {
-	// Stream prints model text as it arrives. See the package comment: it is
-	// an optimistic prefix of what the journal will record.
-	Stream(text string)
-
-	// Render prints one journal-derived event.
-	Render(e Event)
+	// Render prints one event from the engine's stream — a journal event as
+	// it is recorded, or a delta as it arrives. See render.go.
+	Render(e engine.Event)
 
 	// Progress paints a status on the current line only, replacing whatever
 	// it painted before. It is a no-op with no terminal. Passing "" clears
@@ -100,16 +97,20 @@ type Surface interface {
 	// Ask puts a consent request to the user and returns the answer. It
 	// denies on anything that is not an affirmative, including a closed
 	// input and a cancelled turn.
-	Ask(ctx context.Context, c Consent) (Answer, error)
+	Ask(ctx context.Context, req engine.ConsentRequest) (engine.ConsentAnswer, error)
 }
 
-// TurnFunc runs one exchange: the user's prompt in, an [engine.Result] out,
-// printing through s as it goes.
+// TurnFunc runs one exchange: the user's prompt in, an [engine.Result] out.
 //
 // It is a function rather than an interface because there is exactly one
-// implementation in the product — the adapter that drives [engine.Engine] and
-// tees its journal — and several in tests. ctx is the turn's context and is
-// cancelled by Ctrl-C.
+// implementation in the product — a call to engine.Session.Run — and several in
+// tests. ctx is the turn's context and is cancelled by Ctrl-C.
+//
+// s is the surface the turn may print through, and in the product it goes
+// unused: the session announces its own record through engine.Options.Events,
+// wired to the very same [*Loop]. A test's fake turn has no record to announce
+// and prints through s instead. Both are the one surface, which is what stops
+// two sources interleaving.
 type TurnFunc func(ctx context.Context, prompt string, s Surface) (engine.Result, error)
 
 // CloseFunc ends the session. The engine's Close writes SessionEnded, so this
@@ -244,7 +245,7 @@ func (l *Loop) Run(ctx context.Context) (engine.Stop, error) {
 	// to be on it.
 	if l.closeFn != nil {
 		if cerr := l.closeFn(ctx); cerr != nil {
-			l.Render(Event{Kind: KindError, Text: cerr.Error()})
+			l.Fail(cerr.Error())
 			if err == nil {
 				stop, err = engine.StopHarnessError, cerr
 			}
@@ -276,7 +277,7 @@ func (l *Loop) loop(ctx context.Context) (engine.Stop, error) {
 		case errors.Is(err, io.EOF):
 			return engine.StopCompleted, nil
 		case err != nil:
-			l.Render(Event{Kind: KindError, Text: err.Error()})
+			l.Fail(err.Error())
 			return engine.StopHarnessError, fmt.Errorf("repl: reading the prompt: %w", err)
 		}
 
@@ -290,7 +291,7 @@ func (l *Loop) loop(ctx context.Context) (engine.Stop, error) {
 
 		res, err := l.runTurn(ctx, line)
 		if err != nil && res.Stop == engine.StopHarnessError {
-			l.Render(Event{Kind: KindError, Text: err.Error()})
+			l.Fail(err.Error())
 			return engine.StopHarnessError, err
 		}
 		l.renderOutcome(res, err)
@@ -340,7 +341,7 @@ func (l *Loop) runTurn(ctx context.Context, prompt string) (engine.Result, error
 		// The turn's own stop may be anything the loop managed to settle on
 		// before the cancellation reached it; what the user did is not in
 		// doubt, so the surface says so.
-		l.Render(Event{Kind: KindTurnCancelled, Reason: "interrupted"})
+		l.Cancelled()
 		return engine.Result{Stop: engine.StopCancelled, Turns: res.Turns, Tokens: res.Tokens}, nil
 	}
 	return res, err
@@ -376,18 +377,18 @@ func (l *Loop) renderOutcome(res engine.Result, err error) {
 		// runTurn already rendered the interruption it caused. A cancellation
 		// from elsewhere still deserves a line.
 		if err != nil {
-			l.Render(Event{Kind: KindTurnCancelled, Reason: err.Error()})
+			l.Cancelled()
 		}
 		return
 	case engine.StopUnspecified, engine.StopMaxTurns, engine.StopBudgetExhausted,
-		engine.StopProviderError, engine.StopHarnessError:
+		engine.StopVerificationFailed, engine.StopProviderError, engine.StopHarnessError:
 	}
 
-	detail := res.Stop.Reason()
+	detail := ""
 	if err != nil {
 		detail = err.Error()
 	}
-	l.Render(Event{Kind: KindTurnStopped, Reason: res.Stop.Reason(), Text: detail})
+	l.Stopped(res.Stop, detail)
 }
 
 // command classifies a line the user typed.
