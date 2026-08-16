@@ -16,13 +16,14 @@ import (
 //
 // The mapping in full:
 //
-//	Stop                 Reason               ExitCode  SLICE-1 §9 bucket
-//	StopCompleted        completed            0         model (everything else)
-//	StopMaxTurns         max_turns            4         harness — named outright
-//	StopBudgetExhausted  budget_exhausted     1         model; see the note below
-//	StopCancelled        cancelled            1         neither
-//	StopProviderError    error                3         harness — "a provider error surviving retries"
-//	StopHarnessError     error                4         harness
+//	Stop                     Reason               ExitCode  SLICE-1 §9 bucket
+//	StopCompleted            completed            0         model (everything else)
+//	StopMaxTurns             max_turns            4         harness — named outright
+//	StopBudgetExhausted      budget_exhausted     1         model; see the note below
+//	StopVerificationFailed   verification_failed  1         model
+//	StopCancelled            cancelled            1         neither
+//	StopProviderError        error                3         harness — "a provider error surviving retries"
+//	StopHarnessError         error                4         harness
 //
 // **The budget is the one that is not settled here.** SLICE-1 §9 lists the
 // `harness` triggers explicitly and the token budget is not among them, so a
@@ -49,6 +50,20 @@ const (
 	// StopBudgetExhausted is the token budget, decided from reported usage.
 	StopBudgetExhausted
 
+	// StopVerificationFailed is the model saying it is finished over a tree the
+	// project's own verification command has rejected (docs/SLICE-1.md §5).
+	//
+	// It exists because the alternative is [StopCompleted], and "completed" is
+	// exactly the word forced verification exists to withhold. It is exit 1 —
+	// task not completed — and it is charged to the *model*: the harness ran the
+	// suite, showed the model the failure, and the model stopped anyway.
+	//
+	// Only a command that ran and exited non-zero produces this. A verification
+	// that could not run — no command found, the toolchain missing, a timeout —
+	// is recorded honestly and does not block, for the reason internal/verify's
+	// package doc gives.
+	StopVerificationFailed
+
 	// StopCancelled is a cancelled context — Ctrl-C, or a bench runner
 	// abandoning a task. Neither bucket.
 	StopCancelled
@@ -66,13 +81,14 @@ const (
 
 // stopReason is the journal.SessionEnded.Reason each stop is recorded under.
 var stopReason = map[Stop]string{
-	StopUnspecified:     "unspecified",
-	StopCompleted:       "completed",
-	StopMaxTurns:        "max_turns",
-	StopBudgetExhausted: "budget_exhausted",
-	StopCancelled:       "cancelled",
-	StopProviderError:   "error",
-	StopHarnessError:    "error",
+	StopUnspecified:        "unspecified",
+	StopCompleted:          "completed",
+	StopMaxTurns:           "max_turns",
+	StopBudgetExhausted:    "budget_exhausted",
+	StopVerificationFailed: "verification_failed",
+	StopCancelled:          "cancelled",
+	StopProviderError:      "error",
+	StopHarnessError:       "error",
 }
 
 // stopExit is the process exit code each stop maps to, from docs/SLICE-1.md
@@ -80,13 +96,14 @@ var stopReason = map[Stop]string{
 // 3 provider error, 4 harness error. 2 is not reachable from here — an unknown
 // model id is refused before the engine is built (ADR-0007 decision 4).
 var stopExit = map[Stop]int{
-	StopUnspecified:     4,
-	StopCompleted:       0,
-	StopMaxTurns:        4,
-	StopBudgetExhausted: 1,
-	StopCancelled:       1,
-	StopProviderError:   3,
-	StopHarnessError:    4,
+	StopUnspecified:        4,
+	StopCompleted:          0,
+	StopMaxTurns:           4,
+	StopBudgetExhausted:    1,
+	StopVerificationFailed: 1,
+	StopCancelled:          1,
+	StopProviderError:      3,
+	StopHarnessError:       4,
 }
 
 // Reason returns the journal.SessionEnded.Reason for this stop.

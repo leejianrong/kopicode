@@ -3,6 +3,7 @@ package harness_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -40,7 +41,7 @@ func TestReadingTheConfigFile(t *testing.T) {
 		},
 		{
 			name:      "an unrelated key is skipped, value uninterpreted",
-			content:   "verify = [\"go\", \"test\", \"./...\"]\nmodel = \"a/b\"\n",
+			content:   "somebody_elses_key = { deeply = [1, 2, 3] }\nmodel = \"a/b\"\n",
 			wantModel: "a/b",
 		},
 		{
@@ -120,6 +121,110 @@ func TestReadingTheConfigFile(t *testing.T) {
 			if got.Path == "" {
 				t.Error("the loaded config does not say which file it came from, so a diagnostic " +
 					"cannot name it")
+			}
+		})
+	}
+}
+
+// TestReadingTheVerifyCommand drives the `verify` key: the repository naming its
+// own forced-verification command (docs/SLICE-1.md §5).
+//
+// The refusals are the interesting half, and each one is a guess this reader
+// declines to make. journal.VerificationRun records argv, so a command line
+// accepted here would have to be split by something that is not the shell that
+// would have run it — and the two disagree the first time a path holds a space.
+func TestReadingTheVerifyCommand(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    []string
+		wantErr string
+	}{
+		{
+			name:    "a plain argv",
+			content: "verify = [\"make\", \"test\"]\n",
+			want:    []string{"make", "test"},
+		},
+		{
+			name:    "one element",
+			content: "verify = ['./run-tests']\n",
+			want:    []string{"./run-tests"},
+		},
+		{
+			name:    "a trailing comma and a comment",
+			content: "verify = [\"go\", \"test\", \"./...\",]  # the usual\n",
+			want:    []string{"go", "test", "./..."},
+		},
+		{
+			name:    "a comma inside an element",
+			content: "verify = [\"go\", \"test\", \"-run\", \"A,B\"]\n",
+			want:    []string{"go", "test", "-run", "A,B"},
+		},
+		{
+			name:    "a bracket inside an element",
+			content: "verify = [\"pytest\", \"-k\", \"test[1]\"]\n",
+			want:    []string{"pytest", "-k", "test[1]"},
+		},
+		{
+			name:    "unset",
+			content: "model = \"a/b\"\n",
+			want:    nil,
+		},
+		{
+			name:    "a command line rather than argv",
+			content: "verify = \"make test\"\n",
+			wantErr: "is not an array",
+		},
+		{
+			name:    "an empty array",
+			content: "verify = []\n",
+			wantErr: "is empty",
+		},
+		{
+			name:    "an array that does not close on this line",
+			content: "verify = [\"make\",\n  \"test\"]\n",
+			wantErr: "does not close on this line",
+		},
+		{
+			name:    "an unquoted element",
+			content: "verify = [make, test]\n",
+			wantErr: "not a quoted string",
+		},
+		{
+			name:    "a hole in the middle",
+			content: "verify = [\"make\", , \"test\"]\n",
+			wantErr: "has no value",
+		},
+		{
+			name:    "trailing junk after the array",
+			content: "verify = [\"make\"] oops\n",
+			wantErr: "trailing text",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := writeConfig(t, t.TempDir(), tc.content)
+
+			got, err := harness.LoadFileConfig(dir)
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("LoadFileConfig succeeded, want an error containing %q", tc.wantErr)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("error = %v, want it to contain %q", err, tc.wantErr)
+				}
+				if !harness.IsUsageError(err) {
+					t.Errorf("a malformed config file is a usage error (exit 2), not a harness "+
+						"error: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("LoadFileConfig: %v", err)
+			}
+			if !slices.Equal(got.Verify, tc.want) {
+				t.Errorf("verify = %v, want %v", got.Verify, tc.want)
 			}
 		})
 	}

@@ -442,9 +442,13 @@ func (TurnSnapshot) Type() Type { return TypeTurnSnapshot }
 // VerificationRun records the project's own test or lint command after a
 // modifying turn. A non-zero exit blocks a success report.
 type VerificationRun struct {
-	// Command is argv, not a shell string, so it is unambiguous on replay.
+	// Command is argv, not a shell string, so it is unambiguous on replay. It is
+	// empty exactly when Source is "none".
 	Command []string `json:"command"`
-	// Source is "configured" or "discovered".
+	// Source is "configured", "discovered", or "none" — the last being the
+	// honest record that no command was configured and none was found, which is
+	// written rather than skipped so that "nobody looked" cannot be mistaken for
+	// "it passed". ExitCode is -1, never 0, for any run that did not conclude.
 	Source   string `json:"source"`
 	ExitCode int    `json:"exit_code"`
 	Output   Text   `json:"output"`
@@ -454,8 +458,8 @@ func (VerificationRun) Type() Type { return TypeVerificationRun }
 
 // SessionEnded closes the record.
 type SessionEnded struct {
-	// Reason is "completed", "cancelled", "max_turns", "budget_exhausted" or
-	// "error".
+	// Reason is "completed", "cancelled", "max_turns", "budget_exhausted",
+	// "verification_failed" or "error".
 	Reason string `json:"reason"`
 	// ExitCode is the process exit code the surface reported.
 	ExitCode int  `json:"exit_code"`

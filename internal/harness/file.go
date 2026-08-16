@@ -18,10 +18,9 @@ const ConfigFileName = "config.toml"
 
 // FileConfig is the part of .kopicode/config.toml this package reads.
 //
-// It is not the whole file. docs/SLICE-1.md §5 puts the verification command in
-// here too, and this reader passes over every key it does not own rather than
-// refusing them — a config file is shared, and a reader that rejected a
-// neighbour's key would make adding one a breaking change.
+// It is not the whole file. This reader passes over every key it does not own
+// rather than refusing them — a config file is shared, and a reader that
+// rejected a neighbour's key would make adding one a breaking change.
 type FileConfig struct {
 	// Path is the file the values came from, or "" when no file was found.
 	// Nothing else distinguishes "absent" from "present and empty", and the
@@ -31,6 +30,15 @@ type FileConfig struct {
 	Model string
 	// Harness is the `harness` key, or "" when unset.
 	Harness string
+	// Verify is the `verify` key: the forced-verification command this
+	// repository names for itself (docs/SLICE-1.md §5). Nil when unset, which is
+	// what lets internal/verify's discovery answer instead.
+	//
+	// It is an array of strings — `verify = ["make", "test"]` — and never a
+	// shell string, because journal.VerificationRun records argv. A shell string
+	// would have to be re-split on replay by a splitter that is not the shell
+	// that ran it, and the two disagree the first time a path holds a space.
+	Verify []string
 }
 
 // LoadFileConfig finds and reads the repository's config file, starting at dir
@@ -140,6 +148,15 @@ func parseFileConfig(path, content string) (FileConfig, error) {
 		}
 		seen[key] = true
 
+		if key == "verify" {
+			argv, err := parseStringArray(strings.TrimSpace(rest))
+			if err != nil {
+				return FileConfig{}, usagef("%s:%d: %s = %s", path, lineNo, key, err)
+			}
+			cfg.Verify = argv
+			continue
+		}
+
 		target := map[string]*string{"model": &cfg.Model, "harness": &cfg.Harness}[key]
 		if target == nil {
 			// A key belonging to somebody else. Its value is not this reader's
@@ -204,4 +221,119 @@ func parseString(v string) (string, error) {
 		return "", fmt.Errorf("%s has trailing text after the closing quote: %q", v, trailer)
 	}
 	return value, nil
+}
+
+// parseStringArray reads a single-line TOML array of strings, allowing a
+// trailing comma and a trailing comment.
+//
+// # Why an array and not a command line
+//
+// journal.VerificationRun records argv, deliberately: a replayed session runs
+// exactly what the original ran, and there is no shell in the middle to agree
+// with. A `verify = "make test"` accepted here would have to be split by
+// something, and whatever that something is, it is not the shell the user had in
+// mind the first time a directory name has a space in it. So a bare string is
+// refused with the array spelled out, rather than split on whitespace and hoped
+// over.
+//
+// # What it refuses, and why each refusal is better than a guess
+//
+//   - A bare string, per above.
+//   - An empty array. It looks like "switch verification off" and is not: the
+//     forced-verification policy is a harness configuration field and is in the
+//     hash (ADR-0007 decision 6), so turning it off here would move an arm's
+//     behaviour outside the value that identifies the arm.
+//   - An array that does not close on this line. TOML permits a multi-line
+//     array; this reader is line-oriented and says so rather than reading half
+//     of one.
+func parseStringArray(v string) ([]string, error) {
+	if v == "" {
+		return nil, fmt.Errorf("has no value")
+	}
+	if v[0] != '[' {
+		return nil, fmt.Errorf("%s is not an array; write the command as argv, "+
+			"for example [\"make\", \"test\"] — kopicode records and replays argv and will not "+
+			"split a command line for you", v)
+	}
+	end := closingBracket(v)
+	if end < 0 {
+		return nil, fmt.Errorf("%s does not close on this line; kopicode's reader is line-oriented "+
+			"and does not read a multi-line array", v)
+	}
+	if trailer := strings.TrimSpace(v[end+1:]); trailer != "" && !strings.HasPrefix(trailer, "#") {
+		return nil, fmt.Errorf("%s has trailing text after the closing bracket: %q", v, trailer)
+	}
+
+	var argv []string
+	for _, field := range splitArrayElements(v[1:end]) {
+		element, err := parseString(field)
+		if err != nil {
+			return nil, fmt.Errorf("element %d %w", len(argv)+1, err)
+		}
+		argv = append(argv, element)
+	}
+	if len(argv) == 0 {
+		return nil, fmt.Errorf("%s is empty; an empty command is not a way to switch verification "+
+			"off — that is a harness configuration field and is in the arm's hash "+
+			"(docs/adr/0007-model-selection-and-harness-config-shape.md decision 6)", v)
+	}
+	return argv, nil
+}
+
+// closingBracket is the index of the `]` that closes the array at v[0], or -1
+// when the line does not close it.
+//
+// It skips brackets inside quoted strings, so `["go", "test", "-run", "A]B"]`
+// closes where it looks like it closes, and it stops at the first one outside a
+// string, so a trailing `# ]` in a comment cannot move it.
+func closingBracket(v string) int {
+	var quote byte
+	for i := 1; i < len(v); i++ {
+		c := v[i]
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+		case c == ']':
+			return i
+		}
+	}
+	return -1
+}
+
+// splitArrayElements splits an array body on the commas that are not inside a
+// quoted string, dropping a trailing empty element so that a trailing comma is
+// allowed as TOML allows it.
+//
+// Splitting on every comma would break ["go", "test", "-run", "A,B"], which is
+// an ordinary thing to want to verify with.
+func splitArrayElements(body string) []string {
+	var out []string
+	var quote byte
+	start := 0
+	for i := range len(body) {
+		c := body[i]
+		switch {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'':
+			quote = c
+		case c == ',':
+			out = append(out, strings.TrimSpace(body[start:i]))
+			start = i + 1
+		}
+	}
+	out = append(out, strings.TrimSpace(body[start:]))
+
+	// A trailing comma leaves one empty tail; anything else empty is a hole in
+	// the middle and is left in place so parseString reports it.
+	if n := len(out); n > 0 && out[n-1] == "" {
+		out = out[:n-1]
+	}
+	return out
 }
