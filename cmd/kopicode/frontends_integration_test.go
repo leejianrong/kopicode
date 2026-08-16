@@ -231,6 +231,51 @@ func TestModelSelectionOnBothFrontEnds(t *testing.T) {
 	}
 }
 
+// TestRunPrintRefusesBeforeItWritesAnything is KAN-794's exit-2 case asserted
+// where the ordering is actually observable: from outside the process, over the
+// working tree.
+//
+// `run --print` is the surface that will be pointed at a repository by a script,
+// so "nothing was opened, locked or written" has to hold for it and not only for
+// the REPL. Two conditions are refused here — a model this binary does not know,
+// and a task nobody gave it — and neither may leave a journal, because a
+// half-session record for a session that never started is precisely what
+// ADR-0007 decision 4 orders the resolution to prevent.
+//
+// stdout is checked as well as the tree: a headless surface that printed
+// anything at all on a refusal would hand a consumer a JSON stream describing a
+// run that did not happen.
+func TestRunPrintRefusesBeforeItWritesAnything(t *testing.T) {
+	bin := build(t, frontEnds[0])
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{"an unknown model", []string{"run", "--print", "--model", "qwen/qwen3-coder-nxt", "fix it"}},
+		{"no task", []string{"run", "--print"}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := repoDir(t)
+			before := treeOf(t, dir)
+
+			res := run(t, bin, dir, nil, tc.args...)
+			if res.code != exitUsage {
+				t.Fatalf("exit code = %d, want %d (usage). stderr:\n%s", res.code, exitUsage, res.stderr)
+			}
+			if res.stdout != "" {
+				t.Errorf("a refused run wrote to stdout, which --print owns:\n%s", res.stdout)
+			}
+			if !equal(before, treeOf(t, dir)) {
+				t.Errorf("a refused run changed the working tree.\nbefore: %v\nafter:  %v",
+					before, treeOf(t, dir))
+			}
+		})
+	}
+}
+
 // TestTheDefaultModelIsTheOneTheBinaryUses holds the string this file repeats to
 // the one the binary resolves, so the copy cannot go stale unnoticed.
 //

@@ -6,13 +6,15 @@
 // startup rather than at the first provider request, and that refusal belongs
 // to the front end.
 //
-// The surface itself is the repl sub-package, and this file is the ninety lines
-// that connect it to a session: resolve the arm, open the session with
-// engine.Open, hand the loop the engine's event stream to render and its
-// consent requests to ask, and map the stop onto an exit code. Everything about
-// *how* a session is assembled is the engine's, which is what ADR-0003
-// decision 3 means by driving it through its exported interface — this file
-// imports internal/engine and internal/build and nothing else from internal/.
+// There are two surfaces over one engine. The interactive one is the repl
+// sub-package; the headless one is `run --print` in print.go. This file is the
+// ninety lines that connect either to a session: resolve the arm, open the
+// session with engine.Open, hand the surface the engine's event stream to render
+// and its consent requests to answer, and map the stop onto an exit code.
+// Everything about *how* a session is assembled is the engine's, which is what
+// ADR-0003 decision 3 means by driving it through its exported interface — this
+// file imports internal/engine and internal/build and nothing else from
+// internal/.
 //
 // See docs/SLICE-1.md for the scope of the first slice and docs/adr/ for the
 // decisions this build starts from.
@@ -38,11 +40,11 @@ func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 // commands are the subcommands this binary offers, and the map is the usage
 // message's source so the two cannot disagree.
 //
-// `run` is declared here before it does anything (KAN-794, docs/SLICE-1.md
-// build step 14). A subcommand that exists and refuses is a slot the next card
-// fills; one that does not exist is a flag-parsing shape the next card has to
-// invent, and inventing it twice is how the two front ends stop agreeing about
-// how they are invoked.
+// `repl` is the interactive surface (ADR-0004) and `run` the headless one
+// (docs/SLICE-1.md build step 14). They are two renderings of one event stream
+// and not two engines: both open a session with engine.Open, both receive
+// engine.Options.Events, and neither holds a transcript of its own — see
+// print.go and cmd/kopicode/repl.
 var commands = map[string]func(args []string, stdout, stderr io.Writer) int{
 	"repl":    interactive,
 	"run":     runPrint,
@@ -101,13 +103,6 @@ func command(args []string) (string, []string) {
 func version(_ []string, stdout, _ io.Writer) int {
 	say(stdout, "%s\n", build.Current())
 	return exitSuccess
-}
-
-// runPrint is KAN-794's slot: journal-derived JSON on stdout and the five
-// documented exit codes.
-func runPrint(_ []string, _, stderr io.Writer) int {
-	say(stderr, "kopicode: `run --print` is not implemented yet — see docs/SLICE-1.md build step 14\n")
-	return exitHarness
 }
 
 // interactive resolves the arm and starts the REPL over a session.
