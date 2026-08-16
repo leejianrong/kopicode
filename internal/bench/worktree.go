@@ -29,6 +29,27 @@ const reclaimTimeout = 30 * time.Second
 // agent's leases are out of reach by construction.
 const WorktreeSubdir = "bench/worktrees"
 
+// addAttempts and addBackoff bound the retry on [Worktrees.Add].
+//
+// Three attempts, and the delay grows, because the failure being retried is
+// contention with a git process this package does not control — another
+// kopibench, a developer's own `git worktree add`, a `gc` — and contention that
+// has not cleared in ~150ms is not contention. The in-process half of the same
+// race is fixed rather than retried; see [Worktrees.registry].
+const (
+	addAttempts = 3
+	addBackoff  = 50 * time.Millisecond
+)
+
+// gitRunner is the seam every git subprocess in this file goes through.
+//
+// It exists so the retry and the serialisation can be *driven* rather than
+// hoped for. The fault this guards against is intermittent by nature — it
+// appeared once in fifteen runs — so a test that runs real git in a loop and
+// waits to get lucky proves nothing. A test that forces the failure proves the
+// path handles it.
+type gitRunner func(ctx context.Context, dir string, args ...string) (string, error)
+
 // Reclamation is the account of what a run did to the repository's worktrees.
 //
 // It is reported rather than kept internal because silent cleanup and silent
@@ -54,6 +75,15 @@ type Reclamation struct {
 	// Failed lists the paths that could neither be removed by git nor deleted
 	// from disk, so an accumulation has a name instead of a number.
 	Failed []string
+	// CreateFailed names the tasks whose worktree could not be created at all,
+	// sorted.
+	//
+	// It is a list of names and not a count for the same reason Failed is: a
+	// run that created nine worktrees for a ten-task corpus reports Created:9
+	// and looks healthy from outside, and "9" does not say which task never
+	// ran. Every entry here is a task the run measured nothing for, so
+	// [Runner.Run] refuses to report success while this is non-empty.
+	CreateFailed []string
 }
 
 // Worktrees creates and reclaims the git worktrees a run checks its tasks out
@@ -61,6 +91,27 @@ type Reclamation struct {
 //
 // It is safe for concurrent use: the runner adds and releases from several
 // workers at once, and the counts are the run's report.
+//
+// # Git's worktree registry is not safe for concurrent writers, and that is this
+// type's problem
+//
+// Two `git worktree add` processes against one repository race, and the race is
+// git's rather than this package's: `add` enumerates the existing worktrees
+// before it creates anything, and the enumeration dies with `fatal: failed to
+// read .git/worktrees/<other>/commondir: No such file or directory` when it
+// reads a sibling registration another `add` has mkdir'd but not yet filled in.
+// Reproduced on git 2.34.1 at roughly one failure per hundred ten-way batches,
+// which is the rate at which KAN-875's one-in-fifteen sighting arrives. `git
+// worktree remove` races the same way ("is not a working tree"), and `git
+// worktree prune` will delete a half-written registration outright, because an
+// entry with no gitdir file yet is prunable without regard to any expiry.
+//
+// So every command in this file that reads or writes `.git/worktrees` is
+// serialised through [Worktrees.registry]. The cost is nothing that matters —
+// creating and removing a checkout of the corpus is milliseconds, and the
+// parallelism a bench run exists for is the agent session and the oracle, both
+// of which run outside the lock. What it buys is that the in-process half of
+// the race cannot happen at all, rather than happening rarely.
 //
 // # Why every path is deferred
 //
@@ -81,6 +132,19 @@ type Worktrees struct {
 	// keep suppresses removal, for a post-mortem.
 	keep bool
 
+	// run is the git seam. Nil means [runGit]; only a test sets it, and it is
+	// set before the first command runs.
+	run gitRunner
+	// sleep is the retry backoff. Nil means time.Sleep; only a test sets it, so
+	// the attempts are driven rather than waited out.
+	sleep func(time.Duration)
+
+	// registry serialises every git command that reads or writes the
+	// repository's worktree registry — add, remove, prune and list. See the
+	// type's doc comment for the race it closes. It is never held while an
+	// agent session or an oracle runs.
+	registry sync.Mutex
+
 	mu    sync.Mutex
 	stats Reclamation
 }
@@ -99,12 +163,36 @@ func NewWorktrees(repoRoot, stateDir string, keep bool) *Worktrees {
 func (w *Worktrees) Base() string { return w.base }
 
 // Counts reports the account so far.
+//
+// The two name lists are sorted rather than left in the order the workers
+// happened to finish in, so two runs of the same corpus produce the same report.
 func (w *Worktrees) Counts() Reclamation {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	out := w.stats
-	out.Failed = append([]string(nil), w.stats.Failed...)
+	out.Failed = sortedCopy(w.stats.Failed)
+	out.CreateFailed = sortedCopy(w.stats.CreateFailed)
 	return out
+}
+
+func sortedCopy(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := append([]string(nil), in...)
+	sort.Strings(out)
+	return out
+}
+
+// gitLocked runs one registry command. The caller holds [Worktrees.registry];
+// every path that reaches here has it, which is what makes the serialisation a
+// property of the type rather than of each call site.
+func (w *Worktrees) gitLocked(ctx context.Context, args ...string) (string, error) {
+	run := w.run
+	if run == nil {
+		run = runGit
+	}
+	return run(ctx, w.repo, args...)
 }
 
 // Reclaim is the run-start prune. It reclaims what a previous crash orphaned,
@@ -128,12 +216,18 @@ func (w *Worktrees) Counts() Reclamation {
 // back zero on the runner's git while the prune itself worked. A number that
 // disagrees with what happened is worse than no number, because the whole point
 // of reporting the reclamation is that it can be checked.
+// The whole body holds [Worktrees.registry]: it lists, prunes and removes, and
+// a concurrent Add between the two listings would be both miscounted and at
+// risk of being pruned half-created.
 func (w *Worktrees) Reclaim(ctx context.Context) error {
+	w.registry.Lock()
+	defer w.registry.Unlock()
+
 	before, err := w.registered(ctx)
 	if err != nil {
 		return err
 	}
-	if _, err := runGit(ctx, w.repo, "worktree", "prune"); err != nil {
+	if _, err := w.gitLocked(ctx, "worktree", "prune"); err != nil {
 		return fmt.Errorf("bench: pruning worktree registrations: %w", err)
 	}
 	after, err := w.registered(ctx)
@@ -177,9 +271,9 @@ func (w *Worktrees) Reclaim(ctx context.Context) error {
 }
 
 // registered lists the worktree paths git knows about, sorted so a failure
-// message is stable across runs.
+// message is stable across runs. The caller holds [Worktrees.registry].
 func (w *Worktrees) registered(ctx context.Context) ([]string, error) {
-	out, err := runGit(ctx, w.repo, "worktree", "list", "--porcelain")
+	out, err := w.gitLocked(ctx, "worktree", "list", "--porcelain")
 	if err != nil {
 		return nil, fmt.Errorf("bench: listing worktrees: %w", err)
 	}
@@ -217,21 +311,86 @@ func difference(a, b []string) []string {
 // run would then leave ten branches in the user's repository per arm — the ref
 // half of exactly the accumulation this card is about, and a write to git state
 // that is not kopicode's to make.
+//
+// A failure is recorded under the task's name as well as returned, because the
+// caller's error becomes one task's result and the run's account is what says
+// the corpus was not fully measured. A run that created nine worktrees for ten
+// tasks must not be able to report success, and [Runner.Run] reads
+// [Reclamation.CreateFailed] to make sure it cannot.
 func (w *Worktrees) Add(ctx context.Context, name, commit string) (string, error) {
-	if err := os.MkdirAll(w.base, 0o755); err != nil {
-		return "", fmt.Errorf("bench: creating the worktree directory: %w", err)
-	}
 	path := filepath.Join(w.base, name)
-
-	if _, err := runGit(ctx, w.repo,
-		"worktree", "add", "--detach", "--quiet", path, commit); err != nil {
-		return "", fmt.Errorf("bench: creating a worktree for %s: %w", name, err)
+	if err := w.add(ctx, name, path, commit); err != nil {
+		w.mu.Lock()
+		w.stats.CreateFailed = append(w.stats.CreateFailed, name)
+		w.mu.Unlock()
+		return "", err
 	}
 
 	w.mu.Lock()
 	w.stats.Created++
 	w.mu.Unlock()
 	return path, nil
+}
+
+// add is the creation itself: serialised against every other registry command,
+// and retried a bounded number of times.
+//
+// The retry is for the half of the race this package cannot serialise away — a
+// git process outside it, contending on the same `.git/worktrees` — and it is
+// deliberately not conditioned on what git *said*. Git's wording for a losing
+// race varies by version, and KAN-796 already paid for reading a version's
+// output as if it were an API. The condition is structural instead: retry only
+// when the failed attempt left no directory at the target path, which is the
+// difference between "somebody else got in the way" and "there is already
+// something here". The first error is the one reported, because it is the one
+// that describes the original failure rather than its aftermath.
+func (w *Worktrees) add(ctx context.Context, name, path, commit string) error {
+	w.registry.Lock()
+	defer w.registry.Unlock()
+
+	var first error
+	for attempt := 1; ; attempt++ {
+		if err := os.MkdirAll(w.base, 0o755); err != nil {
+			if first == nil {
+				first = fmt.Errorf("creating the worktree directory: %w", err)
+			}
+			break
+		}
+		_, err := w.gitLocked(ctx, "worktree", "add", "--detach", "--quiet", path, commit)
+		if err == nil {
+			return nil
+		}
+		if first == nil {
+			first = err
+		}
+		if ctx.Err() != nil || attempt >= addAttempts || !w.clearForRetry(ctx, path) {
+			break
+		}
+		w.backoff(attempt)
+	}
+	return fmt.Errorf("bench: creating a worktree for %s: %w", name, first)
+}
+
+// clearForRetry reports whether another attempt at path is worth making.
+//
+// The prune first: a `worktree add` that died part way can leave a registration
+// under .git/worktrees with no gitdir file in it, and git prunes exactly that
+// without regard to any expiry. Without it a retry would be given a name with a
+// numeric suffix, which is a second worktree rather than the one that was asked
+// for. Its failure is ignored on purpose — it is a cleanup attempt inside an
+// error path, and the error already in hand is the one worth reporting.
+func (w *Worktrees) clearForRetry(ctx context.Context, path string) bool {
+	_, _ = w.gitLocked(ctx, "worktree", "prune")
+	_, err := os.Stat(path)
+	return errors.Is(err, os.ErrNotExist)
+}
+
+func (w *Worktrees) backoff(attempt int) {
+	sleep := w.sleep
+	if sleep == nil {
+		sleep = time.Sleep
+	}
+	sleep(time.Duration(attempt) * addBackoff)
 }
 
 // Release reclaims one worktree, or records that it was kept.
@@ -264,7 +423,7 @@ func (w *Worktrees) Release(ctx context.Context, path string) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reclaimTimeout)
 	defer cancel()
 
-	if err := w.remove(ctx, path); err != nil {
+	if err := w.removeSerialised(ctx, path); err != nil {
 		w.mu.Lock()
 		w.stats.Failed = append(w.stats.Failed, path)
 		w.mu.Unlock()
@@ -277,7 +436,22 @@ func (w *Worktrees) Release(ctx context.Context, path string) error {
 	return nil
 }
 
-// remove takes one worktree away, by whichever of the two mechanisms works.
+// removeSerialised is [Worktrees.remove] with [Worktrees.registry] taken. It is
+// the entry point for every caller that does not already hold the lock, which
+// is everyone except [Worktrees.Reclaim].
+//
+// Removal is inside the lock rather than outside it because `git worktree
+// remove` enumerates the registry exactly as `add` does, and its fallback runs
+// a prune, which is the command that will delete a half-created registration
+// belonging to a concurrent add.
+func (w *Worktrees) removeSerialised(ctx context.Context, path string) error {
+	w.registry.Lock()
+	defer w.registry.Unlock()
+	return w.remove(ctx, path)
+}
+
+// remove takes one worktree away, by whichever of the two mechanisms works. The
+// caller holds [Worktrees.registry].
 //
 // `git worktree remove --force` is the right one: it deletes the checkout and
 // the registration together. When it refuses — a file the model made read-only,
@@ -295,7 +469,7 @@ func (w *Worktrees) remove(ctx context.Context, path string) error {
 	if rmErr := os.RemoveAll(path); rmErr != nil {
 		return errors.Join(gitErr, rmErr)
 	}
-	if _, err := runGit(ctx, w.repo, "worktree", "prune"); err != nil {
+	if _, err := w.gitLocked(ctx, "worktree", "prune"); err != nil {
 		return errors.Join(gitErr, err)
 	}
 	if _, err := os.Stat(path); err == nil {
@@ -305,7 +479,7 @@ func (w *Worktrees) remove(ctx context.Context, path string) error {
 }
 
 func (w *Worktrees) gitRemove(ctx context.Context, path string) error {
-	_, err := runGit(ctx, w.repo, "worktree", "remove", "--force", path)
+	_, err := w.gitLocked(ctx, "worktree", "remove", "--force", path)
 	return err
 }
 
