@@ -182,6 +182,54 @@ func (r RunResult) Errored() int {
 	return n
 }
 
+// BucketCounts is a run's three-bucket tally, over the tasks that failed.
+//
+// Failures only, because that is what SLICE-1 §9 attributes and what its
+// acceptance criterion counts: "zero failures classify as `harness`". A passing
+// task is not in Failed and is in no bucket — [Attribution] leaves it
+// [BucketUnclassified] and this type does not count it, so the four fields sum
+// to Failed exactly.
+type BucketCounts struct {
+	// Failed is how many tasks the oracle failed, and the denominator the
+	// other four are out of.
+	Failed int
+	// Harness, Unattributed and Model are the three buckets.
+	Harness      int
+	Unattributed int
+	Model        int
+	// Unclassified is a failure nothing attributed: no classifier ran, or the
+	// one that did could not read the record. It is counted rather than folded
+	// into a bucket, because a classifier that has not run must never be
+	// readable as one that found nothing wrong.
+	Unclassified int
+}
+
+// Buckets tallies the run's failures by bucket.
+//
+// Every field is reported at every size, zero included — ADR-0006 §3 asks for
+// the `unattributed` bucket's size on every result by name, and a bucket that
+// is silent when it is empty is indistinguishable from one nobody computed.
+func (r RunResult) Buckets() BucketCounts {
+	var c BucketCounts
+	for _, t := range r.Tasks {
+		if t.Passed {
+			continue
+		}
+		c.Failed++
+		switch t.Bucket {
+		case BucketHarness:
+			c.Harness++
+		case BucketUnattributed:
+			c.Unattributed++
+		case BucketModel:
+			c.Model++
+		default:
+			c.Unclassified++
+		}
+	}
+	return c
+}
+
 // Scored turns the run into the scorer's input, so a paired comparison is
 // [Compare] over two of these and nothing in between.
 func (r RunResult) Scored() Arm {
