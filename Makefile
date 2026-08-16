@@ -245,8 +245,19 @@ secrets: ## gitleaks over history and the working tree
 vuln: ## govulncheck over the module
 	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
+# bench-smoke joined this list when cmd/kopibench stopped being the stub that
+# exits 4 (KAN-796, wired into the workflow by KAN-801). It is the MOCK-provider
+# target: no network, no tokens, a couple of seconds. `bench` is the paid one and
+# is never here and never in the hook. It runs before xbuild because it is much
+# the faster of the two, and a gate that fails early is worth more than a tidy
+# ordering.
+#
+# `secrets` and `vuln` are CI jobs that are still deliberately absent: the
+# pre-push hook already runs `secrets`, and both need a tool this target does not
+# install. So `ci` is the offline compile-and-behaviour subset of the workflow
+# rather than a literal mirror of it.
 .PHONY: ci
-ci: check test-all xbuild ## Everything CI gates on
+ci: check test-all bench-smoke xbuild ## Every CI gate that runs offline
 
 .PHONY: install-hooks
 install-hooks: ## Install the pre-push hook

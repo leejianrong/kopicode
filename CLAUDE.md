@@ -237,14 +237,18 @@ make xbuild       # cross-compile every GOOS/GOARCH target — catches platform-
 make bench-smoke  # the 10-task corpus against the MOCK provider — zero tokens
 make bench        # the corpus against the real pinned provider — COSTS MONEY
 make secrets      # gitleaks over history + tree
-make ci           # check + test-all + xbuild
+make ci           # check + test-all + bench-smoke + xbuild
 make install-hooks
 ```
 
 **What actually runs where, because three agents have now reasoned from a wrong version
-of this.** `make ci` is `check test-all xbuild` — `bench-smoke` is **not** in it, and
-must not be until `cmd/kopibench` stops being the stub that exits 4, or `ci` is red by
-construction (KAN-801 enables it, blocked on KAN-796). The **pre-push hook** runs
+of this.** `make ci` is `check test-all bench-smoke xbuild`. `bench-smoke` joined it in
+KAN-801, once KAN-796 landed the runner and `cmd/kopibench` stopped being the stub that
+exits 4; it is also a CI job now. It is the **mock**-provider target — no network, no
+tokens, a couple of seconds — and `make bench`, the paid one, is in neither `ci` nor the
+hook. `make ci` is still not a literal mirror of the workflow: the `secrets` and `vuln`
+jobs stay out of it, because the hook already runs `secrets` and both want a tool the
+target does not install. The **pre-push hook** runs
 `check`, `test` and `secrets` — not `test-all`, not `xbuild`, not `bench-smoke` — by
 design, because the hook exists to catch cheap mistakes and CI exists to catch the rest.
 So a green pre-push does not predict a green CI, and `--no-verify` is not the way to get
