@@ -116,6 +116,11 @@ func writeReclamation(b *strings.Builder, c Reclamation) {
 	if c.Kept > 0 {
 		b.WriteString("  kept worktrees are reclaimed by the NEXT run: inspect before you re-run\n")
 	}
+	if len(c.CreateFailed) > 0 {
+		fmt.Fprintf(b, "  NOT CREATED (%d): %s — these tasks got no worktree, so nothing was "+
+			"measured for them and this run does not cover the whole corpus\n",
+			len(c.CreateFailed), strings.Join(c.CreateFailed, ", "))
+	}
 	if len(c.Failed) > 0 {
 		fmt.Fprintf(b, "  NOT RECLAIMED (%d): %s\n", len(c.Failed), strings.Join(c.Failed, ", "))
 	}

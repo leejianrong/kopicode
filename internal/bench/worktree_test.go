@@ -3,9 +3,11 @@ package bench_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/leejianrong/kopicode/internal/bench"
@@ -50,6 +52,69 @@ func TestWorktreeAddThenReleaseLeavesNothing(t *testing.T) {
 	got := trees.Counts()
 	if got.Created != 1 || got.Removed != 1 || got.Kept != 0 || len(got.Failed) != 0 {
 		t.Errorf("counts = %+v, want created 1, removed 1, kept 0, none failed", got)
+	}
+}
+
+// TestConcurrentAddsAllProduceAWorktree is KAN-875 end to end, against real
+// git.
+//
+// It is the shape of the sighting — one run, ten tasks, several workers — and
+// what it asserts is the thing that was not true: every task gets a checkout of
+// its own, all of them registered, none of them lost. Before the serialisation
+// this failed at roughly one run in a hundred on git 2.34.1, with `fatal: failed
+// to read .git/worktrees/<other>/commondir`, because `git worktree add`
+// enumerates the registry before it creates anything and one add can read a
+// sibling that another has mkdir'd and not yet filled in.
+//
+// The deterministic proof lives in worktree_internal_test.go, where the
+// contention is injected. This one is the end-to-end check that the serialised
+// path still does the real work correctly under load.
+func TestConcurrentAddsAllProduceAWorktree(t *testing.T) {
+	f := newFixture(t)
+	trees := newTrees(t, f, false)
+
+	const tasks = 10
+	paths := make([]string, tasks)
+	errs := make([]error, tasks)
+	var wg sync.WaitGroup
+	for i := range tasks {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			paths[i], errs[i] = trees.Add(t.Context(), fmt.Sprintf("task-%02d", i+1), f.Commit)
+		}()
+	}
+	wg.Wait()
+
+	registered := worktreePaths(t, f.Root)
+	seen := make(map[string]bool, tasks)
+	for i, path := range paths {
+		if errs[i] != nil {
+			t.Errorf("task-%02d: %v", i+1, errs[i])
+			continue
+		}
+		if seen[path] {
+			t.Errorf("task-%02d reused the worktree at %s", i+1, path)
+		}
+		seen[path] = true
+		if !contains(registered, path) {
+			t.Errorf("task-%02d: %s is not registered:\n%v", i+1, path, registered)
+		}
+	}
+
+	got := trees.Counts()
+	if got.Created != tasks || len(got.CreateFailed) != 0 {
+		t.Errorf("counts = %+v, want %d created and none failed; a run that creates fewer "+
+			"worktrees than it has tasks measures less than the corpus", got, tasks)
+	}
+
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		if err := trees.Release(t.Context(), path); err != nil {
+			t.Errorf("Release(%s): %v", path, err)
+		}
 	}
 }
 

@@ -66,6 +66,7 @@ package bench
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -159,6 +160,13 @@ type Runner struct {
 // [RunResult] with the other nine. A runner that aborted the corpus on the first
 // failing task would make every partial run unpairable, which is the one thing
 // ADR-0005 §1 cannot tolerate.
+//
+// A task that never got a *worktree* is on the other side of that line, and
+// [worktreeAccount] draws it. That failure did not happen inside the task, it
+// happened instead of the task: nothing was asked, so nothing was measured, and
+// the run covered less of the corpus than the label on it claims. The result
+// still comes back alongside the error, because the tasks that did run are
+// worth reading.
 func (r *Runner) Run(ctx context.Context) (*RunResult, error) {
 	if err := r.check(); err != nil {
 		return nil, err
@@ -234,11 +242,52 @@ func (r *Runner) Run(ctx context.Context) (*RunResult, error) {
 	result.Reclamation = trees.Counts()
 	result.Duration = now().Sub(started)
 
-	if failed := result.Reclamation.Failed; len(failed) > 0 {
-		return result, fmt.Errorf("bench: %d worktree(s) were left behind: %s: %w",
-			len(failed), strings.Join(failed, ", "), ErrReclaim)
+	return result, worktreeAccount(result)
+}
+
+// worktreeAccount refuses a run whose worktrees do not add up, in the three
+// ways they can fail to.
+//
+// The middle check is the one with no known cause behind it, and it is there
+// for that reason. KAN-875's sighting was a run that created nine worktrees for
+// a ten-task corpus, removed all nine, reported symmetric counts and exited
+// zero: 90% of the work done and healthy from outside. The first check catches
+// that shape when the creation failed and said so; the second catches it
+// however else it arrives, by asserting the invariant directly — a task either
+// ran in a worktree or carries the reason it did not, and there is no third
+// case.
+//
+// Joined rather than returned one at a time, because they are independent
+// facts about one run and a reader who fixes the first should not have to run
+// it again to be told the second.
+func worktreeAccount(r *RunResult) error {
+	var errs []error
+
+	if failed := r.Reclamation.CreateFailed; len(failed) > 0 {
+		errs = append(errs, fmt.Errorf(
+			"bench: %d of %d task(s) never got a worktree (%s), so the corpus was not fully "+
+				"measured and this run is not comparable with one that was: %w",
+			len(failed), len(r.Tasks), strings.Join(failed, ", "), ErrWorktreeCreate))
 	}
-	return result, nil
+
+	var unexplained []string
+	for _, t := range r.Tasks {
+		if t.Worktree == "" && t.SessionErr == "" && !t.Panicked {
+			unexplained = append(unexplained, t.TaskID)
+		}
+	}
+	if len(unexplained) > 0 {
+		errs = append(errs, fmt.Errorf(
+			"bench: %d of %d task(s) ran in no worktree and reported no reason (%s); the run "+
+				"cannot be reported as successful having measured fewer tasks than the corpus holds: %w",
+			len(unexplained), len(r.Tasks), strings.Join(unexplained, ", "), ErrWorktreeCreate))
+	}
+
+	if failed := r.Reclamation.Failed; len(failed) > 0 {
+		errs = append(errs, fmt.Errorf("bench: %d worktree(s) were left behind: %s: %w",
+			len(failed), strings.Join(failed, ", "), ErrReclaim))
+	}
+	return errors.Join(errs...)
 }
 
 // taskEnv is what every task in a run shares.

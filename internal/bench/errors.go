@@ -55,6 +55,17 @@ var (
 	// a run that cleaned up.
 	ErrReclaim = errors.New("worktree could not be reclaimed")
 
+	// ErrWorktreeCreate reports a task that never got a worktree, so nothing
+	// about it was measured.
+	//
+	// It is a refusal rather than a note on one row because of how it presents:
+	// a run that created nine checkouts for a ten-task corpus finishes, prints a
+	// report, and looks healthy — the counts are symmetric, the reclamation is
+	// clean, and the missing task is one line among ten. The corpus is the unit
+	// of comparison (ADR-0005 decision 1), so a run that measured nine tasks is
+	// not a run with one bad row, it is a run of a different corpus.
+	ErrWorktreeCreate = errors.New("worktree could not be created")
+
 	// ErrCorpusDrift reports a corpus whose contents at the frozen commit do
 	// not match the corpus the run was pointed at. Results are only comparable
 	// within one frozen corpus (ADR-0005 §Consequences), so this is a refusal
