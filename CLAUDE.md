@@ -442,15 +442,34 @@ What is real now (2026-08-17):
   `go list ./...` and therefore out of every root gate; reference fixes live in
   `bench/_solutions/`, outside the corpus tree and behind a `_` the Go tool ignores.
 
-What does **not** exist. Three open cards, and they are the ones that matter because
-each is a claim this project makes and has not yet demonstrated:
+**Both halves of §Demo landed 2026-08-18.** KAN-799 (a real diff in a real repo) and
+KAN-800 (a full corpus run) were the last two cards of EPIC-98, and running them is what
+turned every number in this file from arithmetic into a measurement. KAN-799 drove the
+REPL against a real target repo (`kopicode-eval`, a Minesweeper core) with
+`qwen/qwen3-coder-next`: a correct one-line fix, the existing suite stayed green, one
+consent prompt captured, and `Ctrl-C` proven to cancel cleanly via a real
+`TurnCancelled{phase:"provider_stream"}` journal event — cost ~$0.04. KAN-800 ran the
+frozen 10-task corpus against the same pinned arm: **9/10 passed**, real cost **$0.0846**
+(well under the $2 estimate — the corpus is small and a stuck task's cost is capped by
+the turn limit, not by token volume). The one failure (`go-config-retries`) stopped on
+`max_turns` and is classified `harness` per KAN-797's mechanical rule, and it was traced
+all the way through the journal rather than accepted at face value: the model twice
+copied `read_file`'s anchor-decorated display (`<hash> <line>| <content>`) verbatim into
+`edit_file`'s `new_text`, producing syntax errors the post-edit gate caught immediately
+and reported precisely — and the model then read the file, including via a direct
+`cat config.go` that put the broken line in plain stdout, and repeatedly concluded "the
+file looks correct" rather than seeing it. Every kopicode mechanism (anchors, the syntax
+gate, verification, permission, the per-task temp `HOME` from KAN-874) behaved exactly as
+designed; the failure is a model self-correction limitation, not a harness defect, and
+KAN-797's classifier bucketed it as `harness` anyway because that is its deliberately
+conservative design (CLAUDE.md's own words: "it will absorb some real model failures...
+the correct direction to be wrong in"). Full journal-level root-cause trace is in the
+KAN-800 card's comments. This is the harness's first honest number, not a clean one — and
+that is the point of running it before claiming anything about model capability.
 
-- **A real diff in a real repo (KAN-799)** and **a full corpus run (KAN-800)** — build
-  plan step 18 and the two halves of §Demo. Everything they need is built and nobody has
-  run either, so **no number in this repository has ever come from the real provider**.
-  `make bench`'s ~$2 is arithmetic over a published price list, not a measurement, and
-  the first run's reported usage replaces it. Treat any claim about the harness's effect
-  on a model as untested until these land.
+What does **not** exist. One open card, and it is the one that matters because it is a
+claim this project makes and has not yet demonstrated:
+
 - **Tool definitions on the wire (KAN-844).** `provider.Request` carries none. The
   system prompt is therefore the *only* description of the tools the model gets — do not
   assume it is being handed a catalogue. The argument *names* are not the prompt's own
@@ -479,8 +498,8 @@ reason to look at it, and cards land faster than that. So `ls internal/`, `git l
 one. Most packages open with a doc comment that argues its design; it is faster to read
 than this section and it cannot be stale relative to the code it sits in.
 
-Build order is [`docs/SLICE-1.md`](docs/SLICE-1.md) §Build Plan. Steps 1–17 are landed;
-step 18, the real-repo demo, is KAN-799.
+Build order is [`docs/SLICE-1.md`](docs/SLICE-1.md) §Build Plan. All 18 steps are landed,
+including step 18 (the real-repo demo, KAN-799) and the full corpus run (KAN-800).
 
 Do not add a test count here. It goes stale on the next PR. `make test` prints the real
 number, and a red suite — not a changed count — is the signal something is wrong.
@@ -563,13 +582,16 @@ cross-compilation, and `flock`/process-group code is where that breaks first.
 Toolchain: Go **1.26.5** at `~/.local/go`, with `golangci-lint`, `gopls` and `gitleaks`
 in `~/go/bin`. Both are on `PATH` via `~/.bashrc`.
 
-**`make bench` spends real money.** It is never in `ci` and never in the hook. Roughly
-$2 per full corpus run at current `qwen/qwen3-coder-next` pricing — the pinned endpoint's
-prices were re-checked on 2026-08-14 and are unchanged ($0.12/$0.80 per million tokens),
-so the figure still rests on the numbers it was written against. It is an estimate and not
-a measurement: no bench run has happened, and the first one's reported usage replaces it.
-See [`docs/provider-pin.md`](docs/provider-pin.md). `make bench-smoke` is the free
-equivalent and is what gates a PR.
+**`make bench` spends real money.** It is never in `ci` and never in the hook. The first
+real run (KAN-800, 2026-08-18) cost **$0.0846** for the full 10-task corpus at the pinned
+`qwen/qwen3-coder-next` arm — a measurement now, not the "~$2" arithmetic this line used
+to carry forward from a published price list. Treat $0.0846 as this corpus's actual cost
+under normal conditions rather than a ceiling: a run where more tasks get stuck (as
+`go-config-retries` did here, running to the `max_turns` cap) costs more per stuck task,
+so the old ~$2 order-of-magnitude figure is still the safer number to budget against, even
+though the observed run came in far under it. See
+[`docs/provider-pin.md`](docs/provider-pin.md) for the reported usage in full.
+`make bench-smoke` is the free equivalent and is what gates a PR.
 
 `make smoke-live` is the other target that spends money, and it spends cents rather than
 dollars: one 16-token request against the pinned endpoint, behind the `live` build tag so

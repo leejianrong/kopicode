@@ -139,19 +139,29 @@ Had the chosen endpoint reported no quantization, the honest pin would have been
 what the provider probably runs. It did not come to that, which is itself part of why
 Parasail was chosen.
 
-## Cost, as of 2026-08-14
+## Cost, as of 2026-08-14 (pricing) and 2026-08-18 (a real measurement)
 
 The prices above are **unchanged** from the ones README.md recorded on 2026-08-11
-($0.12/$0.80), so the "roughly $2 per full corpus run" figure in CLAUDE.md still rests on
-the same numbers it was written against. It is not a measurement — the bench runner does
-not exist yet — and it will not become one until a real run reports usage.
+($0.12/$0.80), so the "roughly $2 per full corpus run" figure CLAUDE.md used to carry
+rested on those numbers rather than an observation.
 
-The arithmetic it implies, for whoever checks it later: at $0.12/M prompt and $0.80/M
-completion, $2 buys roughly 16M prompt tokens, or about 1.6M per task across the 10-task
-corpus. That is a long loop with a large re-sent context on every turn, which is the shape
-an agent run has, but it is an assumption about turn count and context growth rather than
-an observation. Treat $2 as an order of magnitude with a plausible upper bias, and replace
-it with the first real `bench` run's reported usage.
+**KAN-800 replaced the arithmetic with a measurement on 2026-08-18.** One full run of the
+10-task corpus against this pin: 621,368 prompt tokens, 12,587 completion tokens, **total
+cost $0.0846** — well under the $2 estimate. `run-20260817t185416z`'s report: 9/10 tasks
+passed; the one failure (`go-config-retries`) ran to the `max_turns` cap rather than
+converging (classified `harness` per KAN-797's mechanical rule; root cause traced through
+the journal to a model self-correction failure, not a harness defect — see the KAN-800
+card's comments and CLAUDE.md's Build status section for the full trace). Being capped by
+turns rather than runaway token growth is exactly why this run came in so far under the
+estimate: a stuck task pays for 20 turns of conversation, not for an unbounded retry loop.
+
+The old arithmetic, kept for context: at $0.12/M prompt and $0.80/M completion, $2 buys
+roughly 16M prompt tokens, or about 1.6M per task across the 10-task corpus — a much
+longer, more context-heavy loop than this run actually needed. Treat $0.0846 as this run's
+actual cost under normal conditions, and $2 as the safer order-of-magnitude figure to
+budget against, since a corpus with more stuck tasks (each paying the full turn-cap cost)
+would land somewhere between the two. A second real run's reported usage is the next data
+point, not a replacement for this one.
 
 Prefix caching is available on this endpoint at $0.07/M read but is **not** implicit
 (`supports_implicit_caching: false`), so nothing is cached unless the client asks. ADR-0005
