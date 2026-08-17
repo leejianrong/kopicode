@@ -57,6 +57,7 @@ const (
 	TypeAssistantMessage    Type = "AssistantMessage"
 	TypeThinkingBlock       Type = "ThinkingBlock"
 	TypeProviderRequest     Type = "ProviderRequest"
+	TypeProviderRetried     Type = "ProviderRetried"
 	TypeProviderResponse    Type = "ProviderResponse"
 	TypeToolCallRequested   Type = "ToolCallRequested"
 	TypeToolCallParsed      Type = "ToolCallParsed"
@@ -225,6 +226,7 @@ var registry = map[Type]func([]byte) (Payload, error){
 	TypeAssistantMessage:    decodeInto[AssistantMessage],
 	TypeThinkingBlock:       decodeInto[ThinkingBlock],
 	TypeProviderRequest:     decodeInto[ProviderRequest],
+	TypeProviderRetried:     decodeInto[ProviderRetried],
 	TypeProviderResponse:    decodeInto[ProviderResponse],
 	TypeToolCallRequested:   decodeInto[ToolCallRequested],
 	TypeToolCallParsed:      decodeInto[ToolCallParsed],

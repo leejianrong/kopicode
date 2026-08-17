@@ -27,6 +27,7 @@ func samplePayloads() []journal.Payload {
 		journal.AssistantMessage{Text: journal.InlineText("on it")},
 		journal.ThinkingBlock{Text: journal.InlineText("hmm")},
 		journal.ProviderRequest{ModelID: "qwen/qwen3-coder-next", Attempt: 2},
+		journal.ProviderRetried{Attempt: 1, Try: 2, OfTries: 6, DelayMS: 2000, Cause: "http 429"},
 		journal.ProviderResponse{
 			Body: journal.InlineText("{}"), FinishReason: "stop", ServedBy: "parasail/bf16",
 			Tokens: journal.TokenCounts{Total: 42},
@@ -161,6 +162,7 @@ func TestTheEventKindNamesAreStable(t *testing.T) {
 		engine.EventAssistantMessage:    "assistant_message",
 		engine.EventThinking:            "thinking",
 		engine.EventProviderRequest:     "provider_request",
+		engine.EventProviderRetried:     "provider_retried",
 		engine.EventProviderResponse:    "provider_response",
 		engine.EventToolCallRequested:   "tool_call_requested",
 		engine.EventToolCallParsed:      "tool_call_parsed",

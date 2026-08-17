@@ -69,6 +69,13 @@ func fixtures() map[journal.Type]journal.Payload {
 			Tokens:   tokens,
 			Attempt:  1,
 		},
+		journal.TypeProviderRetried: journal.ProviderRetried{
+			Attempt: 1,
+			Try:     2,
+			OfTries: 6,
+			DelayMS: 2000,
+			Cause:   "http 429",
+		},
 		journal.TypeProviderResponse: journal.ProviderResponse{
 			Body:         journal.BlobText("e3b0c44298fc1c149afbf4c8996fb924", 91234),
 			Tokens:       tokens,

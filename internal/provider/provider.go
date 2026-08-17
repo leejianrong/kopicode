@@ -164,7 +164,13 @@ type Request struct {
 
 	// Turn is the 1-based loop turn this request belongs to, matching the
 	// journal envelope's turn. Attempt is 1 for the first send of a turn and
-	// increments per repair or retry, matching journal.ProviderRequest.Attempt.
+	// increments once per repair round trip — one per call to Complete,
+	// matching journal.ProviderRequest.Attempt exactly. It does **not** count
+	// what happens inside one Complete call: a live client that retries a 429
+	// or a 5xx several times before returning still reports one Attempt, and
+	// those retries are journal.ProviderRetried events instead (KAN-851) —
+	// see provider.RetryObserver, which is how they reach a journal without
+	// this field, or engine.Provider's signature, changing.
 	//
 	// Neither is sent on the wire. They are here because the loop already knows
 	// both at the moment it calls — it has to, in order to journal them — and

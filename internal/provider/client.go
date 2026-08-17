@@ -50,12 +50,24 @@ import (
 // would be asserting the fixture. Honouring it as a *floor* is the right end
 // state and wants its own card; until then the policy is the whole story.
 //
-// It also does not report its retries to the caller. engine.Provider is one
-// method and the retries happen inside it, so journal.ProviderRequest.Attempt —
-// documented as incrementing per retry, "so a retry storm is visible rather than
-// inferred" — only ever sees the loop's own re-sends, never the transport's. The
-// gap is real and is noted rather than papered over: the slog line below is the
-// only place a transport retry is currently visible.
+// # Retries are visible outside engine.Provider, not through it (KAN-851)
+//
+// engine.Provider stays one method on purpose (SLICE-1 §Build Plan step 8):
+// widening it to report retries would let the loop start making policy out of
+// them. So a [RetryObserver], not a return value, is how a retry storm inside
+// one Complete call reaches the journal. It is injected the way the clock and
+// the RNG are — a [ClientOption] set at construction — and called synchronously,
+// in this goroutine, once per retry, with the same facts the diagnostic slog
+// line already carries. A caller building the live client for a real session
+// wires it straight to journal.Journal.Append; engine.Provider's caller never
+// sees it and Complete's return value is exactly what it always was.
+//
+// journal.ProviderRequest.Attempt is a different count and stays one: it is the
+// *engine's* own re-send, once per call to Complete (a turn, or a repair round
+// trip), and it cannot see inside a single Complete call any more than
+// engine.Provider can. A request the live client retried six times against 429s
+// before succeeding still journals one ProviderRequest — the retries are
+// [journal.ProviderRetried] events beside it, not a bigger Attempt.
 //
 // # What the client does not decide
 //
@@ -97,6 +109,46 @@ var (
 	ErrUnpinned = errors.New("provider: request declares no provider pin")
 )
 
+// RetryEvent is one client-internal retry: an attempt that failed with a
+// retryable cause, about to be followed by a backoff and another send.
+//
+// It carries exactly what the diagnostic slog line in Complete already
+// computes, because the two exist to say the same thing to two different
+// audiences — engine-internal diagnostics on stderr, and a durable record for
+// whoever measures the arm afterward.
+type RetryEvent struct {
+	// Turn and Attempt echo [Request].Turn and [Request].Attempt verbatim, so a
+	// retry can be correlated back to the ProviderRequest it belongs to. Zero
+	// when the caller left them unstated, exactly as on Request.
+	Turn    int
+	Attempt int
+	// Try is 1-based: which send within this Complete call just failed. 1 is
+	// the first send, so a Try of 3 means two retries have already happened
+	// for this request.
+	Try int
+	// OfTries is the retry policy's attempt budget for this request —
+	// [Retry.MaxAttempts], resolved against [DefaultRetry].
+	OfTries int
+	// Delay is the backoff drawn before the next send.
+	Delay time.Duration
+	// Cause summarises the failure that triggered the retry: "http 429",
+	// "http 503", "transport failure" — [cause]'s own classification.
+	Cause string
+}
+
+// RetryObserver is notified once per client-internal retry, synchronously and
+// in the goroutine running Complete — the same contract [Config.Stream] makes
+// for a delta, and for the same reason: no goroutine and no buffering in an
+// output path that a replayed journal has to reproduce byte for byte.
+//
+// It is injected at construction ([WithRetryObserver]), not reachable through
+// [Client.Complete]'s signature, and that is deliberate: engine.Provider is one
+// method, and an observer wired here is how a retry storm reaches a journal
+// without widening it. Nil is the default and means nothing is notified —
+// exactly the mock/replay path, which never retries because it never sends
+// anything over a wire.
+type RetryObserver func(ctx context.Context, ev RetryEvent)
+
 // Client is the live OpenRouter provider.
 //
 // It satisfies engine.Provider structurally and does not import the engine: the
@@ -116,6 +168,7 @@ type Client struct {
 	referer  string
 	title    string
 	unpinned bool
+	onRetry  RetryObserver
 
 	mu   sync.Mutex
 	rand Rand
@@ -197,6 +250,17 @@ func WithLogger(lg *slog.Logger) ClientOption {
 			c.log = lg
 		}
 	}
+}
+
+// WithRetryObserver injects the callback notified once per client-internal
+// retry. Nil (the default) notifies nothing, which is the mock/replay path.
+//
+// It is the same shape of injection as [WithClock] and [WithRand]: a value
+// supplied at construction rather than threaded through [Client.Complete],
+// because Complete satisfies engine.Provider and that interface stays one
+// method. See [RetryObserver] for what a caller does with it.
+func WithRetryObserver(obs RetryObserver) ClientOption {
+	return func(c *Client) { c.onRetry = obs }
 }
 
 // WithAttribution sets OpenRouter's optional HTTP-Referer and X-Title headers,
@@ -299,12 +363,23 @@ func (c *Client) Complete(ctx context.Context, req Request) (*Stream, error) {
 			break
 		}
 		delay := c.delay(attempt)
+		failureCause := cause(err)
 		c.log.LogAttrs(ctx, slog.LevelDebug, "provider request failed, retrying",
 			slog.Int("attempt", attempt+1),
 			slog.Int("of", attempts),
 			slog.Duration("backoff", delay),
-			slog.String("cause", cause(err)),
+			slog.String("cause", failureCause),
 		)
+		if c.onRetry != nil {
+			// Outside engine.Provider's one method by construction: this fires
+			// from inside Complete, before it returns anything, and Complete's
+			// signature carries nothing new because of it. See RetryObserver.
+			c.onRetry(ctx, RetryEvent{
+				Turn: req.Turn, Attempt: req.Attempt,
+				Try: attempt + 1, OfTries: attempts,
+				Delay: delay, Cause: failureCause,
+			})
+		}
 		if err := wait(ctx, c.clock, delay); err != nil {
 			return nil, err
 		}

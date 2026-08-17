@@ -250,8 +250,14 @@ type Exchange struct {
 	// retried; Attempt tells them apart.
 	Turn int `json:"turn"`
 
-	// Attempt is 1 for the first send of a turn and increments per retry,
-	// matching journal.ProviderRequest.Attempt.
+	// Attempt is 1 for the first send of a turn and increments once per repair
+	// round trip, matching journal.ProviderRequest.Attempt exactly — the
+	// engine's own re-sends, one per call to provider.Provider.Complete. It
+	// does not, and cannot, stand in for a client-internal 429/5xx retry
+	// *inside* one Complete call: the replay provider never sends anything over
+	// a wire, so it has no such retries to represent, and
+	// journal.ProviderRetried (KAN-851) is what a live session journals for
+	// those instead.
 	Attempt int `json:"attempt"`
 
 	// Note says what this exchange is demonstrating, for the reader of a failed
