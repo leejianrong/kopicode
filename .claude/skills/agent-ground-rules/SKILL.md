@@ -1,6 +1,6 @@
 ---
 name: agent-ground-rules
-description: Ground rules for any agent working in the kopicode repo, to be read before running commands or writing tests. Covers the git worktree isolation trap (a worktree shares .git/config, the object store and the ref store with its parent, so a stray git command from inside one corrupts the real repository), how to write git fixture tests that cannot escape, what to verify before reporting a card done, and why we do not use a worktree pool manager for this. Use when you are a sub-agent starting a kopicode card, when a card touches git, subprocesses, or the filesystem, or when auditing whether a test suite can reach outside its temp directory.
+description: Ground rules for any agent working in the kopicode repo, to be read before running commands or writing tests. Covers the git worktree isolation trap (a worktree shares .git/config, the object store and the ref store with its parent, so a stray git command from inside one corrupts the real repository), how to write git fixture tests that cannot escape, how every subprocess must name its directory and build its own environment, what to verify before reporting a card done — including which worktrees are the bench runner's and must not be swept — and why the worktree pool manager is a lifecycle tool and not a safety boundary. Use when you are a sub-agent starting a kopicode card, when a card touches git, subprocesses, or the filesystem, or when auditing whether a test suite can reach outside its temp directory.
 ---
 
 # Ground rules for agents in kopicode
@@ -155,10 +155,9 @@ the read-only path refuses any index-writing subcommand, `status` included, beca
 `status` rewrites the index while reporting.
 
 **These two rules are now enforced, not just documented — and they are not about git.**
-`internal/arch/subprocess_test.go` parses the whole tree and fails on any `exec.Command`
-or `exec.CommandContext` that does not assign both `Dir` and `Env` before the command
-escapes its function. It fails closed: a `Cmd` handed to a helper, or one it cannot
-follow, counts as a violation.
+`internal/arch/subprocess_test.go` parses the whole tree and fails on any subprocess that
+does not assign both `Dir` and `Env`. It fails closed: a `Cmd` handed to a helper, or one
+it cannot follow, counts as a violation.
 
 Git is where the incident happened, so the failure message still names `GIT_DIR` and
 `core.bare` when the program is git. The rule is the same for everything else, because
@@ -167,6 +166,44 @@ visible in the command: `GOFLAGS` and `GOOS` change what `go build` produces,
 `PYTHONPATH` and `VIRTUAL_ENV` change what `python` imports, `NODE_OPTIONS` changes what
 `node` runs, and `PATH` decides which binary runs at all. The syntax gate spawns all
 three. The git half was not relaxed to make room for the rest (KAN-837).
+
+**A `Cmd` is not always a call** (KAN-853). The guard used to find subprocesses by
+looking for `exec.Command` and `exec.CommandContext`, and os/exec documents a second way:
+"It is also possible to construct a Cmd directly". `&exec.Cmd{Path: gitPath, Args: …}`
+spawns exactly what the call spawns and inherits exactly what it inherits when `Env` is
+left alone, and for a while it was the one shape that walked past every rule in the file.
+It is not exotic — it is what you reach for when you want to set `SysProcAttr` or `Path`
+yourself, which is what `internal/procgroup` and `internal/tools` are about. So a
+composite literal of `exec.Cmd` is a site like any other, and a field written *inside* the
+literal satisfies its rule exactly as an assignment to the bound variable does: both are
+visible, and insisting on the assignment form would be a style rule wearing a safety
+rule's failure message.
+
+Three shapes, and the middle one does not write `exec.Cmd` in front of the brace that
+builds one at all, so know them by sight:
+
+- `cmd := &exec.Cmd{…}` — bound to a variable, so a later `cmd.Dir = …` counts too.
+- `[]*exec.Cmd{{Path: p}}`, `[]exec.Cmd{{…}}`, `map[string]*exec.Cmd{"build": {…}}` —
+  inside a container of `Cmd`s the element type may be elided, so the inner brace builds
+  a `Cmd` with nothing in front of it. Those are found through the container's element
+  type, and they are bound by both rules.
+- a literal used inline, handed straight to a helper, or written positionally. There is
+  no later assignment for the guard to follow and — for the positional form — no field
+  names to read, so **only what is in the literal counts**, and a positional literal
+  counts as setting nothing at all.
+
+**What it deliberately does not cover.** `var cmd exec.Cmd` is a declaration and not a
+composite literal, and the guard says nothing about it; there is a `want: nil` fixture
+case marking exactly that boundary. `new(exec.Cmd)` is neither a call nor a literal and
+is outside the same way. This is stated rather than quietly left out because a guard
+whose claimed scope is wider than its real scope is worse than one that admits its limit
+— but neither shape is a loophole to use. Build a `Cmd` that way and nothing in the tree
+is checking you, so set `Dir` and `Env` because you decided to.
+
+The analysis is flow-insensitive on purpose. It asks whether the enclosing function
+assigns `Dir` and `Env` at all, not whether it does so before every use: ordering is
+visible in review, a missing assignment is not, and the false negative that costs a
+repository is the missing one.
 
 Genuine exceptions are waived in place and need a reason on the line:
 
@@ -188,9 +225,42 @@ is os/exec's spelling for the same thing. A third check reads the value, waived 
 `//kopicode:allow-ambientenv: <reason>`. It decides only what it can see soundly —
 `os.Environ()`, an `append` over one, `nil`, and a local variable in the same function
 assigned one of those — and deliberately says nothing about a helper's return value.
-That is the point: build your environment in a named function that says what it strips or
-admits, as `repo.baseEnv`, `syntax.baseEnv`, `tools.childEnv` and `internal/corpus`'s
-`passThrough` allowlist each do, and start from one of those rather than from `os.Environ()`.
+
+That silence is the funnel, not a gap. The four forms above are the ones written *without*
+deciding anything; every other shape means somebody wrote a named function, and the name
+and its doc comment are the review surface. So the rule is not a list to memorise, it is
+one sentence: **every package that spawns something owns a named environment builder, and
+you start from that package's builder rather than from `os.Environ()`.** `internal/repo`,
+`internal/syntax`, `internal/verify`, `internal/tools`, `internal/bench` and
+`internal/corpus`'s test oracle each have one — several have more than one, because the
+`go` steps and the `node` steps want different things layered on the same base. Grep the
+package before you write a new one; if it already spawns a subprocess, the builder exists.
+
+**Which shape yours takes is not a style choice.** The two shapes make opposite bets, and
+the code argues it both ways on purpose:
+
+- **Secrets take an allowlist.** The cost of missing one is unbounded — a credential in a
+  child process is a credential in whatever that process prints — so you name what may
+  pass and everything else is gone by default. `internal/bench`'s `goQueryEnv` and
+  `oracleEnv` are built this way, `internal/corpus`'s `passThrough` is the same list for
+  the same reason, and so is the fixture recorder's header scrub.
+- **Toolchain variables take a denylist.** An allowlist is the wrong shape for a gate
+  that must still find its own toolchain: `GOMODCACHE`, `GOCACHE`, `XDG_CACHE_HOME`,
+  `SSL_CERT_FILE`, `TMPDIR` and a dozen distribution-specific variables all have to
+  survive or the checker does not run at all, and a gate that cannot run reports "not
+  run" on every file, which is honest and useless. So you strip the credential and strip
+  the variables that change *what the tool concludes* — `GOFLAGS`, `GOOS`, `PYTHONPATH`,
+  `NODE_OPTIONS`, the `GIT_*` overrides — and leave the rest alone. `internal/repo`,
+  `internal/syntax`, `internal/verify` and `internal/bench`'s `gitEnv` are built this way.
+
+`internal/tools`'s `childEnv` is the one that fits neither, and it says so: `run_shell`
+runs whatever the model wrote, so it needs the user's whole toolchain and an allowlist
+would break real builds for no gain. It strips exactly one variable,
+`OPENROUTER_API_KEY`, and its doc comment is explicit that this is not a sandbox. If your
+builder is going to be that permissive, say why in the same place.
+
+A single shared builder was considered and rejected: the two shapes cannot be collapsed
+without a passthrough option, and a passthrough option is this hole with a name.
 
 ## What isolation does and does not give you
 
@@ -243,7 +313,27 @@ git branch --list            # only main, feat/*, docs/*, worktree-agent-*
 git worktree list            # nothing under /tmp
 ```
 
-Two notes on why it is written this way. The obvious form, `git -C /path/to/parent ...`,
+**`git worktree list` no longer means "anything unfamiliar is a leak".** `make
+bench-smoke` runs the ten-task corpus and gives each task its own worktree under
+`.kopicode/bench/worktrees`, so a clean run registers ten and reclaims ten, and a run that
+is still going shows up here mid-flight. That directory is written by `internal/bench` and
+by nothing else, which is the whole reason it is a fixed path rather than a per-run one.
+
+**Do not sweep them, and this is the case where the reflex this page trains is wrong.**
+A crashed or cancelled run leaves its checkouts behind *deliberately*, and so does
+`--keep-worktrees`, which exists so you can open one and see what the agent actually did
+to the tree. They are self-healing: `Worktrees.Reclaim` runs at the start of every run,
+prunes the administrative entries whose directories have gone, removes what is left under
+that directory, and reports both counts in the run's reclamation. Removing them by hand
+destroys the post-mortem and saves nobody anything.
+
+So read the worktree list as three categories, not one: entries under
+`.kopicode/bench/worktrees` are the bench runner's and the next run reclaims them; entries
+under `~/.treehouse` are leased agent checkouts and `treehouse status` says who holds
+them; **anything under `/tmp` is a fixture that escaped**, which is the one this checklist
+was written for and the one to report.
+
+Two notes on why the rest is written this way. The obvious form, `git -C /path/to/parent ...`,
 is refused by the harness even for reads, so a checklist built on it cannot be run.
 And `git status` is deliberately absent: it is the one piece of state that is *not*
 shared, so running it here tells you about your own worktree and nothing about the
