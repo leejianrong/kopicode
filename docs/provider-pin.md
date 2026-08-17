@@ -172,17 +172,15 @@ Results gathered under the old pin and the new one are two experiments, and ADR-
 discard rule is what keeps them apart. Change the value here, date the change, and start a
 new experiment series.
 
-Nothing in this file has been exercised against a live completion request. `provider.order`
-accepting the suffixed slug form is from OpenRouter's documentation, and the response's
-`provider` field is unverified in shape (see `wire.go`). A first live run that returns
-something other than `Parasail` in `provider` is a finding to record here, not a check to
-relax.
+Between 2026-08-14 and 2026-08-18, nothing in this file had been exercised against a live
+completion request — see "Live confirmation" below for what changed and what remains
+unverified (the tool-call delta shape; §3 there).
 
 **KAN-776 built the client that can ask, and did not ask.** The client landed on
 2026-08-14 and every one of its tests runs against an `httptest` server, because
 `OPENROUTER_API_KEY` was not set in the environment the card was built in and nothing in
-`make ci` may spend money. So the pin is still argued from the endpoints response above
-and from documentation, and not from a completion.
+`make ci` may spend money. So the pin was argued from the endpoints response above and
+from documentation, and not from a completion, until KAN-852.
 
 Asking is one command, and it costs cents:
 
@@ -190,18 +188,50 @@ Asking is one command, and it costs cents:
 make smoke-live          # one 16-token request against the pin; needs OPENROUTER_API_KEY
 ```
 
-It prints the requested model, the model the response reported, the exact `provider`
-string with its casing, the finish reason, the usage and the whole wire transcript. Paste
-what it prints into this file, dated. Three things to look for, in order of what they
-would change:
+## Live confirmation, 2026-08-18 (KAN-852)
 
-1. **The `provider` field's casing**, or its absence. ADR-0005 §2's discard rule compares
-   it, and it is compared case-insensitively precisely because nobody has seen one.
-2. **Whether `parasail/bf16` routes at all.** A suffixed slug that no endpoint matches
-   fails the request rather than falling back, which is what `allow_fallbacks: false`
-   buys — so a failure here is the pin being wrong, not the client.
-3. **The streaming tool-call delta shape**, which `make smoke-live` currently *cannot*
-   answer: `provider.Request` carries no tool catalogue yet, so there is no way to make
-   the model emit a tool call. That is the hand-authored fixtures' least-supported claim
-   (they follow OpenAI's contract and say so), and it stays unverified until the catalogue
-   lands.
+`make smoke-live` ran against the pin above with a real `OPENROUTER_API_KEY`. Output,
+verbatim:
+
+```
+model requested: qwen/qwen3-coder-next
+model reported:  qwen/qwen3-coder-next
+provider field:  "Parasail"
+finish reason:   "stop"
+usage:           {Prompt:20 Completion:2 Total:22}
+content:         "pong"
+```
+
+Wire transcript (SSE frames, `[DONE]` terminator):
+
+```
+data: {"id":"gen-1786988078-NGfmEgJ5Z2MYGfqmExLw","object":"chat.completion.chunk","created":1786988078,"model":"qwen/qwen3-coder-next","provider":"Parasail","choices":[{"index":0,"delta":{"content":"pong","role":"assistant"},"finish_reason":null,"native_finish_reason":null}]}
+
+data: {"id":"gen-1786988078-NGfmEgJ5Z2MYGfqmExLw","object":"chat.completion.chunk","created":1786988078,"model":"qwen/qwen3-coder-next","provider":"Parasail","choices":[{"index":0,"delta":{"content":"","role":"assistant"},"finish_reason":"stop","native_finish_reason":"stop"}]}
+
+data: {"id":"gen-1786988078-NGfmEgJ5Z2MYGfqmExLw","object":"chat.completion.chunk","created":1786988078,"model":"qwen/qwen3-coder-next","provider":"Parasail","service_tier":null,"choices":[{"index":0,"delta":{"content":"","role":"assistant"},"finish_reason":"stop","native_finish_reason":"stop"}],"usage":{"prompt_tokens":20,"completion_tokens":2,"total_tokens":22,"cost":0.000004,"is_byok":false,"prompt_tokens_details":{"cached_tokens":0,"cache_write_tokens":0,"audio_tokens":0,"video_tokens":0},"cost_details":{"upstream_inference_cost":0.000004,"upstream_inference_prompt_cost":0.0000024,"upstream_inference_completions_cost":0.0000016},"completion_tokens_details":{"reasoning_tokens":0,"image_tokens":0,"audio_tokens":0}}}
+
+data: [DONE]
+```
+
+The three things flagged above, resolved:
+
+1. **The `provider` field's casing.** `"Parasail"` — Title case, exactly the display name
+   from the endpoints listing, not `"parasail"` or the request slug `"parasail/bf16"`.
+   ADR-0005 §2's discard rule compares it case-insensitively, which this observation says
+   was the right call: nothing about the response guaranteed the request-slug casing would
+   survive into the reply.
+2. **Whether `parasail/bf16` routes.** Yes. The request pinned `provider.order:
+   ["parasail/bf16"]` with `allow_fallbacks: false`, and the response's `provider` field
+   came back `"Parasail"` rather than a routing failure — the pin names a real, reachable
+   endpoint.
+3. **The streaming tool-call delta shape.** Still unverified, as expected — this request
+   carried no tool catalogue (`provider.Request` doesn't have one; that's KAN-844), so
+   nothing here could provoke a tool call. The hand-authored fixtures' claim to follow
+   OpenAI's contract remains on stated faith until KAN-844 lands and a live request can
+   ask.
+
+Cost of this one request: **$0.000004** (20 prompt + 2 completion tokens), reported by
+OpenRouter itself in the frame above — the first real usage number in this repository,
+replacing arithmetic with a measurement for exactly one request. It does not move the
+per-corpus-run estimate below; that still waits on KAN-800.
