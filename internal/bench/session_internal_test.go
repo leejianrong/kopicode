@@ -25,12 +25,19 @@ import (
 // reached the operator's real ~/.gitconfig or toolchain caches, which will not
 // reproduce on another machine.
 //
-// This drives EngineAgent.runSession — Run's body once a provider is chosen —
-// with a hand-built mock.Provider that scripts one run_shell call reading
-// $HOME, followed by a clean stop, and reads the recorded tool output back out
-// of the journal. It uses runSession rather than Run because Run's provider
-// selection only knows ProviderLive and ProviderMock, and ProviderMock always
-// loads one of the two shipped fixtures — neither of which calls run_shell.
+// This drives EngineAgent.runSession — Run's body once the credential
+// precheck has passed — with a hand-built mock.Provider that scripts one
+// run_shell call reading $HOME, followed by a clean stop, and reads the
+// recorded tool output back out of the journal. The provider is injected
+// through EngineAgent.testProvider rather than Provider/Fixture: the real
+// dispatch (a.provider) only knows ProviderLive and ProviderMock, and
+// ProviderMock always loads one of the two shipped fixtures — neither of
+// which calls run_shell. testProvider exists for exactly this — a test
+// providing its own traffic without teaching the real dispatch a third
+// ProviderKind for one test (KAN-851 moved provider construction inside
+// runSession itself, after the journal it wires a live client's retries to
+// is open, so runSession can no longer take a pre-built provider as a
+// parameter the way it once did).
 func TestEngineAgentRunShellSeesTheTaskTempHOME(t *testing.T) {
 	// No go.mod, no Makefile: forced verification (internal/verify) discovers
 	// nothing to run, which keeps this test about run_shell's environment
@@ -58,8 +65,8 @@ func TestEngineAgentRunShellSeesTheTaskTempHOME(t *testing.T) {
 
 	outDir := t.TempDir()
 	const sessionID = "kan874-sess"
-	agent := EngineAgent{}
-	out, err := agent.runSession(t.Context(), prov, SessionSpec{
+	agent := EngineAgent{testProvider: prov}
+	out, err := agent.runSession(t.Context(), SessionSpec{
 		Task:      corpus.Task{ID: "kan874", Statement: "read $HOME and report it"},
 		Dir:       dir,
 		Home:      taskHome,
