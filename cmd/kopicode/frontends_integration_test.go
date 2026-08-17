@@ -18,15 +18,19 @@
 package main_test
 
 import (
+	"encoding/json"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // exit codes from docs/SLICE-1.md build step 14.
@@ -293,6 +297,178 @@ func TestTheDefaultModelIsTheOneTheBinaryUses(t *testing.T) {
 		t.Errorf("with no flag and no config file the model did not come from the built-in "+
 			"default:\n%s", res.stderr)
 	}
+}
+
+// The session lock, docs/SLICE-1.md §8, asserted where it is actually
+// observable: two real processes, one holding and one refused.
+//
+// It belongs in this file for the same reason the model-selection cases do.
+// What has to be true is an exit code, a message on stderr, and a working tree
+// that a refused invocation did not touch — none of which can be seen from
+// inside the process, and the last of which is a claim about *ordering* rather
+// than about any function's return value.
+
+// lockedHolder is a kopicode session left running in dir, with its standard
+// input held open so it sits at the prompt rather than exiting on EOF.
+type lockedHolder struct {
+	cmd   *exec.Cmd
+	stdin io.WriteCloser
+	dir   string
+	pid   int
+}
+
+// startHolder launches a session and waits until it holds the working tree.
+//
+// Waiting on the lock file rather than on the process's output is deliberate:
+// the file is the thing the refusal will quote, so a test that starts once the
+// file describes a holder is a test synchronised on the state under test rather
+// than on a printed line that could move.
+func startHolder(t *testing.T, bin, dir string) *lockedHolder {
+	t.Helper()
+
+	cmd := exec.Command(bin)
+	cmd.Dir = dir
+	// Built rather than inherited, per CLAUDE.md. The key is a placeholder: the
+	// session opens a client with it and never makes a request, and the point
+	// of setting it is that a machine with no credential must not refuse for
+	// *that* reason in a test about locking.
+	cmd.Env = sessionEnv()
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatalf("opening the holder's stdin: %v", err)
+	}
+	var out, errOut strings.Builder
+	cmd.Stdout = &out
+	cmd.Stderr = &errOut
+
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("starting the holder: %v", err)
+	}
+	h := &lockedHolder{cmd: cmd, stdin: stdin, dir: dir}
+	t.Cleanup(func() { h.stop() })
+
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		pid := holderPID(filepath.Join(dir, ".kopicode", "lock"))
+		if pid > 0 {
+			h.pid = pid
+			return h
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the holder never took %s.\nstdout:\n%s\nstderr:\n%s",
+				filepath.Join(dir, ".kopicode", "lock"), out.String(), errOut.String())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// stop closes the holder's input, which is how the REPL is asked to finish, and
+// waits for it to go.
+func (h *lockedHolder) stop() {
+	_ = h.stdin.Close()
+	_ = h.cmd.Wait()
+}
+
+// holderPID reads the pid out of a lock file, or 0 when there is nothing to
+// read yet.
+//
+// The struct is declared here rather than imported: ADR-0003's allowlist gives
+// a front end internal/engine, internal/bench and internal/build, and
+// internal/arch walks test files too. One field is a cheap price for not
+// widening a boundary, and the lock file is a documented on-disk format.
+func holderPID(path string) int {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	var holder struct {
+		PID int `json:"pid"`
+	}
+	if err := json.Unmarshal(body, &holder); err != nil {
+		return 0
+	}
+	return holder.PID
+}
+
+// sessionEnv is the environment a session runs under: the PATH it needs to
+// exist, and a credential so that the provider is not what stops it.
+func sessionEnv() []string {
+	return []string{
+		"PATH=" + os.Getenv("PATH"),
+		"OPENROUTER_API_KEY=not-a-real-key-and-never-sent",
+	}
+}
+
+func TestASecondSessionInOneWorkingTreeIsRefused(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the session lock is a documented no-op on Windows (docs/SLICE-1.md §8)")
+	}
+	bin := build(t, frontEnds[0])
+	dir := repoDir(t)
+
+	holder := startHolder(t, bin, dir)
+
+	before := treeOf(t, dir)
+	res := run(t, bin, dir, []string{"OPENROUTER_API_KEY=not-a-real-key-and-never-sent"})
+
+	if res.code != exitHarness {
+		t.Fatalf("exit code = %d, want %d. stderr:\n%s", res.code, exitHarness, res.stderr)
+	}
+	if res.stdout != "" {
+		t.Errorf("a refused session wrote to stdout:\n%s", res.stdout)
+	}
+
+	// It names the holder. A pid on its own would be a weak answer — reused,
+	// and silent about what is running — so the message carries the lock file
+	// it can be checked against as well.
+	for _, want := range []string{
+		"already running",
+		"pid " + strconv.Itoa(holder.pid),
+		filepath.Join(dir, ".kopicode", "lock"),
+	} {
+		if !strings.Contains(res.stderr, want) {
+			t.Errorf("the refusal does not mention %q:\n%s", want, res.stderr)
+		}
+	}
+
+	// And it wrote no record. The refusal happens before the journal is opened,
+	// so a session that never started leaves nothing a reader could mistake for
+	// one that ran and did nothing.
+	if after := treeOf(t, dir); !equal(before, after) {
+		t.Errorf("a refused session changed the working tree.\nbefore: %v\nafter:  %v", before, after)
+	}
+
+	// The tree is free once the holder goes. flock is held by the open file
+	// description, so nothing has to clean up after it — which is the property
+	// that keeps a crashed session from bricking a repository.
+	holder.stop()
+	res = run(t, bin, dir, []string{"OPENROUTER_API_KEY=not-a-real-key-and-never-sent"})
+	if strings.Contains(res.stderr, "already running") {
+		t.Errorf("the working tree was still locked after the holder exited:\n%s", res.stderr)
+	}
+}
+
+// TestSessionsInSeparateWorkingTreesDoNotBlockEachOther is the other half of
+// the requirement, and the half that decides whether `make bench-smoke` runs at
+// all: the bench runner puts every task in its own worktree and runs ten at
+// once, so a lock keyed on anything they share would serialise it or deadlock
+// it outright.
+func TestSessionsInSeparateWorkingTreesDoNotBlockEachOther(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the session lock is a documented no-op on Windows (docs/SLICE-1.md §8)")
+	}
+	bin := build(t, frontEnds[0])
+
+	first := startHolder(t, bin, repoDir(t))
+	second := startHolder(t, bin, repoDir(t))
+
+	if first.pid == second.pid {
+		t.Fatal("the two holders are the same process")
+	}
+	// startHolder fails the test if a session never reaches its lock, so
+	// reaching here with two live holders is the assertion.
+	first.stop()
+	second.stop()
 }
 
 // build compiles one front end into the test's temp directory.

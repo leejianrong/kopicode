@@ -229,6 +229,12 @@ func session(std streams, opts engine.Options) int {
 			say(stderr, "kopicode: %s is not set, so there is no provider to talk to\n", engine.APIKeyEnv)
 			return exitHarness
 		}
+		// A working tree already running a session (docs/SLICE-1.md §8) lands
+		// on exit 4 by the same argument: the command line was right and the
+		// machine was busy. Exit 2's definition in exit.go rules it out in as
+		// many words — "nothing was opened, locked or written". The error names
+		// the holder, its record and the lock file itself, so there is no
+		// second sentence for this front end to add.
 		say(stderr, "kopicode: %v\n", err)
 		return exitHarness
 	}

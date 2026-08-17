@@ -9,9 +9,11 @@ import (
 	"github.com/leejianrong/kopicode/internal/corpus"
 	"github.com/leejianrong/kopicode/internal/engine"
 	"github.com/leejianrong/kopicode/internal/journal"
+	"github.com/leejianrong/kopicode/internal/lock"
 	"github.com/leejianrong/kopicode/internal/permission"
 	"github.com/leejianrong/kopicode/internal/provider"
 	"github.com/leejianrong/kopicode/internal/provider/mock"
+	"github.com/leejianrong/kopicode/internal/repo"
 	"github.com/leejianrong/kopicode/internal/syntax"
 	"github.com/leejianrong/kopicode/internal/tools"
 )
@@ -112,6 +114,37 @@ func (a EngineAgent) Run(ctx context.Context, spec SessionSpec) (SessionOutcome,
 	if err != nil {
 		return SessionOutcome{}, err
 	}
+
+	// The working tree's session lock (docs/SLICE-1.md §8), first and released
+	// last, exactly as engine.Open takes it for the REPL. Two things about it
+	// are worth stating here rather than leaving to be inferred.
+	//
+	// **It is keyed on the task's worktree, and that is what stops it
+	// serialising this runner.** Each task gets its own `git worktree`, so ten
+	// concurrent tasks resolve ten different work tree roots and take ten
+	// different locks. Keying on the git *directory* would have been the other
+	// reading of "one session per repo", and the ten worktrees share theirs —
+	// that version deadlocks the corpus at the first task. spec.Dir is inside
+	// the worktree (the task's starting tree), so the root is resolved rather
+	// than assumed, which also keeps .kopicode/ out of bench/tasks/ and away
+	// from the corpus digest.
+	//
+	// **kopibench does not lock the tree it was launched from.** It never edits
+	// it — every session runs in a worktree — and locking it would make a paired
+	// A/B, which ADR-0005 defines as two invocations, impossible to run side by
+	// side from one checkout.
+	held, err := lock.Acquire(repo.WorkTreeRoot(ctx, spec.Dir), lock.Holder{
+		Session: spec.SessionID,
+		Record:  journal.SessionDir(spec.OutDir, spec.SessionID),
+	})
+	if err != nil {
+		return SessionOutcome{}, fmt.Errorf("bench: locking the working tree for %s: %w", spec.Task.ID, err)
+	}
+	// Deferred rather than released at the end of the body: runTask recovers a
+	// panic to keep one task from taking the other nine down with it, and a
+	// lock released only on the happy path would survive that recovery and be
+	// held for the rest of the process.
+	defer func() { _ = held.Release() }()
 
 	set, err := tools.NewSet(spec.Dir)
 	if err != nil {
