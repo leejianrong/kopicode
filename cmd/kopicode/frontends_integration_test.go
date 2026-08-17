@@ -29,6 +29,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -308,21 +309,56 @@ func TestTheDefaultModelIsTheOneTheBinaryUses(t *testing.T) {
 // inside the process, and the last of which is a claim about *ordering* rather
 // than about any function's return value.
 
+// recordNotice is what the REPL prints once its session is open, and it is the
+// signal this file synchronises on. See [startHolder] for why, which is KAN-908.
+const recordNotice = "record: "
+
 // lockedHolder is a kopicode session left running in dir, with its standard
 // input held open so it sits at the prompt rather than exiting on EOF.
 type lockedHolder struct {
-	cmd   *exec.Cmd
-	stdin io.WriteCloser
-	dir   string
-	pid   int
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	out    *watcher
+	errOut *watcher
+
+	dir string
+	// pid and record identify the holder: the pid the refusal must name, and
+	// the record directory that must be the only one in the tree.
+	pid    int
+	record string
+
+	// done is closed when the process has been reaped. waitErr is what Wait
+	// said, kept so that both stop and the readiness wait can consult it
+	// without either calling Wait twice.
+	done    chan struct{}
+	waitErr error
+
+	stopOnce sync.Once
 }
 
-// startHolder launches a session and waits until it holds the working tree.
+// startHolder launches a session and waits until it is **fully** started.
 //
-// Waiting on the lock file rather than on the process's output is deliberate:
-// the file is the thing the refusal will quote, so a test that starts once the
-// file describes a holder is a test synchronised on the state under test rather
-// than on a printed line that could move.
+// Fully started, and not merely holding the lock, is the whole point of this
+// function, and getting it wrong is KAN-908: an earlier version polled for
+// .kopicode/lock to describe a holder and returned as soon as it did. That is a
+// real signal — the lock file is written inside lock.Acquire, and the refusal
+// quotes it — but it is the *first* thing a session writes, not the last.
+// engine.Open goes on to open the tool root and then the journal, so a caller
+// that snapshotted the tree at that moment caught the holder's own
+// .kopicode/sessions/<id>/events.jsonl appearing a few milliseconds later and
+// attributed it to whatever ran next. It failed about one full-package run in
+// three, and the record it blamed on the refused process was provably the
+// holder's: the directory name matched the `session` field in the lock file the
+// holder itself had written.
+//
+// So the signal is the REPL's own "record:" notice, which main.go prints after
+// engine.Open has returned — which is after Start appended and fsynced
+// SessionStarted. Confirming the file at the announced path exists turns the
+// notice from a printed line into a fact about the tree. After that the holder
+// blocks reading stdin and writes nothing further: the REPL and the line editor
+// touch no files, and .kopicode/blobs is created lazily by a spill that an idle
+// session never performs. The tree is quiescent, which is what a byte-for-byte
+// comparison across the next process's lifetime needs.
 func startHolder(t *testing.T, bin, dir string) *lockedHolder {
 	t.Helper()
 
@@ -337,36 +373,120 @@ func startHolder(t *testing.T, bin, dir string) *lockedHolder {
 	if err != nil {
 		t.Fatalf("opening the holder's stdin: %v", err)
 	}
-	var out, errOut strings.Builder
-	cmd.Stdout = &out
-	cmd.Stderr = &errOut
+	h := &lockedHolder{
+		cmd:    cmd,
+		stdin:  stdin,
+		out:    newWatcher(recordNotice),
+		errOut: newWatcher(""),
+		dir:    dir,
+		done:   make(chan struct{}),
+	}
+	cmd.Stdout = h.out
+	cmd.Stderr = h.errOut
 
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("starting the holder: %v", err)
 	}
-	h := &lockedHolder{cmd: cmd, stdin: stdin, dir: dir}
-	t.Cleanup(func() { h.stop() })
+	go func() {
+		h.waitErr = cmd.Wait()
+		close(h.done)
+	}()
+	t.Cleanup(h.stop)
 
-	deadline := time.Now().Add(20 * time.Second)
-	for {
-		pid := holderPID(filepath.Join(dir, ".kopicode", "lock"))
-		if pid > 0 {
-			h.pid = pid
-			return h
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the holder never took %s.\nstdout:\n%s\nstderr:\n%s",
-				filepath.Join(dir, ".kopicode", "lock"), out.String(), errOut.String())
-		}
-		time.Sleep(20 * time.Millisecond)
+	// Three outcomes, and only one of them is a hang: the notice arrives, the
+	// holder dies before printing it, or neither happens. Selecting on the
+	// process as well as on the notice is what turns a crashed holder into a
+	// failure that shows its stderr instead of a test that sits for the whole
+	// timeout.
+	select {
+	case <-h.out.seen:
+	case <-h.done:
+		t.Fatalf("the holder exited before it opened a session (%v).\nstdout:\n%s\nstderr:\n%s",
+			h.waitErr, h.out.text(), h.errOut.text())
+	case <-time.After(30 * time.Second):
+		t.Fatalf("the holder never announced its record.\nstdout:\n%s\nstderr:\n%s",
+			h.out.text(), h.errOut.text())
 	}
+
+	h.record = recordPath(h.out.text())
+	if h.record == "" {
+		t.Fatalf("could not read the record path out of the holder's output:\n%s", h.out.text())
+	}
+	// The notice is printed after engine.Open returned, so the record exists by
+	// now. Checking says so as a fact about the filesystem rather than as an
+	// inference about the order of two statements in another package.
+	events := filepath.Join(h.record, "events.jsonl")
+	if _, err := os.Stat(events); err != nil {
+		t.Fatalf("the holder announced %s but %s is not there yet, so the readiness "+
+			"signal does not mean what this test needs it to mean: %v", h.record, events, err)
+	}
+
+	h.pid = holderPID(filepath.Join(dir, ".kopicode", "lock"))
+	if h.pid <= 0 {
+		t.Fatalf("the holder is running but %s does not describe it",
+			filepath.Join(dir, ".kopicode", "lock"))
+	}
+	return h
 }
 
 // stop closes the holder's input, which is how the REPL is asked to finish, and
-// waits for it to go.
+// waits for it to go. It is safe to call more than once: the test calls it
+// explicitly to prove the tree is freed, and t.Cleanup calls it again.
 func (h *lockedHolder) stop() {
-	_ = h.stdin.Close()
-	_ = h.cmd.Wait()
+	h.stopOnce.Do(func() { _ = h.stdin.Close() })
+	<-h.done
+}
+
+// watcher collects a child's output and signals once a marker has appeared in
+// it.
+//
+// It exists because the readiness signal and the failure message are the same
+// bytes, read from two goroutines: os/exec's copier writes, and the test reads.
+// A strings.Builder shared between them is a data race that -race would find on
+// whichever run happened to look. An empty want never fires, which is what
+// stderr wants — collected for the message, never waited on.
+type watcher struct {
+	want string
+	seen chan struct{}
+
+	mu   sync.Mutex
+	buf  strings.Builder
+	once sync.Once
+}
+
+func newWatcher(want string) *watcher {
+	return &watcher{want: want, seen: make(chan struct{})}
+}
+
+func (w *watcher) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	w.buf.Write(p)
+	hit := w.want != "" && strings.Contains(w.buf.String(), w.want)
+	w.mu.Unlock()
+	if hit {
+		w.once.Do(func() { close(w.seen) })
+	}
+	return len(p), nil
+}
+
+func (w *watcher) text() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.String()
+}
+
+// recordPath pulls the announced record directory out of the REPL's output.
+func recordPath(out string) string {
+	for _, line := range strings.Split(out, "\n") {
+		i := strings.Index(line, recordNotice)
+		if i < 0 {
+			continue
+		}
+		if p := strings.TrimSpace(line[i+len(recordNotice):]); p != "" {
+			return p
+		}
+	}
+	return ""
 }
 
 // holderPID reads the pid out of a lock file, or 0 when there is nothing to
@@ -388,6 +508,29 @@ func holderPID(path string) int {
 		return 0
 	}
 	return holder.PID
+}
+
+// sessionDirs lists the session record directories under dir.
+//
+// It backs an assertion that does not depend on timing at all: whatever else is
+// racing, the number of records in a tree that has hosted one session and one
+// refusal is one. See [TestASecondSessionInOneWorkingTreeIsRefused].
+func sessionDirs(t *testing.T, dir string) []string {
+	t.Helper()
+
+	entries, err := os.ReadDir(filepath.Join(dir, ".kopicode", "sessions"))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		t.Fatalf("listing session records: %v", err)
+	}
+	var out []string
+	for _, e := range entries {
+		out = append(out, e.Name())
+	}
+	sort.Strings(out)
+	return out
 }
 
 // sessionEnv is the environment a session runs under: the PATH it needs to
@@ -434,8 +577,26 @@ func TestASecondSessionInOneWorkingTreeIsRefused(t *testing.T) {
 	// And it wrote no record. The refusal happens before the journal is opened,
 	// so a session that never started leaves nothing a reader could mistake for
 	// one that ran and did nothing.
+	//
+	// The holder's session id goes in the message because the one way this
+	// assertion has ever failed was a readiness race in this file rather than a
+	// defect in the lock, and the two are told apart by whose record appeared
+	// (KAN-908). If the extra directory is the holder's, the bug is here.
 	if after := treeOf(t, dir); !equal(before, after) {
-		t.Errorf("a refused session changed the working tree.\nbefore: %v\nafter:  %v", before, after)
+		t.Errorf("a refused session changed the working tree.\nbefore: %v\nafter:  %v\n"+
+			"the holder's own record is %s", before, after, holder.record)
+	}
+
+	// The same property again, and this one cannot race: a tree that has hosted
+	// one session and one refusal holds exactly one record, the holder's. It is
+	// worth stating separately because it is the ADR-0007 decision 4 property in
+	// its own terms — no half-session record for a session that never started —
+	// where the comparison above is a tree snapshot that any concurrent write
+	// could disturb.
+	records := sessionDirs(t, dir)
+	if len(records) != 1 || filepath.Join(dir, ".kopicode", "sessions", records[0]) != holder.record {
+		t.Errorf("session records under %s are %v; want only the holder's, %s",
+			dir, records, holder.record)
 	}
 
 	// The tree is free once the holder goes. flock is held by the open file
