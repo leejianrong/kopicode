@@ -20,6 +20,7 @@ package main_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -326,6 +327,12 @@ type lockedHolder struct {
 	// the record directory that must be the only one in the tree.
 	pid    int
 	record string
+	// settled is the tree as it stood once it stopped changing, and is what a
+	// caller compares against afterwards. Taking it here rather than in the
+	// caller is deliberate: it is the last of the two identical walks that
+	// [awaitQuiescent] made, so there is no gap between "the tree has settled"
+	// and "this is what it settled to".
+	settled []string
 
 	// done is closed when the process has been reaped. waitErr is what Wait
 	// said, kept so that both stop and the readiness wait can consult it
@@ -354,11 +361,19 @@ type lockedHolder struct {
 // So the signal is the REPL's own "record:" notice, which main.go prints after
 // engine.Open has returned — which is after Start appended and fsynced
 // SessionStarted. Confirming the file at the announced path exists turns the
-// notice from a printed line into a fact about the tree. After that the holder
-// blocks reading stdin and writes nothing further: the REPL and the line editor
-// touch no files, and .kopicode/blobs is created lazily by a spill that an idle
-// session never performs. The tree is quiescent, which is what a byte-for-byte
-// comparison across the next process's lifetime needs.
+// notice from a printed line into a fact about the tree.
+//
+// And then the tree is watched until it holds still, which is KAN-909 and the
+// part that matters most here. The notice tells us the session is up; it does
+// not tell us the session has finished writing, and the belief that it has is
+// another inference about another package's internals — true today, silently
+// false the day the REPL grows a history file or a heartbeat. [awaitQuiescent]
+// measures it instead, so that a future idle write produces a legible failure
+// naming the paths rather than an intermittent one blaming the process that ran
+// next. The argument for why the tree *should* settle is still worth having, and
+// it is this: the REPL and the line editor touch no files, and .kopicode/blobs
+// is created lazily by a spill an idle session never performs. It is now an
+// explanation of the check's result rather than a substitute for it.
 func startHolder(t *testing.T, bin, dir string) *lockedHolder {
 	t.Helper()
 
@@ -426,6 +441,10 @@ func startHolder(t *testing.T, bin, dir string) *lockedHolder {
 		t.Fatalf("the holder is running but %s does not describe it",
 			filepath.Join(dir, ".kopicode", "lock"))
 	}
+
+	// And then the measured half. Everything above is an argument that the
+	// holder has finished writing; this is the check that it has (KAN-909).
+	h.settled = awaitQuiescent(t, dir)
 	return h
 }
 
@@ -551,7 +570,10 @@ func TestASecondSessionInOneWorkingTreeIsRefused(t *testing.T) {
 
 	holder := startHolder(t, bin, dir)
 
-	before := treeOf(t, dir)
+	// The tree as it stood when it stopped changing, not as it stood when the
+	// holder said it was ready. startHolder waited for the second (KAN-909), so
+	// there is nothing left here to race with.
+	before := holder.settled
 	res := run(t, bin, dir, []string{"OPENROUTER_API_KEY=not-a-real-key-and-never-sent"})
 
 	if res.code != exitHarness {
@@ -745,9 +767,47 @@ func repoRoot(t *testing.T) string {
 
 func treeOf(t *testing.T, dir string) []string {
 	t.Helper()
+	return pathsOf(scan(t, dir))
+}
 
-	var out []string
+func pathsOf(entries []treeEntry) []string {
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, e.path)
+	}
+	return out
+}
+
+// treeEntry is one path in a walked tree, with the size that path had.
+//
+// The size is not part of the byte-for-byte comparison — [treeOf] drops it, and
+// the assertions it feeds are about paths appearing. It is here for
+// [awaitQuiescent], which has to be *more* sensitive than the assertion it
+// stands in front of: a precondition that can miss a write its assertion would
+// catch is not a precondition. An append to an existing file moves a size and no
+// path, and that is the shape of the idle write — a log, a history file — this
+// is guarding against.
+type treeEntry struct {
+	path string
+	size int64
+}
+
+// scan walks dir and reports every path under it, sorted, directories rendered
+// with a trailing slash.
+//
+// An entry that vanishes between the walk finding it and the stat reading it is
+// skipped rather than fatal. Nothing in these fixtures deletes anything, but
+// [awaitQuiescent] walks the same tree repeatedly while another process is live
+// in it, and a walker that a race can kill is a poor instrument for detecting
+// one.
+func scan(t *testing.T, dir string) []treeEntry {
+	t.Helper()
+
+	var out []treeEntry
 	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -756,13 +816,133 @@ func treeOf(t *testing.T, dir string) []string {
 			return relErr
 		}
 		if d.IsDir() {
-			rel += "/"
+			out = append(out, treeEntry{path: rel + "/"})
+			return nil
 		}
-		out = append(out, rel)
+		info, infoErr := d.Info()
+		if errors.Is(infoErr, fs.ErrNotExist) {
+			return nil
+		}
+		if infoErr != nil {
+			return infoErr
+		}
+		out = append(out, treeEntry{path: rel, size: info.Size()})
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("walking %s: %v", dir, err)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].path < out[j].path })
+	return out
+}
+
+// How long a tree has to hold still before [awaitQuiescent] believes it, and how
+// long it will wait for that to happen.
+//
+// **The window: 100ms between two identical walks.** The gap it has to cover is
+// the one KAN-908 measured — a holder wrote .kopicode/lock and then its journal
+// a few milliseconds later, and the test looked in between. 100ms is about two
+// orders of magnitude above that, which is the margin worth having on a shared
+// CI runner where a scheduling stall is the usual reason a gap widens. Going
+// wider buys progressively less: a write landing more than 100ms after a session
+// announced itself is not a startup write but a background one, and the timeout
+// is what deals with those.
+//
+// **The cost: one extra 100ms per holder.** 100ms for the refusal case and 200ms
+// for the two-holder case, against a package that runs for about fifteen
+// seconds. It is paid once per holder rather than per poll, because the common
+// case settles on the first pair.
+//
+// **The timeout: 10s**, which is a hundred chances to hold still. A tree that
+// has not managed one by then is not slow, it is being written to continuously,
+// and that is a finding rather than a reason to carry on.
+const (
+	quiescenceWindow  = 100 * time.Millisecond
+	quiescenceTimeout = 10 * time.Second
+)
+
+// awaitQuiescent blocks until dir stops changing, and reports the settled tree.
+//
+// It exists because the alternative is an argued invariant, and this file has
+// now been wrong about one of those once already in this exact place. KAN-908
+// replaced "the lock file is written, so the session is up" with "the notice is
+// printed, so nothing more will be written" — both inferences about another
+// package's internals, and the second goes stale in silence the day the REPL
+// grows a history file, a status cache, a heartbeat, or any lazily created
+// directory. It would then fail the way the first did: intermittently, and
+// blaming the process that merely ran next.
+//
+// So the invariant is measured rather than argued. Two consecutive identical
+// walks is the weakest check that tells "settled" apart from "between two
+// writes", and it absorbs the ordinary case rather than failing on it: a
+// one-shot write landing just after the notice moves the tree once, the next
+// pair agrees, and the snapshot returned is the one that includes it. Only a
+// tree that never holds still fails, and it fails saying what kept moving.
+func awaitQuiescent(t *testing.T, dir string) []string {
+	t.Helper()
+
+	deadline := time.Now().Add(quiescenceTimeout)
+	prev := scan(t, dir)
+	for {
+		time.Sleep(quiescenceWindow)
+		cur := scan(t, dir)
+		if sameEntries(prev, cur) {
+			return pathsOf(cur)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s never settled: it was still changing after %s, so a byte-for-byte "+
+				"comparison across another process's lifetime cannot mean anything.\n"+
+				"still changing:\n%s\n"+
+				"something in the session's idle path is writing to the tree. That is the thing "+
+				"to fix; this check exists to name it rather than let it surface later as an "+
+				"intermittent failure blaming whichever process ran next.",
+				dir, quiescenceTimeout, strings.Join(changes(prev, cur), "\n"))
+		}
+		prev = cur
+	}
+}
+
+func sameEntries(a, b []treeEntry) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// changes describes what moved between two walks, so the timeout names the paths
+// to go and look at rather than only reporting that something happened.
+func changes(before, after []treeEntry) []string {
+	was := make(map[string]int64, len(before))
+	for _, e := range before {
+		was[e.path] = e.size
+	}
+	seen := make(map[string]bool, len(after))
+
+	var out []string
+	for _, e := range after {
+		seen[e.path] = true
+		size, existed := was[e.path]
+		switch {
+		case !existed:
+			out = append(out, "  appeared: "+e.path)
+		case size != e.size:
+			out = append(out, fmt.Sprintf("  grew:     %s (%d -> %d bytes)", e.path, size, e.size))
+		}
+	}
+	for _, e := range before {
+		if !seen[e.path] {
+			out = append(out, "  vanished: "+e.path)
+		}
+	}
+	if len(out) == 0 {
+		// Unreachable unless sameEntries and this function disagree, which is
+		// worth saying out loud rather than printing an empty list.
+		out = append(out, "  (the two walks differ but no path did; the comparison is wrong)")
 	}
 	sort.Strings(out)
 	return out
