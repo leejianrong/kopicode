@@ -212,6 +212,33 @@ satay-runtime's posture) and **refuses to start** a second session in the same r
 naming the holder. Concurrent sessions in separate worktrees are fine and are how bench
 achieves parallelism.
 
+Landed as `internal/lock` (KAN-906). Four things it settled that the paragraph above
+left open:
+
+- **"The repo" is the *working tree*, not the git directory.** A linked worktree shares
+  `.git/config`, the object store and the ref store with its parent — only `HEAD` and the
+  index are private — so the git-directory reading would serialise the ten concurrent
+  task worktrees the bench runner creates on purpose. The lock root is
+  `repo.WorkTreeRoot`, which is `git rev-parse --show-toplevel` and falls back to the
+  directory itself outside a repository. A session started in a subdirectory therefore
+  collides with one started at the root, which it must: a snapshot covers the whole tree.
+- **The refusal is exit 4, not exit 2.** The command line was right and the machine was
+  busy, and §Build Plan step 14's exit 2 is defined as "nothing was opened, locked or
+  written". Same argument as `ErrNoAPIKey`.
+- **The refused invocation creates nothing**, even though taking the lock creates
+  `.kopicode/lock`. The only way to be refused is for a holder to exist, and a holder
+  exists only because it already created the directory and the file.
+- **There is no staleness heuristic and there must not be one.** `flock` is held by the
+  open file description, so the kernel releases it when the process dies — clean exit,
+  panic, SIGTERM, SIGKILL, power loss. The lock file left behind is not a stale lock, it
+  is an empty mailbox the next session truncates and rewrites. `Release` deliberately does
+  not unlink it: that reopens the race where one process locks an inode nobody else can
+  reach.
+
+`kopibench` locks each task's worktree and **not** the tree it was launched from: it never
+edits that one, and locking it would stop a paired A/B — two invocations, per ADR-0005 —
+running side by side from one checkout.
+
 ### 9. Bench execution model and three-bucket attribution
 
 One `git worktree` per task off a frozen corpus commit, plus a temp `HOME`. The oracle

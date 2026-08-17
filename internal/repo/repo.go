@@ -186,6 +186,30 @@ func classifyOpenError(ctx context.Context, dir string, cause error) error {
 // directory StateDir sits in.
 func (r *Repo) Root() string { return r.root }
 
+// WorkTreeRoot is the work tree root containing dir, or dir made absolute when
+// dir is not inside a repository with a work tree.
+//
+// It exists for the session lock (docs/SLICE-1.md §8, internal/lock), which has
+// to name one directory per *working tree* and cannot fail just because the
+// session is not in a repository. Running kopicode outside git is supported —
+// no snapshots, no head on the record — and so is running it in a subdirectory,
+// where the whole tree is still what a snapshot covers and therefore what a
+// second session would collide over. Both callers want the same answer for both
+// cases, which is why the fallback is here rather than repeated at each.
+//
+// It never returns an error. A directory that git cannot resolve is a working
+// tree of one directory as far as the lock is concerned, and a session there
+// still excludes a second session in the same place.
+func WorkTreeRoot(ctx context.Context, dir string) string {
+	if r, err := Open(ctx, dir); err == nil {
+		return r.Root()
+	}
+	if abs, err := filepath.Abs(dir); err == nil {
+		return abs
+	}
+	return dir
+}
+
 // GitDir is this work tree's git directory. In a linked worktree that is
 // .git/worktrees/<name>, not the shared .git.
 func (r *Repo) GitDir() string { return r.gitDir }

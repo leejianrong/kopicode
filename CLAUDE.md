@@ -216,6 +216,22 @@ What is real now (2026-08-17):
   the bench runner. Commits carry a fixed `kopicode` identity and an injected clock,
   so a snapshot never depends on the user having configured git and the same tree
   yields the same sha.
+- **`internal/lock`** — one session per **working tree** (docs/SLICE-1.md §8), `flock`
+  on unix and a documented no-op on Windows. The word "repo" in that section is the
+  trap: a linked worktree shares `.git/config`, the object store and the ref store with
+  its parent, so keying on the git directory would serialise the bench runner's ten
+  concurrent task worktrees. The root is `repo.WorkTreeRoot` — `rev-parse
+  --show-toplevel`, falling back to the directory outside a repository — so a session in
+  a subdirectory still collides with one at the root, which it must, because a snapshot
+  covers the whole tree. `engine.Open` takes it before the journal exists, so a refusal
+  leaves no half-session record; a refused invocation creates nothing, because the only
+  way to be refused is for a holder to have created `.kopicode/lock` already. The
+  refusal names the holder — pid, host, start time, program, session id and the path to
+  its record, since a pid alone is reused and says nothing. **No staleness heuristic,
+  deliberately:** flock lives on the open file description, so the kernel releases it on
+  every exit including panic, SIGKILL and power loss, and `Release` does not unlink the
+  file because that reopens the two-inodes race. `kopibench` locks each task's worktree
+  and never the tree it was launched from.
 - **`internal/provider` + `internal/provider/mock`** — the wire format the loop
   exchanges with a model, and the replay provider that serves recorded traffic through
   it. **This is the primary test seam** (SLICE-1 affordance P2), so the shape it settles
@@ -646,6 +662,7 @@ internal/
   procgroup/         start a subprocess in its own group, end the whole group
   journal/           Journal interface, FileJournal, blob spill, redaction, event types
   repo/              git shadow refs — write-only in slice 1
+  lock/              the advisory lock at .kopicode/lock — one session per working tree
   permission/        policy decisions
   corpus/            the loader, validator and digest for bench/tasks
   bench/             runner, worktrees, oracle execution, attribution, McNemar scoring

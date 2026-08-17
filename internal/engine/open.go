@@ -12,6 +12,7 @@ import (
 
 	"github.com/leejianrong/kopicode/internal/build"
 	"github.com/leejianrong/kopicode/internal/journal"
+	"github.com/leejianrong/kopicode/internal/lock"
 	"github.com/leejianrong/kopicode/internal/permission"
 	"github.com/leejianrong/kopicode/internal/provider"
 	"github.com/leejianrong/kopicode/internal/repo"
@@ -154,6 +155,17 @@ var ErrNoAPIKey = errors.New("engine: OPENROUTER_API_KEY is not set")
 // importing internal/provider.
 const APIKeyEnv = "OPENROUTER_API_KEY"
 
+// ErrSessionLocked reports that another live session already holds the working
+// tree (docs/SLICE-1.md §8). The error returned by [Open] wraps it and its
+// message names the holder, so a surface prints the error and matches on this
+// rather than on prose.
+//
+// It is re-exported from internal/lock because ADR-0003's allowlist gives a
+// front end three internal imports and internal/lock is not one of them: the
+// engine decides that a second session is refused, and the surface decides how
+// to say so, which is the same division the permission gate is built on.
+var ErrSessionLocked = lock.ErrHeld
+
 // Session is a running session and everything it holds open.
 //
 // It exists so that a front end has **one** thing to close. Open acquires a
@@ -217,9 +229,13 @@ func (s *Session) Close(ctx context.Context) error {
 //
 // The order matters and is the order ADR-0007 decision 4 asks for. Everything
 // that can be refused without touching the filesystem is refused first, so a
-// session that will not run leaves nothing behind; the journal — the first
-// thing that creates a directory — is opened only once the rest has been built.
+// session that will not run leaves nothing behind; then the working tree's
+// advisory lock, which is the one refusal that needs a file and creates none on
+// the path that refuses (docs/SLICE-1.md §8); then the journal.
 // [ResolveSelection] happens earlier still, in the caller.
+//
+// Two refusals here are conditions rather than faults, and both are matchable:
+// [ErrNoAPIKey] and [ErrSessionLocked].
 //
 // It journals nothing. [Session.Run] and [Session.Close] do; the caller starts
 // the record with [Engine.Start] by way of the returned session having already
@@ -260,7 +276,36 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 		return nil, err
 	}
 
+	// Then the working tree's lock, and it is the first thing here that touches
+	// disk on purpose — docs/SLICE-1.md §8 refuses a second session in one tree,
+	// and ADR-0007 decision 4's ordering applies to that refusal exactly as it
+	// does to an unknown model: before a prompt is assembled, before the journal
+	// is opened, before SessionStarted is written. Nothing below this line can
+	// leave a half-session record for a session that never started.
+	//
+	// It creates .kopicode/lock, which looks like a contradiction and is not:
+	// the *only* way to be refused is for a holder to exist, and a holder
+	// exists only because it already created the directory and the file. So a
+	// refused invocation creates nothing. What creates the file is the session
+	// that goes on to run.
+	//
+	// The root is the work tree, not the git directory. A linked worktree
+	// shares .git/config, the object store and the ref store with its parent,
+	// so keying on the git directory would serialise the bench runner's ten
+	// concurrent task worktrees — see internal/lock's package comment.
+	lockRoot := repo.WorkTreeRoot(ctx, abs)
+	held, err := lock.Acquire(lockRoot, lock.Holder{
+		Session: id,
+		Record:  journal.SessionDir(abs, id),
+	})
+	if err != nil {
+		return nil, err
+	}
+
 	s := &Session{id: id, dir: abs}
+	// The lock is released last, because closers unwind in reverse: the record
+	// is closed and fsynced while the tree is still ours.
+	s.closers = append(s.closers, held.Release)
 	// fail releases whatever has been acquired so far. Every early return below
 	// goes through it, so a half-built session never leaves a file open.
 	fail := func(err error) (*Session, error) {
@@ -272,7 +317,10 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 
 	set, err := tools.NewSet(abs)
 	if err != nil {
-		return nil, fmt.Errorf("engine: opening the tool root at %s: %w", abs, err)
+		// Through fail, not a bare return: the lock is already on the closer
+		// stack, and a session that could not open its tool root must not leave
+		// the working tree locked against the next attempt.
+		return fail(fmt.Errorf("engine: opening the tool root at %s: %w", abs, err))
 	}
 	s.closers = append(s.closers, set.Close)
 
