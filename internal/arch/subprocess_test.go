@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -92,6 +93,33 @@ import (
 // toolchain gate that must still find its toolchain, an allowlist is right for
 // a benchmark oracle that must be reproducible. Collapsing them would need a
 // passthrough option, and a passthrough option is this hole with a name.
+//
+// # A Cmd is not always a call (KAN-853)
+//
+// Everything above found subprocesses by looking for exec.Command and
+// exec.CommandContext. os/exec documents a second way — "It is also possible to
+// construct a Cmd directly" — and `&exec.Cmd{Path: gitPath, Args: …}` spawns
+// exactly what the call spawns, inherits exactly what it inherits when Env is
+// left alone, and was invisible to all three rules. Not an exotic shape: it is
+// the one you reach for when you want to set SysProcAttr or Path yourself, which
+// is what internal/procgroup and internal/tools are about.
+//
+// So a composite literal of exec.Cmd is a site like any other. A field written
+// inside the literal satisfies its rule exactly as an assignment to the bound
+// variable does — both are visible, and insisting on the assignment form would
+// be a style rule wearing a safety rule's failure message — and the value check
+// reads Env out of the literal the same way it reads it out of an assignment.
+//
+// It fails closed in the two places it cannot follow the literal, which is the
+// same bias as everywhere else here: a positional literal, whose fields cannot
+// be named, counts as setting none of them; and a literal not bound to a single
+// variable — used inline, or handed straight to a helper — has no later
+// assignment to look for, so only what is in the literal counts.
+//
+// One spelling is worth naming because it writes no exec.Cmd at all. Inside a
+// container of Cmds the element type may be elided, so `[]*exec.Cmd{{Path: p}}`
+// builds a Cmd out of a brace with nothing in front of it. Those inner literals
+// are reachable only from the container, and they are collected from there.
 //
 // The analysis is flow-insensitive and deliberately crude: it asks whether the
 // enclosing function assigns Dir and Env to the variable holding the Cmd at
@@ -276,11 +304,20 @@ type violation struct {
 	msg   string
 }
 
-// subprocessCall is a call to exec.Command or exec.CommandContext, whatever it
-// runs.
+// subprocessCall is one place an *exec.Cmd comes into existence: a call to
+// exec.Command or exec.CommandContext whatever it runs, or — since KAN-853 — a
+// composite literal of exec.Cmd.
+//
+// The two are one type because they are one rule. os/exec documents building a
+// Cmd directly as an ordinary way to use the package, so `&exec.Cmd{Path: git}`
+// spawns exactly what `exec.Command("git")` spawns and inherits exactly the same
+// environment when Env is left alone. Before KAN-853 the guard only recognised
+// the call, so the most direct way to build a Cmd was the one way past every
+// check in this file.
 type subprocessCall struct {
-	// name is the variable the resulting *exec.Cmd was bound to, empty when the
-	// call's result is used directly or passed straight to another function.
+	// name is the variable the *exec.Cmd was bound to, empty when the call's
+	// result or the literal is used directly or passed straight to another
+	// function.
 	name string
 	// body is the enclosing function, nil for a package-level call.
 	body *ast.BlockStmt
@@ -288,6 +325,25 @@ type subprocessCall struct {
 	// isGit is true for a literal git program name. It selects the wording of
 	// the failure, never whether the rules apply.
 	isGit bool
+	// literal holds the keyed fields of the exec.Cmd composite literal this Cmd
+	// was built from, and is nil for a Cmd built by exec.Command. A field set in
+	// the literal satisfies its rule exactly as an assignment to it would: both
+	// are visible, and demanding the assignment form would be a style rule
+	// wearing a safety rule's failure message.
+	literal map[string]ast.Expr
+	// unkeyed marks a composite literal written positionally, whose fields this
+	// analysis cannot name. It satisfies nothing and says so.
+	unkeyed bool
+	// viaLiteral distinguishes a literal from a call even when the literal set
+	// no fields at all, which is the case that most needs the distinction.
+	viaLiteral bool
+}
+
+// setsInLiteral reports whether the composite literal this Cmd came from wrote
+// the field itself.
+func (sc subprocessCall) setsInLiteral(field string) bool {
+	_, ok := sc.literal[field]
+	return ok
 }
 
 // subprocessCalls returns every exec.Command/exec.CommandContext call in file.
@@ -296,13 +352,13 @@ type subprocessCall struct {
 // comments. parser.ImportsOnly, which the import guard in this package uses, is
 // not enough here — the call expressions and the assignments are the subject.
 func subprocessCalls(fset *token.FileSet, file *ast.File) []subprocessCall {
-	execName, ok := importName(file, "os/exec")
-	if !ok {
+	execPkg := resolveImport(file, "os/exec")
+	if !execPkg.imported() {
 		return nil
 	}
 
 	bodies := funcBodies(file)
-	bound := boundCmds(execName, file)
+	bound := boundCmds(execPkg, file)
 
 	var calls []subprocessCall
 	ast.Inspect(file, func(n ast.Node) bool {
@@ -310,7 +366,7 @@ func subprocessCalls(fset *token.FileSet, file *ast.File) []subprocessCall {
 		if !isCall {
 			return true
 		}
-		prog, isSpawn := spawnedProgram(execName, call)
+		prog, isSpawn := spawnedProgram(execPkg, call)
 		if !isSpawn {
 			return true
 		}
@@ -325,24 +381,126 @@ func subprocessCalls(fset *token.FileSet, file *ast.File) []subprocessCall {
 	return calls
 }
 
+// cmdLiterals returns every composite literal of exec.Cmd in file, whether it
+// was written as a value or had its address taken.
+//
+// The literal's own fields are carried along rather than resolved here, because
+// all three rules ask a different question of them: two ask whether the field is
+// present at all, and the third asks what it holds.
+func cmdLiterals(fset *token.FileSet, file *ast.File) []subprocessCall {
+	execPkg := resolveImport(file, "os/exec")
+	if !execPkg.imported() {
+		return nil
+	}
+
+	bodies := funcBodies(file)
+	bound := boundCmdLiterals(execPkg, file)
+
+	var out []subprocessCall
+	record := func(lit *ast.CompositeLit) {
+		fields, keyed := literalFields(lit)
+		out = append(out, subprocessCall{
+			name:       bound[lit],
+			body:       enclosingBody(bodies, lit),
+			line:       fset.Position(lit.Pos()).Line,
+			isGit:      literalRunsGit(fields),
+			literal:    fields,
+			unkeyed:    !keyed,
+			viaLiteral: true,
+		})
+	}
+
+	ast.Inspect(file, func(n ast.Node) bool {
+		lit, isLit := n.(*ast.CompositeLit)
+		if !isLit {
+			return true
+		}
+		if execPkg.isCmdType(lit.Type) {
+			record(lit)
+			return true
+		}
+		// A container of Cmds lets its elements elide the type, so the literal
+		// that builds the Cmd never names it. Those elements are reachable only
+		// from here: their own Type is nil, and a nil type matches nothing.
+		if execPkg.holdsCmdElements(lit.Type) {
+			for _, elt := range lit.Elts {
+				if kv, isKV := elt.(*ast.KeyValueExpr); isKV {
+					elt = kv.Value
+				}
+				if inner, isInner := elt.(*ast.CompositeLit); isInner && inner.Type == nil {
+					record(inner)
+				}
+			}
+		}
+		return true
+	})
+	return out
+}
+
+// literalFields returns the keyed fields of a composite literal, and whether it
+// was keyed at all.
+//
+// A positional literal reports false with no fields. exec.Cmd has more than a
+// dozen fields and go vet's composites check rejects an unkeyed literal of an
+// imported type, so this is not a shape anybody writes — but "the analysis
+// cannot name these fields" must resolve to "nothing is set", never to silence.
+func literalFields(lit *ast.CompositeLit) (map[string]ast.Expr, bool) {
+	fields := map[string]ast.Expr{}
+	for _, elt := range lit.Elts {
+		kv, ok := elt.(*ast.KeyValueExpr)
+		if !ok {
+			return nil, false
+		}
+		key, ok := kv.Key.(*ast.Ident)
+		if !ok {
+			return nil, false
+		}
+		fields[key.Name] = kv.Value
+	}
+	return fields, true
+}
+
+// literalRunsGit reports whether a Cmd literal visibly runs git, from Path or
+// from the first element of Args. As with a computed program name in a call,
+// this only picks the wording of the failure and never whether it fires.
+func literalRunsGit(fields map[string]ast.Expr) bool {
+	if path, ok := fields["Path"]; ok && isGitProgram(path) {
+		return true
+	}
+	args, ok := fields["Args"]
+	if !ok {
+		return false
+	}
+	lit, ok := args.(*ast.CompositeLit)
+	if !ok || len(lit.Elts) == 0 {
+		return false
+	}
+	return isGitProgram(lit.Elts[0])
+}
+
 // subprocessViolations reports every subprocess in file that fails any of the
 // three rules: Dir assigned, Env assigned, and the value assigned to Env not
 // being one the analysis can see is inherited.
 func subprocessViolations(fset *token.FileSet, file *ast.File) []violation {
-	calls := subprocessCalls(fset, file)
-	if len(calls) == 0 {
+	sites := append(subprocessCalls(fset, file), cmdLiterals(fset, file)...)
+	if len(sites) == 0 {
 		return nil
 	}
+	// Two traversals produced this, so the sites are in source order within each
+	// and not across them. Sorting is what makes a file holding both kinds report
+	// them the way a reader reads them.
+	sort.SliceStable(sites, func(i, j int) bool { return sites[i].line < sites[j].line })
+
 	waived := collectWaivers(fset, file)
 	// How this file spells os.Environ. Zero when os is not imported at all, in
 	// which case no Environ call can be reached and the value check simply has
 	// nothing to say. It never becomes a reason to skip the assignment checks.
-	osPkg := resolveOsImport(file)
+	osPkg := resolveImport(file, "os")
 
 	var out []violation
-	for _, sc := range calls {
+	for _, sc := range sites {
 		for _, rule := range subprocessRules {
-			if assignsField(fset, sc.body, sc.name, rule.field) {
+			if sc.setsInLiteral(rule.field) || assignsField(fset, sc.body, sc.name, rule.field) {
 				continue
 			}
 			reason, found := waived.lookup(rule.directive, sc.line)
@@ -360,7 +518,7 @@ func subprocessViolations(fset *token.FileSet, file *ast.File) []violation {
 		// The value check speaks only where Env was assigned; where it was
 		// not, the rule above has already said so and saying it twice would
 		// bury the one message that names the fix.
-		how, ambient := ambientEnvAssignment(fset, osPkg, sc.body, sc.name)
+		how, ambient := sc.ambientEnv(fset, osPkg)
 		if !ambient {
 			continue
 		}
@@ -378,47 +536,77 @@ func subprocessViolations(fset *token.FileSet, file *ast.File) []violation {
 	return out
 }
 
+// target is what the fix line calls this Cmd: the variable it was bound to, or
+// a stand-in when there is none to name.
+func (sc subprocessCall) target() string {
+	if sc.name != "" {
+		return sc.name
+	}
+	return "the command"
+}
+
+// subject names what broke the rule, in the words that tell a reader where to
+// look. A literal has to say so: "subprocess does not set Dir" sends someone
+// hunting for an exec.Command that is not there.
+func (sc subprocessCall) subject() string {
+	switch {
+	case sc.viaLiteral && sc.isGit:
+		return "git exec.Cmd literal"
+	case sc.viaLiteral:
+		return "exec.Cmd literal"
+	case sc.isGit:
+		return "git subprocess"
+	default:
+		return "subprocess"
+	}
+}
+
+// literalNote is the paragraph a composite literal gets and a call does not: how
+// to satisfy the rule from inside the literal, and — where the analysis could
+// not follow the literal — what it could not follow and why that is a failure
+// rather than a pass.
+func (sc subprocessCall) literalNote() string {
+	if !sc.viaLiteral {
+		return ""
+	}
+	note := "\nnote:  a Cmd built as a struct literal spawns what exec.Command spawns and inherits\n" +
+		"       what it inherits, so it is held to the same rules. Set the field inside the\n" +
+		"       literal — exec.Cmd{Dir: …, Env: …} — or on the variable it is bound to."
+	switch {
+	case sc.unkeyed:
+		note += "\n       This literal is positional, so its fields cannot be named here and none of\n" +
+			"       them counts. Write the field names."
+	case sc.name == "":
+		note += "\n       This literal is not bound to a single variable, so there is no later\n" +
+			"       assignment for this guard to follow: the field has to be in the literal."
+	}
+	return note
+}
+
 // message is the failure a developer reads. It names which rule broke, why that
 // rule exists, the assignment that satisfies it, and the escape hatch.
 func (sc subprocessCall) message(rule subprocessRule, waivedWithoutReason bool) string {
-	target := sc.name
-	if target == "" {
-		target = "the command"
-	}
-	subject := "subprocess"
-	if sc.isGit {
-		subject = "git subprocess"
-	}
-
-	head := fmt.Sprintf("%s does not set %s", subject, rule.field)
+	head := fmt.Sprintf("%s does not set %s", sc.subject(), rule.field)
 	if waivedWithoutReason {
 		head = fmt.Sprintf("%s does not set %s, and its %s waiver gives no reason",
-			subject, rule.field, rule.directive)
+			sc.subject(), rule.field, rule.directive)
 	}
 	g := rule.forProgram(sc.isGit)
 	return fmt.Sprintf("%s\n%s\nfix:   %s\nwaive: %s <reason>  on this line or the line above;\n"+
-		"       a waiver with no reason waives nothing, and %s does not waive %s\nsee:   %s and %s",
-		head, g.why, fmt.Sprintf(g.fix, target), rule.directive,
-		rule.directive, otherDirectives(rule.directive), groundRules, brief)
+		"       a waiver with no reason waives nothing, and %s does not waive %s%s\nsee:   %s and %s",
+		head, g.why, fmt.Sprintf(g.fix, sc.target()), rule.directive,
+		rule.directive, otherDirectives(rule.directive), sc.literalNote(), groundRules, brief)
 }
 
 // ambientMessage is the failure for the value check. how is what the analysis
 // saw, quoted back, because "your Env is inherited" is unactionable next to
 // "your Env is os.Environ()".
 func (sc subprocessCall) ambientMessage(how string, waivedWithoutReason bool) string {
-	target := sc.name
-	if target == "" {
-		target = "the command"
-	}
-	subject := "subprocess"
-	if sc.isGit {
-		subject = "git subprocess"
-	}
-
-	head := fmt.Sprintf("%s assigns Env the inherited environment: %s.Env is %s", subject, target, how)
+	target := sc.target()
+	head := fmt.Sprintf("%s assigns Env the inherited environment: %s.Env is %s", sc.subject(), target, how)
 	if waivedWithoutReason {
 		head = fmt.Sprintf("%s assigns Env the inherited environment (%s.Env is %s), and its %s "+
-			"waiver gives no reason", subject, target, how, ambientEnvRule.directive)
+			"waiver gives no reason", sc.subject(), target, how, ambientEnvRule.directive)
 	}
 	g := ambientEnvRule.general
 	if sc.isGit {
@@ -428,10 +616,10 @@ func (sc subprocessCall) ambientMessage(how string, waivedWithoutReason bool) st
 		"       a waiver with no reason waives nothing, and %s does not waive %s\n"+
 		"scope: this check reads only os.Environ(), an append over one, nil, and a local\n"+
 		"       variable assigned one of those. It cannot see through a helper, and it does\n"+
-		"       not claim to — that is why an environment is built in a named function.\n"+
+		"       not claim to — that is why an environment is built in a named function.%s\n"+
 		"see:   %s and %s",
 		head, g.why, fmt.Sprintf(g.fix, target), ambientEnvRule.directive,
-		ambientEnvRule.directive, otherDirectives(ambientEnvRule.directive), groundRules, brief)
+		ambientEnvRule.directive, otherDirectives(ambientEnvRule.directive), sc.literalNote(), groundRules, brief)
 }
 
 // otherDirectives names the waivers this one does not imply.
@@ -452,18 +640,14 @@ func otherDirectives(directive string) string {
 // every spawn is in scope whether or not the analysis can read what it runs.
 // internal/syntax and internal/corpus both compute the program name, and before
 // KAN-837 both were invisible here.
-func spawnedProgram(execName string, call *ast.CallExpr) (ast.Expr, bool) {
-	sel, ok := call.Fun.(*ast.SelectorExpr)
+func spawnedProgram(execPkg pkgQualifier, call *ast.CallExpr) (ast.Expr, bool) {
+	fn, ok := execPkg.reference(call.Fun)
 	if !ok {
-		return nil, false
-	}
-	pkg, ok := sel.X.(*ast.Ident)
-	if !ok || pkg.Name != execName {
 		return nil, false
 	}
 
 	var arg int
-	switch sel.Sel.Name {
+	switch fn {
 	case "Command":
 		arg = 0
 	case "CommandContext":
@@ -497,21 +681,48 @@ func isGitProgram(prog ast.Expr) bool {
 // call that is not bound to a single identifier — used inline, or handed
 // straight to a helper — has no entry, so nothing can be found assigning its
 // fields and it needs a waiver.
-func boundCmds(execName string, file *ast.File) map[*ast.CallExpr]string {
+func boundCmds(execPkg pkgQualifier, file *ast.File) map[*ast.CallExpr]string {
 	bound := map[*ast.CallExpr]string{}
+	walkSingleBindings(file, func(name string, rhs ast.Expr) {
+		call, ok := rhs.(*ast.CallExpr)
+		if !ok {
+			return
+		}
+		if _, isSpawn := spawnedProgram(execPkg, call); isSpawn {
+			bound[call] = name
+		}
+	})
+	return bound
+}
+
+// boundCmdLiterals maps each exec.Cmd composite literal to the local variable it
+// was assigned to, whether it was written as a value or taken the address of.
+//
+// A literal with no entry — used inline, handed straight to a helper, or bound
+// as one of several values in a multiple assignment — has nothing an assignment
+// can be looked up against, so the only fields it can satisfy the rules with are
+// the ones written inside the literal itself. That is the fail-closed direction
+// and it is the same one boundCmds takes.
+func boundCmdLiterals(execPkg pkgQualifier, file *ast.File) map[*ast.CompositeLit]string {
+	bound := map[*ast.CompositeLit]string{}
+	walkSingleBindings(file, func(name string, rhs ast.Expr) {
+		if lit, ok := cmdCompositeLit(execPkg, rhs); ok {
+			bound[lit] = name
+		}
+	})
+	return bound
+}
+
+// walkSingleBindings calls visit for every `x = <expr>`, `x := <expr>` and
+// `var x = <expr>` in file that binds exactly one name to exactly one
+// expression. Anything wider than that is not followed, by design.
+func walkSingleBindings(file *ast.File, visit func(name string, rhs ast.Expr)) {
 	record := func(lhs, rhs []ast.Expr) {
 		if len(lhs) != 1 || len(rhs) != 1 {
 			return
 		}
-		call, ok := rhs[0].(*ast.CallExpr)
-		if !ok {
-			return
-		}
-		if _, isSpawn := spawnedProgram(execName, call); !isSpawn {
-			return
-		}
 		if id, ok := lhs[0].(*ast.Ident); ok {
-			bound[call] = id.Name
+			visit(id.Name, rhs[0])
 		}
 	}
 	ast.Inspect(file, func(n ast.Node) bool {
@@ -527,7 +738,19 @@ func boundCmds(execName string, file *ast.File) map[*ast.CallExpr]string {
 		}
 		return true
 	})
-	return bound
+}
+
+// cmdCompositeLit unwraps expr to an exec.Cmd composite literal, seeing through
+// the address-of that `&exec.Cmd{…}` puts in front of it.
+func cmdCompositeLit(execPkg pkgQualifier, expr ast.Expr) (*ast.CompositeLit, bool) {
+	if unary, ok := expr.(*ast.UnaryExpr); ok && unary.Op == token.AND {
+		expr = unary.X
+	}
+	lit, ok := expr.(*ast.CompositeLit)
+	if !ok || !execPkg.isCmdType(lit.Type) {
+		return nil, false
+	}
+	return lit, true
 }
 
 // fieldAssign is one `<something>.<field> = <rhs>`.
@@ -592,6 +815,23 @@ func assignsField(fset *token.FileSet, body *ast.BlockStmt, name, field string) 
 	return false
 }
 
+// ambientEnv reports whether this Cmd's Env is one the analysis can see is this
+// process's own environment, wherever it was written: in the composite literal
+// that built the Cmd, or in an assignment to the variable holding it.
+//
+// The literal is read first because it is the one a Cmd built as a literal
+// usually uses, and because `&exec.Cmd{Env: os.Environ()}` is precisely the
+// shape KAN-853 stopped being invisible — it satisfies both assignment rules
+// from inside the literal while inheriting everything.
+func (sc subprocessCall) ambientEnv(fset *token.FileSet, osPkg pkgQualifier) (string, bool) {
+	if env, ok := sc.literal[ambientEnvRule.field]; ok {
+		if how, ambient := ambientEnvExpr(osPkg, sc.body, env, map[string]bool{}); ambient {
+			return how, true
+		}
+	}
+	return ambientEnvAssignment(fset, osPkg, sc.body, sc.name)
+}
+
 // ambientEnvAssignment reports whether the function assigns name.Env something
 // the analysis can see is this process's own environment, and how it saw it.
 //
@@ -599,7 +839,7 @@ func assignsField(fset *token.FileSet, body *ast.BlockStmt, name, field string) 
 // bias of the rest of this file: a guard that has to be right about ordering is
 // a guard that is wrong about the interesting cases, and ordering is visible in
 // review where a wholesale inherit is not.
-func ambientEnvAssignment(fset *token.FileSet, osPkg osImport, body *ast.BlockStmt, name string) (string, bool) {
+func ambientEnvAssignment(fset *token.FileSet, osPkg pkgQualifier, body *ast.BlockStmt, name string) (string, bool) {
 	if body == nil || name == "" {
 		return "", false
 	}
@@ -614,59 +854,116 @@ func ambientEnvAssignment(fset *token.FileSet, osPkg osImport, body *ast.BlockSt
 	return "", false
 }
 
-// osImport is how a file spells package os, which decides what an Environ call
-// looks like in its AST.
+// pkgQualifier is how one file spells one imported package, which decides what
+// a reference into that package looks like in its AST. os and os/exec both need
+// it: the value check has to recognise os.Environ, and the construction check
+// (KAN-853) has to recognise exec.Cmd.
 //
 // The dot-import case is carried rather than dropped. It is rare and a linter
 // would object to it, but "the guard silently stops seeing os.Environ if
-// somebody dot-imports os" is exactly the shape of hole this card exists to
+// somebody dot-imports os" is exactly the shape of hole these cards exist to
 // close, and it costs one field to not have.
-type osImport struct {
-	// name qualifies the call (os.Environ). Empty when os is dot-imported,
-	// blank-imported or absent.
+type pkgQualifier struct {
+	// name qualifies the reference (os.Environ, exec.Cmd). Empty when the
+	// package is dot-imported, blank-imported or absent.
 	name string
-	// dot is true when os is dot-imported, so Environ() is unqualified.
+	// dot is true when the package is dot-imported, so Environ() and Cmd{} are
+	// unqualified.
 	dot bool
 }
 
-func resolveOsImport(file *ast.File) osImport {
+// imported reports whether the package is reachable in this file at all.
+func (q pkgQualifier) imported() bool { return q.name != "" || q.dot }
+
+// resolveImport returns how file spells the import of path. The last import
+// path that matches wins, which cannot happen in compiling Go.
+func resolveImport(file *ast.File, path string) pkgQualifier {
 	for _, spec := range file.Imports {
 		p, err := strconv.Unquote(spec.Path.Value)
-		if err != nil || p != "os" {
+		if err != nil || p != path {
 			continue
 		}
 		switch {
 		case spec.Name == nil:
-			return osImport{name: "os"}
+			return pkgQualifier{name: defaultPkgName(path)}
 		case spec.Name.Name == ".":
-			return osImport{dot: true}
+			return pkgQualifier{dot: true}
 		case spec.Name.Name == "_":
-			return osImport{}
+			return pkgQualifier{}
 		default:
-			return osImport{name: spec.Name.Name}
+			return pkgQualifier{name: spec.Name.Name}
 		}
 	}
-	return osImport{}
+	return pkgQualifier{}
+}
+
+// defaultPkgName is the identifier an unaliased import binds. It is the last
+// path element for every package this guard resolves, which is checked rather
+// than assumed by the callers passing only "os" and "os/exec".
+func defaultPkgName(path string) string {
+	return path[strings.LastIndex(path, "/")+1:]
+}
+
+// reference reports whether expr names something in this package, and which
+// name it is. It is the one place the dot-import and alias spellings are
+// decided, so every check that reaches into a package — os.Environ, exec.Command,
+// exec.Cmd — reads the same rules rather than each re-deriving them.
+func (q pkgQualifier) reference(expr ast.Expr) (string, bool) {
+	switch e := expr.(type) {
+	case *ast.Ident:
+		if q.dot {
+			return e.Name, true
+		}
+	case *ast.SelectorExpr:
+		if q.name == "" {
+			return "", false
+		}
+		if pkg, isIdent := e.X.(*ast.Ident); isIdent && pkg.Name == q.name {
+			return e.Sel.Name, true
+		}
+	}
+	return "", false
 }
 
 // isEnvironCall reports whether call is os.Environ() as this file spells it.
-func (o osImport) isEnvironCall(call *ast.CallExpr) (string, bool) {
-	if o.dot {
-		if id, ok := call.Fun.(*ast.Ident); ok && id.Name == "Environ" {
-			return "Environ() from a dot-imported os", true
-		}
-	}
-	if o.name == "" {
+func (q pkgQualifier) isEnvironCall(call *ast.CallExpr) (string, bool) {
+	name, ok := q.reference(call.Fun)
+	if !ok || name != "Environ" {
 		return "", false
 	}
-	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok || sel.Sel.Name != "Environ" {
-		return "", false
+	if q.dot {
+		return "Environ() from a dot-imported os", true
 	}
-	if pkg, isIdent := sel.X.(*ast.Ident); isIdent && pkg.Name == o.name {
-		return o.name + ".Environ()", true
+	return q.name + ".Environ()", true
+}
+
+// isCmdType reports whether expr is the type exec.Cmd as this file spells it.
+func (q pkgQualifier) isCmdType(expr ast.Expr) bool {
+	name, ok := q.reference(expr)
+	return ok && name == "Cmd"
+}
+
+// holdsCmdElements reports whether a composite literal of type t has exec.Cmd
+// elements, so the literals inside it are Cmds even though Go lets their type be
+// elided: `[]*exec.Cmd{{Path: p}}` builds a Cmd and never writes exec.Cmd in
+// front of the brace that does it.
+func (q pkgQualifier) holdsCmdElements(t ast.Expr) bool {
+	switch e := t.(type) {
+	case *ast.ArrayType:
+		return q.isCmdTypeOrPointer(e.Elt)
+	case *ast.MapType:
+		return q.isCmdTypeOrPointer(e.Value)
 	}
-	return "", false
+	return false
+}
+
+// isCmdTypeOrPointer accepts exec.Cmd and *exec.Cmd alike. Which one a container
+// holds changes nothing about the rules its elements are bound by.
+func (q pkgQualifier) isCmdTypeOrPointer(t ast.Expr) bool {
+	if star, ok := t.(*ast.StarExpr); ok {
+		t = star.X
+	}
+	return q.isCmdType(t)
 }
 
 // ambientEnvExpr decides the four forms described at the top of this file, and
@@ -674,7 +971,7 @@ func (o osImport) isEnvironCall(call *ast.CallExpr) (string, bool) {
 //
 // seen breaks the cycle a self-referential assignment would otherwise cause
 // (`env = append(env, …)`), and bounds the walk.
-func ambientEnvExpr(osPkg osImport, body *ast.BlockStmt, expr ast.Expr, seen map[string]bool) (string, bool) {
+func ambientEnvExpr(osPkg pkgQualifier, body *ast.BlockStmt, expr ast.Expr, seen map[string]bool) (string, bool) {
 	switch e := expr.(type) {
 	case *ast.Ident:
 		// The untyped nil. os/exec: "If Env is nil, the new process uses the
@@ -717,6 +1014,11 @@ func ambientEnvExpr(osPkg osImport, body *ast.BlockStmt, expr ast.Expr, seen map
 // assignmentsTo returns every expression assigned to the local variable name
 // anywhere in body, by := , by = or by a var declaration.
 func assignmentsTo(body *ast.BlockStmt, name string) []ast.Expr {
+	// A package-level Cmd has no enclosing function, and ast.Inspect over a typed
+	// nil panics rather than doing nothing.
+	if body == nil {
+		return nil
+	}
 	var out []ast.Expr
 	record := func(lhs, rhs []ast.Expr) {
 		if len(lhs) != len(rhs) {
@@ -833,24 +1135,6 @@ func collectWaivers(fset *token.FileSet, file *ast.File) waiverSet {
 func looksLikeWaiver(text string) bool {
 	stripped := strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(text), "/*"))
 	return strings.HasPrefix(stripped, directiveStem)
-}
-
-// importName returns the identifier path is bound to in file.
-func importName(file *ast.File, path string) (string, bool) {
-	for _, spec := range file.Imports {
-		p, err := strconv.Unquote(spec.Path.Value)
-		if err != nil || p != path {
-			continue
-		}
-		if spec.Name != nil {
-			if spec.Name.Name == "_" || spec.Name.Name == "." {
-				return "", false
-			}
-			return spec.Name.Name, true
-		}
-		return "exec", true
-	}
-	return "", false
 }
 
 // goFile is one parsed file from the tree walk, with the bytes it was parsed
@@ -1394,6 +1678,537 @@ func TestSubprocessGuardCatchesViolations(t *testing.T) {
 			}
 			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
 				t.Errorf("reported %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCmdLiteralGuardCatchesViolations is the guard on the half of the guard
+// KAN-853 added. A composite literal of exec.Cmd is the most direct way to build
+// a subprocess and, until this card, the one way past every check in this file:
+// a &exec.Cmd{} with no Dir and an inherited Env passed all three rules because
+// none of them was looking.
+//
+// The table is the call table's shape deliberately, case for case where a case
+// exists on both sides, because the claim being made is that the two
+// constructions are held to the same rules and not to similar ones.
+func TestCmdLiteralGuardCatchesViolations(t *testing.T) {
+	const preamble = "package p\n\nimport (\n\t\"os\"\n\t\"os/exec\"\n)\n\n" +
+		"func f(dir string, env []string, prog string) {\n"
+
+	tests := []struct {
+		name string
+		body string
+		// src replaces preamble+body when a case needs a different import
+		// block, which is how the aliased and dot-imported spellings are
+		// reached.
+		src  string
+		want []string
+	}{
+		{
+			name: "a bare Cmd literal sets neither, and is the hole this card closed",
+			body: "\tcmd := &exec.Cmd{Path: prog}\n\t_ = cmd.Run()\n",
+			want: []string{"Dir", "Env"},
+		},
+		{
+			name: "fields written in the literal satisfy both rules",
+			body: "\tcmd := &exec.Cmd{Path: prog, Dir: dir, Env: env}\n\t_ = cmd.Run()\n",
+			want: nil,
+		},
+		{
+			name: "Dir in the literal and Env nowhere is the shape that bit, rebuilt",
+			body: "\tcmd := &exec.Cmd{Path: prog, Dir: dir}\n\t_ = cmd.Run()\n",
+			want: []string{"Env"},
+		},
+		{
+			name: "Env in the literal and Dir nowhere",
+			body: "\tcmd := &exec.Cmd{Path: prog, Env: env}\n\t_ = cmd.Run()\n",
+			want: []string{"Dir"},
+		},
+		{
+			name: "a value literal is a Cmd exactly as a pointer one is",
+			body: "\tcmd := exec.Cmd{Path: prog}\n\t_ = cmd.Run()\n",
+			want: []string{"Dir", "Env"},
+		},
+		{
+			name: "fields assigned after the literal count",
+			body: "\tcmd := &exec.Cmd{Path: prog}\n\tcmd.Dir = dir\n\tcmd.Env = env\n\t_ = cmd.Run()\n",
+			want: nil,
+		},
+		{
+			name: "the literal and the assignments may split the work between them",
+			body: "\tcmd := &exec.Cmd{Path: prog, Dir: dir}\n\tcmd.Env = env\n\t_ = cmd.Run()\n",
+			want: nil,
+		},
+		{
+			name: "an inline literal has no variable to follow and fails closed",
+			body: "\t_ = (&exec.Cmd{Path: prog}).Run()\n",
+			want: []string{"Dir", "Env"},
+		},
+		{
+			name: "an inline literal that sets both is complete where it stands",
+			body: "\t_ = (&exec.Cmd{Path: prog, Dir: dir, Env: env}).Run()\n",
+			want: nil,
+		},
+		{
+			name: "a literal handed straight to a helper fails closed",
+			body: "\tconfigure(&exec.Cmd{Path: prog})\n",
+			want: []string{"Dir", "Env"},
+		},
+		{
+			name: "a literal bound as one of several values is not followed",
+			body: "\tcmd, err := &exec.Cmd{Path: prog}, error(nil)\n\tcmd.Dir = dir\n\tcmd.Env = env\n\t_ = err\n",
+			want: []string{"Dir", "Env"},
+		},
+		{
+			name: "a positional literal names no fields, so it satisfies none",
+			body: "\tcmd := &exec.Cmd{prog}\n\t_ = cmd.Run()\n",
+			want: []string{"Dir", "Env"},
+		},
+		{
+			name: "a literal of another exec type is not this guard's business",
+			body: "\t_ = exec.Error{Name: prog}\n",
+			want: nil,
+		},
+
+		// --- the elided type, which writes no exec.Cmd in front of its brace ---
+		{
+			name: "a Cmd inside a slice of Cmds elides its type and is still a Cmd",
+			body: "\tcmds := []*exec.Cmd{{Path: prog}}\n\t_ = cmds\n",
+			want: []string{"Dir", "Env"},
+		},
+		{
+			name: "an elided Cmd that sets both fields is clean",
+			body: "\tcmds := []*exec.Cmd{{Path: prog, Dir: dir, Env: env}}\n\t_ = cmds\n",
+			want: nil,
+		},
+		{
+			name: "a slice of values rather than pointers elides the same way",
+			body: "\tcmds := []exec.Cmd{{Path: prog}}\n\t_ = cmds\n",
+			want: []string{"Dir", "Env"},
+		},
+		{
+			name: "a map of Cmds elides the type behind a key",
+			body: "\tcmds := map[string]*exec.Cmd{\"build\": {Path: prog}}\n\t_ = cmds\n",
+			want: []string{"Dir", "Env"},
+		},
+		{
+			name: "an elided Cmd is read for its Env value too",
+			body: "\tcmds := []*exec.Cmd{{Path: prog, Dir: dir, Env: os.Environ()}}\n\t_ = cmds\n",
+			want: []string{"Env value"},
+		},
+		{
+			name: "an empty container of Cmds builds none",
+			body: "\tcmds := []*exec.Cmd{}\n\t_ = cmds\n",
+			want: nil,
+		},
+		{
+			name: "a container of something else does not lend its elements a Cmd type",
+			body: "\tspecs := []struct{ Path string }{{Path: prog}}\n\t_ = specs\n",
+			want: nil,
+		},
+		{
+			name: "a signature naming *exec.Cmd builds nothing",
+			src: "package p\n\nimport \"os/exec\"\n\nfunc newCmd(prog string) *exec.Cmd {\n" +
+				"\treturn nil\n}\n\nfunc take(cmd *exec.Cmd) {}\n",
+			want: nil,
+		},
+		{
+			name: "a var declaration of a Cmd type is not a composite literal",
+			body: "\tvar cmd exec.Cmd\n\t_ = cmd\n",
+			want: nil,
+		},
+
+		// --- the value check, reached through the literal --------------------
+		{
+			name: "os.Environ in the literal satisfies the assignment rule and must not satisfy the value rule",
+			body: "\tcmd := &exec.Cmd{Path: prog, Dir: dir, Env: os.Environ()}\n\t_ = cmd.Run()\n",
+			want: []string{"Env value"},
+		},
+		{
+			name: "appending to os.Environ in the literal is still os.Environ",
+			body: "\tcmd := &exec.Cmd{Path: prog, Dir: dir, Env: append(os.Environ(), \"GOFLAGS=\")}\n\t_ = cmd.Run()\n",
+			want: []string{"Env value"},
+		},
+		{
+			name: "an explicit nil Env in the literal reads as a decision and is not one",
+			body: "\tcmd := &exec.Cmd{Path: prog, Dir: dir, Env: nil}\n\t_ = cmd.Run()\n",
+			want: []string{"Env value"},
+		},
+		{
+			name: "a local variable holding os.Environ is followed into the literal",
+			body: "\tinherited := os.Environ()\n\tcmd := &exec.Cmd{Path: prog, Dir: dir, Env: inherited}\n\t_ = cmd.Run()\n",
+			want: []string{"Env value"},
+		},
+		{
+			name: "an environment from a named builder is not decided here, which is the funnel",
+			body: "\tcmd := &exec.Cmd{Path: prog, Dir: dir, Env: baseEnv()}\n\t_ = cmd.Run()\n",
+			want: nil,
+		},
+		{
+			name: "an inline literal is read for its Env value too",
+			body: "\t_ = (&exec.Cmd{Path: prog, Dir: dir, Env: os.Environ()}).Run()\n",
+			want: []string{"Env value"},
+		},
+		{
+			name: "the value check does not replace the assignment checks on a literal either",
+			body: "\tcmd := &exec.Cmd{Path: prog, Env: os.Environ()}\n\t_ = cmd.Run()\n",
+			want: []string{"Dir", "Env value"},
+		},
+
+		// --- the waiver vocabulary, unchanged ---------------------------------
+		{
+			name: "waivers with reasons are honoured on a literal",
+			body: "\t//kopicode:allow-nodir: kills a pid, so no directory is the right one\n" +
+				"\t//kopicode:allow-noenv: needs the ambient PATH to find the binary at all\n" +
+				"\tcmd := &exec.Cmd{Path: prog}\n\t_ = cmd.Run()\n",
+			want: nil,
+		},
+		{
+			name: "waiving nodir on a literal does not waive noenv",
+			body: "\t//kopicode:allow-nodir: kills a pid, so no directory is the right one\n" +
+				"\tcmd := &exec.Cmd{Path: prog}\n\t_ = cmd.Run()\n",
+			want: []string{"Env"},
+		},
+		{
+			name: "a waiver without a reason does not waive a literal either",
+			body: "\t//kopicode:allow-nodir:\n\tcmd := &exec.Cmd{Path: prog, Env: env}\n\t_ = cmd.Run()\n",
+			want: []string{"Dir"},
+		},
+		{
+			name: "the ambientenv waiver reaches an Env written in the literal",
+			body: "\t//kopicode:allow-ambientenv: this test is about the ambient toolchain itself\n" +
+				"\tcmd := &exec.Cmd{Path: prog, Dir: dir, Env: os.Environ()}\n\t_ = cmd.Run()\n",
+			want: nil,
+		},
+		{
+			name: "noenv does not waive ambientenv on a literal",
+			body: "\t//kopicode:allow-noenv: a reason that is about the other rule entirely\n" +
+				"\tcmd := &exec.Cmd{Path: prog, Dir: dir, Env: os.Environ()}\n\t_ = cmd.Run()\n",
+			want: []string{"Env value"},
+		},
+
+		// --- how the file spells os/exec ---------------------------------------
+		{
+			name: "an aliased os/exec import still spells the literal Cmd",
+			src: "package p\n\nimport (\n\t\"os\"\n\tosexec \"os/exec\"\n)\n\nfunc f(dir string, prog string) {\n" +
+				"\tcmd := &osexec.Cmd{Path: prog, Dir: dir, Env: os.Environ()}\n\t_ = cmd.Run()\n}\n",
+			want: []string{"Env value"},
+		},
+		{
+			name: "a dot-imported os/exec makes the literal unqualified, and it is still a Cmd",
+			src: "package p\n\nimport (\n\t. \"os/exec\"\n)\n\nfunc f(prog string) {\n" +
+				"\tcmd := &Cmd{Path: prog}\n\t_ = cmd.Run()\n}\n",
+			want: []string{"Dir", "Env"},
+		},
+		{
+			name: "a blank-imported os/exec cannot name a Cmd, so there is nothing to find",
+			src: "package p\n\nimport (\n\t_ \"os/exec\"\n)\n\ntype Cmd struct{ Path string }\n\n" +
+				"func f(prog string) {\n\tcmd := &Cmd{Path: prog}\n\t_ = cmd\n}\n",
+			want: nil,
+		},
+
+		// --- calls and literals in one file ------------------------------------
+		//
+		// Two traversals produce these, so without an ordering step the calls
+		// would all report before any literal however the source reads. The
+		// labels here differ on purpose: swap the sort out and this case reports
+		// them the other way round.
+		{
+			name: "a literal and a call report in source order",
+			body: "\tlit := &exec.Cmd{Path: prog, Dir: dir, Env: os.Environ()}\n" +
+				"\tcall := exec.Command(prog)\n\tcall.Env = env\n\t_ = lit.Run()\n\t_ = call.Run()\n",
+			want: []string{"Env value", "Dir"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			src := tc.src
+			if src == "" {
+				src = preamble + tc.body + "}\n"
+			}
+			fset := token.NewFileSet()
+			file, err := parser.ParseFile(fset, "p.go", src, parser.ParseComments)
+			if err != nil {
+				t.Fatalf("parsing fixture: %v", err)
+			}
+
+			var got []string
+			for _, v := range subprocessViolations(fset, file) {
+				got = append(got, v.label)
+			}
+			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
+				t.Errorf("reported %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// cmdLiteralControlSrc is the source [TestCmdLiteralAnalysisSeesEveryLiteral]
+// reads two ways. It lives outside the test because the point is that both
+// readings get the same bytes.
+//
+// Every literal in it is compliant. The control is about whether the analysis
+// *sees* a literal, and a control whose fixture also has to be a violation
+// conflates two failures into one red.
+const cmdLiteralControlSrc = `package p
+
+import (
+	"os"
+	"os/exec"
+)
+
+func f(dir string, env []string, prog string) {
+	a := &exec.Cmd{Path: prog, Dir: dir, Env: env}
+	b := exec.Cmd{Path: prog, Dir: dir, Env: env}
+	_ = (&exec.Cmd{Path: prog, Dir: dir, Env: env}).Run()
+	c := &exec.Cmd{Path: prog}
+	c.Dir = dir
+	c.Env = env
+	_ = os.Getpid()
+	_, _, _ = a, b, c
+}
+`
+
+// TestCmdLiteralAnalysisSeesEveryLiteral is the positive control for the walk
+// KAN-853 added, and it is built differently from the other two on purpose.
+//
+// The controls above can demand a non-zero count from the repository, because a
+// repository with no exec.Command in it would be the surprising thing. This one
+// cannot: there is no exec.Cmd literal in the tree today and the hoped-for
+// future is that there never is one. A control that asserts nothing whenever the
+// tree is clean is a control that goes silent exactly when the guard does, so
+// this one carries its own source with literals in it, and the count that must
+// be non-zero is over that.
+//
+// The repository is then walked as well, holding the same equality: a literal
+// go/scanner finds and the AST walk does not is a hole, whether or not one
+// exists today.
+func TestCmdLiteralAnalysisSeesEveryLiteral(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "control.go", cmdLiteralControlSrc, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parsing the control source: %v", err)
+	}
+
+	byAST := map[int]bool{}
+	for _, sc := range cmdLiterals(fset, file) {
+		byAST[sc.line] = true
+	}
+	byScanner := map[int]bool{}
+	for _, line := range scannedCmdLiteralLines("control.go", []byte(cmdLiteralControlSrc)) {
+		byScanner[line] = true
+	}
+
+	if len(byScanner) == 0 {
+		t.Fatal("the token scan found no exec.Cmd literal in this test's own control source, " +
+			"so the reading it is meant to check the AST walk against proved nothing")
+	}
+	for line := range byScanner {
+		if !byAST[line] {
+			t.Errorf("control.go:%d: go/scanner sees an exec.Cmd literal here and cmdLiterals "+
+				"does not. A Cmd this walk cannot see is a Cmd held to none of the three rules, "+
+				"which is the state KAN-853 found the guard in.", line)
+		}
+	}
+	for line := range byAST {
+		if !byScanner[line] {
+			t.Errorf("control.go:%d: cmdLiterals reports an exec.Cmd literal here and the token "+
+				"scan finds none; the two readings must agree.", line)
+		}
+	}
+
+	walkGoFiles(t, func(g goFile) {
+		found := map[int]bool{}
+		for _, sc := range cmdLiterals(g.fset, g.file) {
+			found[sc.line] = true
+		}
+		for _, line := range scannedCmdLiteralLines(g.rel, g.src) {
+			if !found[line] {
+				t.Errorf("%s:%d: go/scanner sees an exec.Cmd literal here and the guard's AST "+
+					"analysis does not.\nEither the traversal in cmdLiterals has stopped finding "+
+					"them, or this literal is written in a shape it cannot follow, which it must "+
+					"not silently allow.\nsee:   %s", g.rel, line, groundRules)
+			}
+		}
+	})
+}
+
+// typeContextTokens are the tokens after which `exec.Cmd {` is a type followed
+// by an unrelated brace rather than a composite literal.
+//
+// This list is not a guess. `func newShellCmd(command string) *exec.Cmd {` in
+// internal/tools is the shape that made it necessary: a return type and the
+// opening brace of the function body, three tokens apart from a literal and
+// identical to one in a four-token window. `)` covers the same signature written
+// without the pointer, `]` covers `[]exec.Cmd{…}` — a slice literal, whose type
+// is not exec.Cmd — and an identifier covers a declaration such as
+// `var cmd exec.Cmd`.
+var typeContextTokens = map[token.Token]bool{
+	token.MUL:    true,
+	token.RPAREN: true,
+	token.RBRACK: true,
+	token.IDENT:  true,
+	token.CHAN:   true,
+	token.ARROW:  true,
+}
+
+// scannedCmdLiteralLines reports the line of every `exec.Cmd{` in src that is a
+// composite literal, read as a token stream.
+//
+// As with the call scan, it keys on the literal package identifier, so an
+// aliased or dot-imported os/exec is missed here and caught by the AST side.
+// That is the safe direction for a control whose job is to prove the AST side
+// still sees things — and so is the elided form inside `[]*exec.Cmd{{…}}`, which
+// puts no `exec.Cmd` in front of its brace at all and which the AST side
+// resolves from the enclosing literal's element type.
+func scannedCmdLiteralLines(name string, src []byte) []int {
+	var fset token.FileSet
+	f := fset.AddFile(name, -1, len(src))
+
+	var s scanner.Scanner
+	s.Init(f, src, nil, 0)
+
+	// A five-token window: whatever came before, then exec, '.', Cmd, '{'.
+	type tok struct {
+		tok token.Token
+		lit string
+		pos token.Pos
+	}
+	var window [5]tok
+
+	var lines []int
+	for {
+		pos, t, lit := s.Scan()
+		if t == token.EOF {
+			break
+		}
+		window[0], window[1], window[2], window[3], window[4] =
+			window[1], window[2], window[3], window[4], tok{tok: t, lit: lit, pos: pos}
+
+		if window[4].tok != token.LBRACE ||
+			window[1].tok != token.IDENT || window[1].lit != "exec" ||
+			window[2].tok != token.PERIOD ||
+			window[3].tok != token.IDENT || window[3].lit != "Cmd" {
+			continue
+		}
+		if typeContextTokens[window[0].tok] {
+			continue
+		}
+		lines = append(lines, fset.Position(window[1].pos).Line)
+	}
+	return lines
+}
+
+// TestCmdLiteralMessageExplainsItself holds the literal's failure to the same
+// standard as the call's, plus the two things only it has to say: that the Cmd
+// in question is a struct literal, and — where the analysis could not follow the
+// literal — what it could not follow. A reader who is told "subprocess does not
+// set Dir" and has no exec.Command on that line learns nothing.
+func TestCmdLiteralMessageExplainsItself(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want []string
+	}{
+		{
+			name: "a git literal still names the incident",
+			body: "\tcmd := &exec.Cmd{Args: []string{\"git\", \"status\"}}\n\t_ = cmd.Run()\n",
+			want: []string{"git exec.Cmd literal", "core.bare=true", "GIT_DIR", "note:",
+				groundRules, brief, "waive:"},
+		},
+		{
+			name: "a non-git literal names what an inherited environment does",
+			body: "\tcmd := &exec.Cmd{Path: \"/usr/bin/go\"}\n\t_ = cmd.Run()\n",
+			want: []string{"exec.Cmd literal", "GOFLAGS", "PATH", "note:", groundRules, brief},
+		},
+		{
+			name: "an unbound literal says there is nothing to follow",
+			body: "\t_ = (&exec.Cmd{Path: prog}).Run()\n",
+			want: []string{"exec.Cmd literal", "not bound to a single variable"},
+		},
+		{
+			name: "a positional literal says why none of its fields counts",
+			body: "\tcmd := &exec.Cmd{prog}\n\t_ = cmd.Run()\n",
+			want: []string{"exec.Cmd literal", "positional", "Write the field names"},
+		},
+		{
+			name: "the value check on a literal keeps its scope paragraph and gains the note",
+			body: "\tcmd := &exec.Cmd{Path: prog, Dir: dir, Env: os.Environ()}\n\t_ = cmd.Run()\n",
+			want: []string{"exec.Cmd literal", "os.Environ()", "scope:", "note:",
+				allowAmbientEnv, allowNoDir, allowNoEnv},
+		},
+	}
+
+	const preamble = "package p\n\nimport (\n\t\"os\"\n\t\"os/exec\"\n)\n\n" +
+		"func f(dir string, prog string) {\n"
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fset := token.NewFileSet()
+			file, err := parser.ParseFile(fset, "p.go", preamble+tc.body+"}\n", parser.ParseComments)
+			if err != nil {
+				t.Fatalf("parsing fixture: %v", err)
+			}
+
+			violations := subprocessViolations(fset, file)
+			if len(violations) == 0 {
+				t.Fatal("the fixture produced no violation, so there is no message to read")
+			}
+			var joined string
+			for _, v := range violations {
+				joined += v.msg + "\n"
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(joined, want) {
+					t.Errorf("the failures do not mention %q:\n%s", want, joined)
+				}
+			}
+		})
+	}
+}
+
+// TestDefaultPkgNameMatchesTheImportsThisGuardResolves checks the assumption
+// [defaultPkgName] is built on, rather than leaving it in a doc comment. It is
+// the last path element for os and os/exec, and it is not for every package —
+// so this holds it to the two paths the guard actually passes it, and would go
+// red if a third arrived whose package name is not its last element.
+func TestDefaultPkgNameMatchesTheImportsThisGuardResolves(t *testing.T) {
+	for path, want := range map[string]string{"os": "os", "os/exec": "exec"} {
+		if got := defaultPkgName(path); got != want {
+			t.Errorf("defaultPkgName(%q) = %q, want %q", path, got, want)
+		}
+		src := "package p\n\nimport \"" + path + "\"\n"
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, "p.go", src, parser.ParseComments)
+		if err != nil {
+			t.Fatalf("parsing fixture: %v", err)
+		}
+		q := resolveImport(file, path)
+		if !q.imported() || q.dot || q.name != want {
+			t.Errorf("resolveImport(%q) = %+v, want the unaliased name %q", path, q, want)
+		}
+	}
+
+	for _, tc := range []struct {
+		name string
+		spec string
+		want pkgQualifier
+	}{
+		{name: "an alias", spec: "osexec \"os/exec\"", want: pkgQualifier{name: "osexec"}},
+		{name: "a dot import", spec: ". \"os/exec\"", want: pkgQualifier{dot: true}},
+		{name: "a blank import", spec: "_ \"os/exec\"", want: pkgQualifier{}},
+		{name: "no import at all", spec: "\"strings\"", want: pkgQualifier{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fset := token.NewFileSet()
+			file, err := parser.ParseFile(fset, "p.go", "package p\n\nimport "+tc.spec+"\n", parser.ParseComments)
+			if err != nil {
+				t.Fatalf("parsing fixture: %v", err)
+			}
+			if got := resolveImport(file, "os/exec"); got != tc.want {
+				t.Errorf("resolveImport = %+v, want %+v", got, tc.want)
 			}
 		})
 	}
