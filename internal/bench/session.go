@@ -92,6 +92,16 @@ type EngineAgent struct {
 	// Fixture names the recording a mock run replays. Empty means
 	// [SmokeFixture].
 	Fixture string
+
+	// testProvider overrides a.provider's dispatch entirely when set,
+	// bypassing Provider and Fixture. It exists for
+	// session_internal_test.go's TestEngineAgentRunShellSeesTheTaskTempHOME
+	// (KAN-874), which needs a provider that scripts a native run_shell call
+	// — something neither shipped fixture does — without teaching the real
+	// dispatch a third ProviderKind for one test. Unexported: cmd/kopibench
+	// builds an EngineAgent from Provider and Fixture alone, and nothing
+	// outside this package's own tests can reach the field at all.
+	testProvider engine.Provider
 }
 
 // Run wires one session and runs it to a stop.
@@ -110,20 +120,29 @@ type EngineAgent struct {
 // tree that is deleted minutes later. A bench post-mortem reads the journal and
 // the kept worktree; neither needs a ref.
 func (a EngineAgent) Run(ctx context.Context, spec SessionSpec) (SessionOutcome, error) {
-	prov, err := a.provider(spec)
-	if err != nil {
+	// A cheap, side-effect-free check that a live run will have a credential,
+	// before anything below touches disk — the same reason engine.Open checks
+	// this early rather than only when the client is actually built. Building
+	// the client itself waits until the journal exists, further down, because
+	// its retry observer appends to it (KAN-851).
+	if err := a.requireProviderCredential(); err != nil {
 		return SessionOutcome{}, err
 	}
-	return a.runSession(ctx, prov, spec)
+	return a.runSession(ctx, spec)
 }
 
-// runSession is Run's body once the provider has been chosen. Split out so a
-// test in this package can drive it with a hand-built mock.Provider — a native
-// run_shell tool call rather than one of the two shipped fixtures — without
-// teaching EngineAgent.provider a third ProviderKind for one test. See
+// runSession is Run's body once the credential precheck has passed.
+//
+// It builds its own provider, via a.provider, rather than taking one as a
+// parameter: the live provider's retry observer is wired to this task's
+// journal (KAN-851), and that journal is not open until partway through this
+// function's body — lock, then tools, then permission, then the journal —
+// so there is no provider to hand in any earlier than a.provider builds one
+// here. A test wanting a different provider than a.provider would dispatch to
+// sets EngineAgent.testProvider instead, which a.provider checks first; see
 // session_internal_test.go's TestEngineAgentRunShellSeesTheTaskTempHOME
 // (KAN-874).
-func (a EngineAgent) runSession(ctx context.Context, prov engine.Provider, spec SessionSpec) (SessionOutcome, error) {
+func (a EngineAgent) runSession(ctx context.Context, spec SessionSpec) (SessionOutcome, error) {
 	// The working tree's session lock (docs/SLICE-1.md §8), first and released
 	// last, exactly as engine.Open takes it for the REPL. Two things about it
 	// are worth stating here rather than leaving to be inferred.
@@ -189,6 +208,13 @@ func (a EngineAgent) runSession(ctx context.Context, prov engine.Provider, spec 
 	}
 	defer func() { _ = jrn.Close() }()
 
+	// The journal exists now, so the live provider's retry observer — if this
+	// is a live run — has somewhere to append to. See a.provider.
+	prov, err := a.provider(spec, jrn)
+	if err != nil {
+		return SessionOutcome{}, err
+	}
+
 	eng, err := engine.New(engine.Config{
 		SessionID:   spec.SessionID,
 		Selection:   spec.Selection,
@@ -220,10 +246,36 @@ func (a EngineAgent) runSession(ctx context.Context, prov engine.Provider, spec 
 	return out, errors.Join(runErr, closeErr)
 }
 
+// requireProviderCredential fails fast when a live run will have no
+// credential, without building anything. See its caller in Run.
+func (a EngineAgent) requireProviderCredential() error {
+	if a.Provider != ProviderLive {
+		return nil
+	}
+	if _, err := provider.APIKeyFromEnv(); err != nil {
+		return fmt.Errorf("bench: %w", err)
+	}
+	return nil
+}
+
 // provider builds this task's provider. A mock run gets its own replay per
 // task: the cursor is per fixture, and ten tasks sharing one would exhaust it
 // on the second.
-func (a EngineAgent) provider(spec SessionSpec) (engine.Provider, error) {
+//
+// jrn is the task's own journal, already open by the time this is called. A
+// live client's retry observer is wired to it, so a 429 or a 5xx the client
+// retries against the pinned endpoint mid-task reaches this task's record —
+// otherwise a flaky provider inside one task reads as a clean run or a clean
+// model failure to KAN-797's classifier, which is exactly the laundering
+// ADR-0006 §3 exists to forbid (KAN-851).
+//
+// testProvider, when set, wins outright and jrn goes unused: a test supplying
+// its own provider is supplying its own traffic and has no retries of this
+// package's making to journal.
+func (a EngineAgent) provider(spec SessionSpec, jrn journal.Journal) (engine.Provider, error) {
+	if a.testProvider != nil {
+		return a.testProvider, nil
+	}
 	switch a.Provider {
 	case ProviderMock:
 		name := a.Fixture
@@ -244,7 +296,7 @@ func (a EngineAgent) provider(spec SessionSpec) (engine.Provider, error) {
 		if err != nil {
 			return nil, fmt.Errorf("bench: %w", err)
 		}
-		c, err := provider.NewClient(key)
+		c, err := provider.NewClient(key, provider.WithRetryObserver(journalRetryObserver(jrn)))
 		if err != nil {
 			return nil, fmt.Errorf("bench: building the provider client: %w", err)
 		}
@@ -252,6 +304,28 @@ func (a EngineAgent) provider(spec SessionSpec) (engine.Provider, error) {
 	default:
 		return nil, fmt.Errorf("bench: unknown provider %q, want %q or %q: %w",
 			a.Provider, ProviderLive, ProviderMock, ErrNotConfigured)
+	}
+}
+
+// journalRetryObserver turns the live client's retry notifications into a
+// journal event. internal/engine's Open builds the same six-line mapping for
+// the interactive session; it is not shared, because the two packages wire an
+// entirely separate journal each and the mapping itself is short enough that
+// a shared helper would buy an import edge and not much else.
+//
+// The append error is swallowed for the same reason internal/engine's does:
+// this runs inside provider.Client.Complete, has no channel back to the task,
+// and the very next event this session writes goes through the ordinary path
+// that does report a broken journal.
+func journalRetryObserver(jrn journal.Journal) provider.RetryObserver {
+	return func(ctx context.Context, ev provider.RetryEvent) {
+		_, _ = jrn.Append(ctx, ev.Turn, journal.ProviderRetried{
+			Attempt: ev.Attempt,
+			Try:     ev.Try,
+			OfTries: ev.OfTries,
+			DelayMS: ev.Delay.Milliseconds(),
+			Cause:   ev.Cause,
+		})
 	}
 }
 

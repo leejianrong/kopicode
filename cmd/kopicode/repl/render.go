@@ -54,6 +54,14 @@ func (l *Loop) Render(e engine.Event) {
 		// the progress indicator's job, on the current line, never scrollback.
 		l.Progress("waiting for " + e.Detail)
 
+	case engine.EventProviderRetried:
+		// Unlike a provider request or response, this is not routine — it says
+		// the provider answered with a 429, a 5xx, or nothing at all, and the
+		// client is about to try again on its own. A user watching a session
+		// wants to know the wait is the provider being flaky and not the model
+		// thinking, so this is a line rather than progress text.
+		l.tag("retry", fmt.Sprintf("attempt %d, %s: %s", e.ExitCode, e.Detail, e.Reason))
+
 	case engine.EventProviderResponse:
 		l.Progress("")
 

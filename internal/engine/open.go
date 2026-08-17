@@ -268,11 +268,15 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 		id = newSessionID(now())
 	}
 
-	// The provider first, because a missing credential is the one failure that
-	// costs nothing to detect and would otherwise be found after a directory
-	// had been created and a record opened.
-	prov, err := openProvider(opts)
-	if err != nil {
+	// The credential check first, because a missing one is the one failure
+	// that costs nothing to detect and would otherwise be found after a
+	// directory had been created and a record opened. It is only the check:
+	// building the actual client waits until the journal exists, a few lines
+	// down, because the live client's retry observer appends to it (KAN-851)
+	// and nothing here may build a client before there is a journal to wire it
+	// to. Splitting the two keeps ADR-0007 decision 4's ordering exactly as it
+	// was — a refused Open still touches nothing.
+	if err := requireProviderCredential(opts); err != nil {
 		return nil, err
 	}
 
@@ -344,6 +348,18 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 	}
 	s.closers = append(s.closers, jrn.Close)
 
+	// The teed journal exists before the provider does, and deliberately: a
+	// live client's retry observer is wired to it below, so a retry the client
+	// makes during the session reaches Options.Events exactly like any other
+	// event, through the one journal the session has rather than a second copy
+	// of it.
+	teed := tee(jrn, opts.Events)
+
+	prov, err := openProvider(opts, teed)
+	if err != nil {
+		return fail(err)
+	}
+
 	eng, err := New(Config{
 		SessionID: id,
 		Selection: opts.Selection,
@@ -354,7 +370,7 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 		CWD:         abs,
 		RepoHead:    head,
 		Provider:    prov,
-		Journal:     tee(jrn, opts.Events),
+		Journal:     teed,
 		Tools:       set,
 		Permissions: gate,
 		Syntax:      &syntax.Gate{Root: set.Root.Path()},
@@ -398,18 +414,47 @@ func mustAskPolicy(c Consenter) permission.Policy {
 	return p
 }
 
+// requireProviderCredential fails fast when the live client Open would build
+// has nothing to authenticate with, without building anything.
+//
+// It exists apart from openProvider because ADR-0007 decision 4's ordering
+// applies to this refusal exactly as it does to an unknown model — before the
+// lock, before the journal — and openProvider itself cannot run that early:
+// building the live client needs the journal open, so its retry observer has
+// something to append to (KAN-851).
+func requireProviderCredential(opts Options) error {
+	if opts.Provider != nil {
+		return nil
+	}
+	if os.Getenv(APIKeyEnv) == "" {
+		return ErrNoAPIKey
+	}
+	return nil
+}
+
 // openProvider returns the provider the session will call.
-func openProvider(opts Options) (Provider, error) {
+//
+// jrn is the session's own journal — the same value Config.Journal holds —
+// and it exists only so the live client's retry observer can be wired to it
+// before the client is built. openProvider never appends to jrn itself; it
+// hands it to [journalRetryObserver], and only a retry the client makes later,
+// during Session.Run, ever reaches it.
+func openProvider(opts Options, jrn journal.Journal) (Provider, error) {
 	if opts.Provider != nil {
 		return opts.Provider, nil
 	}
 
 	key := os.Getenv(APIKeyEnv)
 	if key == "" {
+		// Unreachable through Open: requireProviderCredential already refused
+		// this above. Kept so a direct caller of this function fails the same
+		// way rather than building a client with an empty key.
 		return nil, ErrNoAPIKey
 	}
 
-	var clientOpts []provider.ClientOption
+	clientOpts := []provider.ClientOption{
+		provider.WithRetryObserver(journalRetryObserver(jrn)),
+	}
 	if opts.ProviderBaseURL != "" {
 		clientOpts = append(clientOpts, provider.WithBaseURL(opts.ProviderBaseURL))
 	}
@@ -418,6 +463,34 @@ func openProvider(opts Options) (Provider, error) {
 		return nil, fmt.Errorf("engine: building the provider client: %w", err)
 	}
 	return c, nil
+}
+
+// journalRetryObserver turns the live client's retry notifications into a
+// journal event, wired at construction time and entirely outside
+// engine.Provider's one method: Complete's return value is unaffected, and
+// the loop learns about a retry storm the same way any other reader of the
+// record would — by it having been journaled — rather than through anything
+// Complete returns.
+//
+// The append error is deliberately swallowed rather than surfaced anywhere:
+// this callback runs inside provider.Client.Complete, which has no channel
+// back to the engine and — being outside engine.Provider on purpose — must
+// not gain one just to report a broken journal. A journal that cannot accept
+// an append is not going to accept the next one either, and the very next
+// event this session writes (the ProviderResponse or ProviderRequest either
+// side of this retry) goes through Engine.append, which does surface that
+// failure and end the exchange with StopHarnessError. Nothing is lost that
+// would not already be caught one event later.
+func journalRetryObserver(jrn journal.Journal) provider.RetryObserver {
+	return func(ctx context.Context, ev provider.RetryEvent) {
+		_, _ = jrn.Append(ctx, ev.Turn, journal.ProviderRetried{
+			Attempt: ev.Attempt,
+			Try:     ev.Try,
+			OfTries: ev.OfTries,
+			DelayMS: ev.Delay.Milliseconds(),
+			Cause:   ev.Cause,
+		})
+	}
 }
 
 // openRepo reports the commit HEAD points at and the snapshotter for the

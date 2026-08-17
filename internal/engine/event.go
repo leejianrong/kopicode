@@ -30,6 +30,7 @@ const (
 	EventAssistantMessage
 	EventThinking
 	EventProviderRequest
+	EventProviderRetried
 	EventProviderResponse
 	EventToolCallRequested
 	EventToolCallParsed
@@ -72,6 +73,7 @@ var eventKindText = map[EventKind]string{
 	EventAssistantMessage:    "assistant_message",
 	EventThinking:            "thinking",
 	EventProviderRequest:     "provider_request",
+	EventProviderRetried:     "provider_retried",
 	EventProviderResponse:    "provider_response",
 	EventToolCallRequested:   "tool_call_requested",
 	EventToolCallParsed:      "tool_call_parsed",
@@ -263,6 +265,13 @@ func eventOf(ev journal.Event) Event {
 		base.Kind = EventProviderRequest
 		base.Detail = p.ModelID
 		base.ExitCode, base.HasExitCode = p.Attempt, true
+
+	case journal.ProviderRetried:
+		base.Kind = EventProviderRetried
+		base.Reason = p.Cause
+		base.Detail = fmt.Sprintf("try %d of %d", p.Try, p.OfTries)
+		base.ExitCode, base.HasExitCode = p.Attempt, true
+		base.Size = p.DelayMS
 
 	case journal.ProviderResponse:
 		base.Kind = EventProviderResponse

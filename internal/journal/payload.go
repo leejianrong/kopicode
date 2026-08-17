@@ -182,12 +182,61 @@ type ProviderRequest struct {
 	// count up front is a thing that could exist. A reader summing token cost
 	// reads [ProviderResponse].Tokens and nothing else.
 	Tokens TokenCounts `json:"tokens"`
-	// Attempt is 1 for the first send and increments per retry, so a retry
-	// storm is visible rather than inferred.
+	// Attempt is 1 for the first send and increments once per repair round
+	// trip — one per call the engine makes to provider.Provider.Complete, for
+	// a turn or for a repair the parser asked for. It does **not** count a
+	// retry the live client made *inside* one Complete call: a request the
+	// client retried six times against 429s before succeeding still journals
+	// one ProviderRequest with Attempt unchanged. Those retries are
+	// [ProviderRetried] events instead (KAN-851) — a widened Attempt could not
+	// represent them without engine.Provider growing past its one method to
+	// learn about them, which SLICE-1 §Build Plan step 8 rules out on purpose.
 	Attempt int `json:"attempt"`
 }
 
 func (ProviderRequest) Type() Type { return TypeProviderRequest }
+
+// ProviderRetried records one client-internal retry: an attempt that failed
+// with a retryable cause — a 429, a 5xx, or a transport failure — about to be
+// followed by a backoff and another send, all inside a single call to
+// provider.Provider.Complete.
+//
+// It exists apart from ProviderRequest because the two count different
+// things, and conflating them would erase the distinction rather than clarify
+// it: ProviderRequest.Attempt is the *engine's* re-send count, one per call to
+// Complete, and engine.Provider's one-method interface deliberately keeps a
+// retry storm *inside* that call invisible to the loop (SLICE-1 §Build Plan
+// step 8 — widening the interface would let the loop start making policy out
+// of retries). Without this event, a request the live client retried six
+// times against 429s before succeeding journals identically to one that
+// succeeded on the first try, and a flaky provider reads as a clean result —
+// which is exactly the gap KAN-797's `harness` bucket exists to catch and
+// could not, because nothing recorded that it happened.
+type ProviderRetried struct {
+	// Attempt matches the ProviderRequest.Attempt this retry happened inside:
+	// which engine-level send — a turn's first, or a repair round trip —
+	// triggered the client's internal backoff loop.
+	Attempt int `json:"attempt"`
+	// Try is 1-based: which client-internal send just failed. 1 is the first
+	// send, so a Try of 3 means two retries have already happened for this
+	// request.
+	Try int `json:"try"`
+	// OfTries is the retry policy's attempt budget for this request
+	// (provider.Retry.MaxAttempts, resolved against provider.DefaultRetry).
+	OfTries int `json:"of_tries"`
+	// DelayMS is the backoff drawn before the next send, in milliseconds.
+	// Milliseconds rather than a duration string: every other numeric field in
+	// this journal is a plain number, and a duration string would be the one
+	// field a reader has to parse specially rather than sum or compare.
+	DelayMS int64 `json:"delay_ms"`
+	// Cause summarises the failure that triggered the retry — "http 429",
+	// "http 503", "transport failure" — the same classification the client's
+	// own diagnostic log line uses, so the two never disagree about what
+	// happened.
+	Cause string `json:"cause"`
+}
+
+func (ProviderRetried) Type() Type { return TypeProviderRetried }
 
 // ProviderResponse records what came back.
 type ProviderResponse struct {

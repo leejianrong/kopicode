@@ -394,6 +394,127 @@ func TestGivesUpAtTheCap(t *testing.T) {
 	}
 }
 
+// TestRetryObserverSeesEachRetryThenSuccess is KAN-851's done-when at the
+// client level: a retry storm inside Complete is not just logged, it reaches
+// an observer wired at construction — the seam a caller uses to journal it —
+// with the same facts a journal.ProviderRetried event needs.
+func TestRetryObserverSeesEachRetryThenSuccess(t *testing.T) {
+	f := loadFixture(t)
+
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		if calls <= 2 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			fmt.Fprint(w, `{"error":{"code":429,"message":"rate limited"}}`)
+			return
+		}
+		writeSSE(t, w, f.Exchanges[0].Response.Stream)
+	}))
+	defer srv.Close()
+
+	clock := &manualClock{}
+	policy := provider.Retry{MaxAttempts: 4, Base: time.Second, Cap: 8 * time.Second}
+	var seen []provider.RetryEvent
+	c := newClient(t, srv,
+		provider.WithClock(clock),
+		provider.WithRand(topOfInterval()),
+		provider.WithRetry(policy),
+		provider.WithRetryObserver(func(_ context.Context, ev provider.RetryEvent) {
+			seen = append(seen, ev)
+		}),
+	)
+
+	req := request(f)
+	req.Turn, req.Attempt = 3, 1
+	stream, err := c.Complete(t.Context(), req)
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	drain(t, stream)
+	_ = stream.Close()
+
+	want := []provider.RetryEvent{
+		{Turn: 3, Attempt: 1, Try: 1, OfTries: 4, Delay: policy.Ceiling(0), Cause: "http 429"},
+		{Turn: 3, Attempt: 1, Try: 2, OfTries: 4, Delay: policy.Ceiling(1), Cause: "http 429"},
+	}
+	if diff := cmp.Diff(want, seen); diff != "" {
+		t.Errorf("retry events (-want +got):\n%s", diff)
+	}
+}
+
+// TestRetryObserverSeesExhaustion is the other half: an observer sees every
+// retry right up to the give-up, not just the ones that led somewhere.
+func TestRetryObserverSeesExhaustion(t *testing.T) {
+	const body = `{"error":{"code":503,"message":"upstream is having a day"}}`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		fmt.Fprint(w, body)
+	}))
+	defer srv.Close()
+
+	clock := &manualClock{}
+	policy := provider.Retry{MaxAttempts: 4, Base: time.Second, Cap: 2 * time.Second}
+	var seen []provider.RetryEvent
+	c := newClient(t, srv,
+		provider.WithClock(clock),
+		provider.WithRand(topOfInterval()),
+		provider.WithRetry(policy),
+		provider.WithRetryObserver(func(_ context.Context, ev provider.RetryEvent) {
+			seen = append(seen, ev)
+		}),
+	)
+
+	req := request(loadFixture(t))
+	req.Turn, req.Attempt = 1, 1
+	_, err := c.Complete(t.Context(), req)
+	if !errors.Is(err, provider.ErrRetriesExhausted) {
+		t.Fatalf("Complete against a permanent 503: %v, want ErrRetriesExhausted", err)
+	}
+
+	// One retry notification fewer than there are attempts: the client does
+	// not wait — and so does not notify — after the send it has already
+	// decided is the last one, exactly as it does not wait on TestGivesUpAtTheCap.
+	want := []provider.RetryEvent{
+		{Turn: 1, Attempt: 1, Try: 1, OfTries: 4, Delay: policy.Ceiling(0), Cause: "http 503"},
+		{Turn: 1, Attempt: 1, Try: 2, OfTries: 4, Delay: policy.Ceiling(1), Cause: "http 503"},
+		{Turn: 1, Attempt: 1, Try: 3, OfTries: 4, Delay: policy.Ceiling(2), Cause: "http 503"},
+	}
+	if diff := cmp.Diff(want, seen); diff != "" {
+		t.Errorf("retry events (-want +got):\n%s", diff)
+	}
+}
+
+// TestNoRetryObserverMeansNothingIsNotified. Nil is the default and the
+// mock/replay provider's whole story: WithRetryObserver is never called there,
+// so this is what "not wired" looks like from Complete's side, and it must not
+// panic.
+func TestNoRetryObserverMeansNothingIsNotified(t *testing.T) {
+	f := loadFixture(t)
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		if calls == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		writeSSE(t, w, f.Exchanges[0].Response.Stream)
+	}))
+	defer srv.Close()
+
+	c := newClient(t, srv, provider.WithClock(&manualClock{}), provider.WithRand(topOfInterval()))
+
+	stream, err := c.Complete(t.Context(), request(f))
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	drain(t, stream)
+	_ = stream.Close()
+}
+
 // TestDoesNotRetryWhatCannotSucceed. A 4xx that is not 429 describes the
 // request: sending it again spends the budget and the wall clock to be told the
 // same thing later.
