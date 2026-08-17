@@ -7,6 +7,12 @@
 /kopicode
 /kopibench
 
+# The real credential file (KAN-910). Anchored for the same reason as above: a bare
+# `.env` pattern would also match any *directory* named .env, which does not exist
+# here today but is exactly the kind of thing this file's own header warns about.
+# .env.example is the committed template; this is the one that must never be.
+/.env
+
 # Go
 *.test
 *.out

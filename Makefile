@@ -1,6 +1,18 @@
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
 
+# Load a local .env if one exists, so OPENROUTER_API_KEY (or anything else a
+# developer put there) reaches `smoke-live` and `bench` without kopicode itself
+# ever parsing dotenv files (KAN-910) — the binary still reads the credential only
+# from the ambient process environment, via internal/provider.APIKeyFromEnv.
+# `-include` is silent when the file is absent, which is every CI runner and every
+# machine that has not opted in, so this changes nothing there. The bare `export`
+# marks every make variable — the ones above, whatever .env just defined, and
+# everything defined below — for export to each recipe's child process; it prints
+# nothing, so a value from .env never appears in `make`'s own output.
+-include .env
+export
+
 MODULE   := github.com/leejianrong/kopicode
 
 # The build identity that lands on every SessionStarted (KAN-806, ADR-0007
