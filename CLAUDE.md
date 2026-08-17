@@ -21,38 +21,69 @@ git subprocess with no working directory set runs in the *real* repository, and 
 failing with `fatal: this operation must be run in a work tree`. The skill has the
 rules that prevent it and the checks that catch it.
 
-## Build status — foundations landed, no loop yet
+## Build status — slice 1 is all but whole
 
 **Trust the code over the docs.** `docs/` describes the intended system; where they
 disagree, the code is the truth for what exists today — verify before you believe a
-docstring, including this section.
+docstring, including this section. The paragraph after the list is this section's own
+drift record, and it is there because the instruction above keeps being needed.
 
-What is real now (2026-08-11):
+What is real now (2026-08-17):
 
 - **Module + toolchain.** Go 1.26.5. `Makefile` with the gates below, `.golangci.yml`
-  (v2 schema, validated), `.github/workflows/ci.yml` with parallel jobs, and a pre-push
-  hook mirroring the cheap gates. Two dependencies, both sanctioned in advance:
+  (v2 schema, validated), `.github/workflows/ci.yml` with seven parallel jobs, and a
+  pre-push hook mirroring the cheap ones. Two dependencies, both sanctioned in advance:
   `github.com/google/go-cmp` in tests only, and `golang.org/x/term` for the line
   editor (ADR-0004 decision 2). Pure Go, no CGo, and `golang.org/x/sys` comes with
   it as an indirect.
-- **Cross-compilation proven.** `make xbuild` produces both binaries for linux/amd64,
+- **Cross-compilation proven.** `make xbuild` builds both binaries for linux/amd64,
   linux/arm64, darwin/amd64, darwin/arm64 and windows/amd64 with `CGO_ENABLED=0` — the
-  ADR-0001 distribution promise, checked rather than asserted.
-- **Boundary guards, proven red.** `internal/arch` enforces ADR-0003: front ends may
-  import only `internal/engine` and `internal/bench`, and the engine may not import a
-  surface. Both were confirmed to fail when violated, and the failure names the file,
-  the import and the ADR.
-- **`internal/journal`** — the event tagged union. Envelope plus 19 payload types, with
-  explicit `MarshalJSON`/`UnmarshalJSON` so an unknown future type survives a round trip
-  as bytes rather than being dropped. Two guards, both seen red, make it structurally
-  impossible for a payload *field* to hold a credential: no free-form map anywhere, and
-  no field named for one. Use `journal.Marshal` and not `json.Marshal` — the latter
-  re-escapes HTML in whatever `MarshalJSON` returns and fills the record with `\uXXXX`
-  noise.
-- **`internal/parse`** — tool-call extraction over three routes (native `tool_calls`,
-  fenced JSON, XML-tagged). First success wins, a route that finds its marker commits to
-  it rather than falling through, and ambiguity is a typed error rather than a guess.
-  Returns the route it took as a typed value; it does **not** import the journal.
+  ADR-0001 distribution promise, checked rather than asserted. The load-bearing half is
+  the `go vet ./...` it runs **per platform** first: back when `cmd/` was two stubs
+  importing nothing, cross-compiling them proved nothing about the code that actually
+  has platform-specific behaviour, and vet typechecks `_test.go` files too — so a test
+  that will not build under `GOOS=windows` fails here rather than on the one machine
+  that runs it.
+- **Boundary guards, proven red.** `internal/arch` is three static suites over the whole
+  tree, and none of them is a convention. Import hygiene enforces ADR-0003: a front end
+  may import `internal/engine`, `internal/bench` and `internal/build` and nothing else,
+  the engine may not import a surface, and a second test holds `internal/build` to being
+  a leaf — the day it imports something, the allowlist entry stops being defensible and
+  every front end inherits a path into the engine's internals without a line of `cmd/`
+  changing. The ldflags check reads the Makefile and requires every `-X` target to name
+  a real string variable, because `go build` does not report a bogus one, it silently
+  ships the zero value. The subprocess guard is described under "Boundaries" below. Each
+  failure names the file, the import or the call site, and the rule it broke — and each
+  guard was broken on purpose and watched fail before it landed, which is this repo's
+  standing requirement for any safety check and the reason to trust these rather than
+  the comments beside them.
+- **`internal/journal`** — the event tagged union, and the record behind it. Envelope
+  plus 20 payload types, with explicit `MarshalJSON`/`UnmarshalJSON` so an unknown
+  future type survives a round trip as bytes rather than being dropped. Two guards, both
+  seen red, make it structurally impossible for a payload *field* to hold a credential:
+  no free-form map anywhere, and no field named for one. Use `journal.Marshal` and not
+  `json.Marshal` — the latter re-escapes HTML in whatever `MarshalJSON` returns and
+  fills the record with `\uXXXX` noise. `FileJournal` writes JSONL under
+  `.kopicode/sessions/<id>/`, 0600 because the record holds what the user typed and what
+  the model read; any `Text` field over 64 KiB spills to a content-addressed blob rather
+  than being clipped, found by one reflective traversal instead of a method per payload
+  type, since the failure mode of twenty hand-written lists is a twenty-first that
+  spills nothing and nobody finds out until a 4 MB line lands in the record. A redactor
+  removes known secret *values* from the encoded line at append time: no type can stop a
+  model from running `env` and a tool result from carrying the answer.
+- **`internal/parse`** — tool-call extraction *and* repair. Extraction runs three routes
+  (native `tool_calls`, fenced JSON, XML-tagged). First success wins, a route that finds
+  its marker commits to it rather than falling through, and ambiguity is a typed error
+  rather than a guess. Every failure carries a `Kind`, and the repair loop turns that
+  into a specific message back to the model — two attempts per call, then the call fails
+  and the turn continues with the failure as an observation rather than aborting the
+  session. It returns the route it took as a typed value, because *which* route a model
+  reaches for is a finding rather than a detail. It does **not** import the journal:
+  what it owes instead is that every outcome maps onto exactly one event without the
+  engine guessing, which is what makes parse-success rate and repair-recovery rate
+  readable off the record rather than anecdotal. The schemas it repairs against are not
+  written here either — `parse.Tools` is a two-method interface declared at the
+  consumer, and the engine's catalogue satisfies it.
 - **`internal/anchor`** — the anchor format, settled by ADR-0006 §7 and versioned.
   8 hex characters of SHA-256 over a length-prefixed (previous, this, next) window,
   rendered as `<anchor> <line-number>| <content>`. `read_file` must call `anchor.Render`
@@ -67,12 +98,98 @@ What is real now (2026-08-11):
   `cmd/`'s import allowlist, and `internal/arch` enforces both halves. `internal/arch`
   also checks statically that every `-X` target in the Makefile names a real string
   variable — `go build` does not report a bogus one, it silently ships the zero value.
+- **`internal/tools`** — `read_file`, `list_dir`, `grep`, `write_file`, `edit_file`,
+  `edit_file_fuzzy` and `run_shell`, on one root and one set of limits. Three rules
+  shape all of it. **Anchors come from `read_file` and nowhere else** — `grep`
+  deliberately emits none, because ADR-0006 rests on an anchor being obtainable only
+  from a read, which is what makes an edit into a region the model was never shown
+  structurally impossible rather than merely discouraged; a test holds that across the
+  whole set, so a tool added later cannot leak one by accident. **Bounds are declared,
+  never silent**: where a bound is unavoidable the tool either refuses outright with a
+  message naming the size, or returns a window and *says in its output* that it did,
+  with the argument that fetches the rest. **Every path argument goes through
+  `Root.Resolve`**, which resolves symlinks *before* cleaning the string — `foo/../bar`
+  is only lexically inside the root if `foo` is not a link elsewhere — and every open
+  then goes through `os.Root`, which refuses to traverse out at the syscall level and
+  closes the window between the check and the open. That window matters because the
+  thing driving these tools is model output. `run_shell` is the stated exception and the
+  reason the permission gate exists: its working directory is resolved like any other
+  path, but a shell goes where it likes, so containment is not claimed.
+- **The edit tool, which is the mechanism ADR-0006 is about.** `edit_file` re-derives
+  every anchor from disk before it writes anything, and a mismatch is a **rejection**
+  carrying a typed reason — `anchor_malformed`, `anchor_drift`, `anchor_ambiguous` —
+  because each implies a different recovery and one error string would make the
+  distinction unrecoverable after the fact, as well as sending the model to re-read a
+  file that had not changed. A drift rejection carries the file's *current* anchors, so
+  recovering costs no turn. `edit_file_fuzzy` is a separate tool and not a second
+  argument shape on `edit_file`, because one tool taking either pair would have to infer
+  which mode a call meant from which fields arrived. Its `ModeFuzzy` is the
+  `unattributed` trigger: a fuzzy match above the floor and in the wrong place applies
+  cleanly and emits no error, so the mode is recorded on every result the file produces
+  and `EditResult.Fuzzy` carries it a second time — a caller has to miss two independent
+  signals to under-count the bucket. The floor is 0.90 and its doc comment argues the
+  number rather than asserting it, including the part that matters most: the floor is
+  *not* what makes this safe. Two near-duplicate regions both clear it, and the
+  ambiguity refusal is what stops the guess.
+- **`internal/syntax`** — the post-edit gate: a language-native check run immediately
+  after an edit, selected by extension, shelled out to. Its honesty matters more than
+  its coverage, because SLICE-1 §9 charges a gate failure following an `EditApplied`
+  straight to the `harness` bucket, which makes the gate a measurement instrument as
+  much as a feature. So the whole weight sits on one distinction: a gate that did not
+  run must never read as a gate that passed. `NotRun` is `Outcome`'s zero value, there
+  is no bool anywhere in `Result` that could be mistaken for "ok", `ExitCode` is -1
+  when nothing ran, and `Skip` says *why* — "no checker for .md" and "node is not
+  installed" call for different responses. Steps are split: a **verdict** step has the
+  edited file alone as its subject (`gofmt -e`, `node --check`, `py_compile`) and sets
+  the outcome; an **advisory** step has a package as its subject (`go build`), runs, is
+  journaled in full, and does not. The split is the acceptance criterion made
+  mechanical — a correct edit can legitimately leave a package failing to typecheck
+  mid-refactor, and charging that to the edit fills the one bucket whose bar is zero
+  with noise.
+- **`internal/procgroup`** — one answer to "how do we kill a subprocess", rather than
+  one per package that happens to spawn something. A command is started as a group
+  leader so everything it spawns inherits the group, and a timeout or a cancellation
+  signals the *negative* pid so the signal reaches the whole tree; killing by pid
+  instead leaves `sh -c 'sleep 300 & wait'` with `sleep` reparented to init and still
+  running, and in a bench run leaves a machine that slowly fills with orphans. Graceful
+  then forceful, with a bounded grace period, because a compiler given the chance to
+  exit removes its own temporary files — and nothing signals on the ordinary exit path,
+  since a group signalled after its leader is reaped can reach a stranger whose pid was
+  recycled. It holds no policy: three packages use it and each owns its own timeout.
+- **`internal/permission`** — the policy half of consent, and nothing else. It formats
+  no prompt, reads no key, and does not know a terminal exists: the REPL renders a
+  `Request` however it likes, the bench runner answers one without a human, and both sit
+  on a `Gate` that cannot tell which of them it is talking to. The failure that
+  separation prevents is concrete rather than aesthetic — a classifier living next to
+  the prompt hands the headless runner an interactive dependency it cannot satisfy, and
+  the usual fix is a "non-interactive mode" flag that approves everything, which is how
+  a corpus run escapes its worktree and contaminates the next task's result. It fails
+  closed twice over: the zero `Outcome` is a denial, so a caller who drops the value on
+  an error path still denies, and every non-allow returns an error wrapping `ErrDenied`,
+  so a caller who checks only the error still denies. `allow_session` is exact-match and
+  nothing wider; a prefix or directory grant is the version of this that quietly becomes
+  "allow everything", and the package does not offer one.
+- **`internal/verify`** — forced verification (KAN-787): the project's own command, run
+  after any turn that could have changed the tree, journaled whole, and holding the
+  right to report success. The hard part is the honest-none case. A harness that quietly
+  skipped verification on a project it did not recognise would report every session as
+  verified, which is the flattering direction and the one that corrupts the
+  measurement — so `SourceNone` is a value, `NotRun` is `Outcome`'s zero value rather
+  than `Passed`, and only `Failed` (a command that ran and exited non-zero) blocks a
+  success report. A missing toolchain or a timeout is recorded and does not block: it is
+  not evidence the model's change is wrong, and treating it as such would make the loop
+  unable to finish a task on any project without a Makefile. Discovery **executes
+  nothing** — a makefile target, `go.mod`, a non-empty `scripts.test`, a uv project, in
+  that fixed order — because probing a tree by building it turns discovery into a side
+  effect, and one that happens before the user has consented to anything.
 - **`internal/provider/fixture`** — provider traffic as data, plus the loader and
   validator for it. Enough to drive a two-turn session end to end, one fixture per
   extraction route. **Every fixture in it is hand-authored and says so in the file**
-  (`"origin": "hand_authored"`), because the mock provider is build step 3 and the real
-  client is step 8, so there is no traffic to record yet. That is a deliberate,
-  temporary violation of the test-seam rule below, and the drift risk is real: a
+  (`"origin": "hand_authored"`). That is no longer because the live client does not
+  exist — it landed with KAN-776 — but because the **recorder** does not: KAN-774 owns
+  it, and until it lands there is nothing that can scrub an API key out of real traffic
+  at write time. That is a deliberate, temporary violation of the test-seam rule below,
+  and the drift risk is real: a
   synthetic body that does not match OpenRouter produces a green suite over a loop that
   fails live. Bounded, not removed, by three things — the origin marker, a validator that
   holds each fixture to itself (the SSE frames must fold back into the assembled body,
@@ -104,8 +221,9 @@ What is real now (2026-08-11):
   it. **This is the primary test seam** (SLICE-1 affordance P2), so the shape it settles
   is the one every engine test inherits. The interface is one method,
   `Complete(ctx, Request) (*Stream, error)`, and it is declared in **`internal/engine`**
-  because an interface belongs where it is consumed — the real client (KAN-776) will
-  satisfy the same one without importing the engine. A reply arrives as a `Stream`
+  because an interface belongs where it is consumed — the live client satisfies the same
+  one without importing the engine, which is the claim now checked rather than
+  predicted. A reply arrives as a `Stream`
   pulled synchronously by its consumer: **no goroutine, no map iteration in any output
   path**, which is what a byte-identical replayed journal rests on. Replay is at the
   interface but over the fixture's **recorded SSE frames**, decoded by the same reader
@@ -135,6 +253,24 @@ What is real now (2026-08-11):
   an encoding change that no configuration value explains. `internal/engine/selection.go`
   is the thin seam the two front ends reach it through, because ADR-0003's allowlist
   has three entries and widening it needs an ADR.
+- **The system prompt is a harness value, not a detail of the loop** (KAN-843).
+  `Config.SystemPrompt` holds `prompt_default.md`, `go:embed`ed rather than read at run
+  time — ADR-0007 decision 5 requires a harness configuration to be a value in the
+  binary and not something a user can edit underneath a recorded result — and it is in
+  the hash preimage by digest, so editing the prose opens a new arm rather than quietly
+  changing what every number is relative to. It is a markdown file rather than a Go
+  string because the prose *is* the product: a diff over it reads as prose to somebody
+  judging wording, and it can use backticks. What holds it to the code is tests rather
+  than care: every tool in the arm's tool set gets a section, in that set's order; every
+  `json` argument name on that tool's struct appears in its section as a JSON key; every
+  rejection reason `internal/tools` can refuse an edit with has a documented recovery;
+  and the prompt states the anchor version. Add a tool on one side only and the suite
+  fails. It is also held under an 8 KiB budget, because naive full-history assembly
+  re-sends it on every turn and the cost that matters is the share of a cheap model's
+  attention spent on instructions rather than on the repository. The golden hash moved
+  to `07251b5de390…` when the prompt landed — a configuration *value* changing, so
+  `PreimageVersion` stayed at 1, and nothing was invalidated because no bench run has
+  happened.
 - **The live OpenRouter client** (`internal/provider/client.go`, KAN-776) — one POST to
   `/chat/completions` with `stream=true`, decoded by the *same* SSE reader the replay
   provider drives, and driven in tests by an `httptest` server replaying the fixtures'
@@ -157,6 +293,53 @@ What is real now (2026-08-11):
   journal, the blobs and the log by `internal/engine/keyleak_test.go`, with redaction
   deliberately switched **off** — a leak test run with the journal's redactor on passes
   whatever the client does.
+- **`internal/engine` — the bounded turn loop, and it exists** (KAN-789). `Run` is one
+  exchange: the user's message in, then prompt → provider → parse → dispatch → observe
+  → repeat. A single turn tree — no subagents, no planner, no second loop. It ends on a
+  prose reply that asks for no tool (the clean stop), the turn cap, reported usage
+  reaching the token budget, a cancelled context, or a provider or harness failure. A
+  malformed tool call is explicitly **not** an ending: repair is bounded per reply and a
+  call that exhausts its budget continues the turn with the failure as an observation.
+  **Every bound comes off `Selection.Config`** and none is a constant in the package —
+  a bound the loop held itself would be a bound *outside* the arm, so two runs differing
+  in it would compare as identical, which is the hash describing something that is not
+  happening. `Stop` is the loop's own vocabulary, finer than the journal's five reasons
+  because two distinct stops map onto `error`, and `Stop.ExitCode` is the one mapping
+  onto the process exit codes, so no surface re-decides an outcome the engine settled.
+  Context assembly is **naive full history** — a decision, not a gap, because a
+  compaction strategy chosen without session data is a guess and the journal is the data
+  needed to choose one later — and nothing in it truncates: an assembler that dropped a
+  large tool result to save tokens is the never-truncate rule crossed from the inside,
+  at exactly the point the model could still act on the output. There is no map anywhere
+  in the assembler, for the reason there is none in the harness config: a replayed
+  journal has to be byte-identical and Go randomises map iteration.
+- **Cancellation is on the record, not an absence** (KAN-857). Cancelling a turn already
+  worked — the context reaches the provider stream, the consent gate, the tools and the
+  shell's process group — but the journal used to say nothing, so "the user pressed
+  Ctrl-C", "the process was killed" and "the disk filled up mid-write" were the same
+  bytes. `TurnCancelled` names what was *in flight* — `provider_stream`, `tool_call`,
+  `verification`, `between_steps` — and the **first** observation wins, because the loop
+  checks its context at the top of every turn and every attempt, so a cancellation that
+  interrupted a shell command would otherwise be filed as "between_steps" one step
+  later: true about the loop, useless about the session. The bench classifier reads
+  cancellation off this event rather than off the runner's in-memory summary, which is
+  the whole reason it exists.
+- **`engine.Open` and a presentation-neutral event stream** (KAN-865). `Config` is a
+  struct of `journal.Journal`, `*tools.Set`, `*permission.Gate`, `*syntax.Gate` and
+  `parse.Tools` — every one a type `cmd/` cannot *name*, since Go needs an import to
+  write a type in a struct literal — so the exported interface was not reachable from
+  the surface it was exported for. `Open` is the fix and it satisfies ADR-0003 rather
+  than amending it: the allowlist is unchanged, and what changes is that a front end now
+  asks for a session instead of assembling one. What `Options` deliberately does **not**
+  offer is the argument: the verifier (nil means the default, never "skip"), the two
+  gates, the tool set, the journal and the harness configuration are all built inside,
+  because a surface able to substitute one would be a surface able to disable a gate by
+  forgetting a field. `Options.Events` receives one `engine.Event` per journal event —
+  the append happens first and only what the record accepted is announced — plus
+  `EventDelta`, the one kind with no payload behind it, marked by a zero `Seq` so a
+  fragment that is *happening* cannot be mistaken for a thing that *happened*.
+  `ConsentRequest` and `ConsentAnswer` cross the same boundary, so a surface can be
+  asked without importing `internal/permission`.
 - **`cmd/kopicode/lineedit`** — the line editor behind the prompt (ADR-0004): raw
   mode via `golang.org/x/term`, history, arrows, `Ctrl-A/E/K/U`. It lives under
   `cmd/` and not `internal/` because it is presentation, and the ADR-0003 allowlist
@@ -170,6 +353,67 @@ What is real now (2026-08-11):
   A key constant that lands without a name, a decoder entry *and* a binding fails the
   suite — `key_internal_test.go` derives the set from the source with `go/ast` rather
   than trusting a hand-written table.
+- **`cmd/kopicode` — two surfaces over one engine.** `repl` is the interactive one
+  (KAN-793, ADR-0004): lines to stdout, never the screen, so the terminal keeps its own
+  scrollback and its own selection. Streamed model text is treated as an **optimistic
+  prefix of the record** — tokens reach the terminal before the journal has an
+  `AssistantMessage` to derive from, so when the message lands the surface prints the
+  part of the recorded text that was not streamed, and prints the *divergence* rather
+  than hiding it if the streamed bytes were not a prefix. The user therefore sees
+  exactly what the journal holds. Piped output emits no escape byte at all by
+  construction and not by stripping: the non-interactive writer has no code path that
+  produces one, progress is a total no-op, and a test drives a whole session through it
+  and asserts on the captured bytes. `Ctrl-C` at the prompt discards the line; during a
+  turn it cancels that turn's context — which is what reaches the shell tool's process
+  group — and prompts again with the session open. The `[cancelled]` line is rendered
+  from the journal's `TurnCancelled` like every other line, not from what the surface
+  happened to see.
+- **`kopicode run --print` — the headless surface, schema 1** (KAN-794). Newline-
+  delimited JSON: line 1 is a `{"kind":"stream","schema":1,"record":…}` header, the only
+  line that is not an event, and every other line is one `engine.Event` with the journal
+  payload's field names. It accumulates nothing and holds no session state, so it has no
+  way to print something the record does not hold; a translation table would be exactly
+  where the two accounts drift. Deltas are the one thing deliberately dropped — the
+  `AssistantMessage` that follows is the recorded text, and emitting both would put the
+  same words on the stream twice with only one of them in the record. All five exit
+  codes are live and live in one file, because two front ends and a bench harness read
+  them: `0` success, `1` task not completed, `2` usage (nothing opened, locked or
+  written), `3` provider, `4` harness — and 4 is also the fail-closed default for an
+  outcome nobody mapped.
+- **`internal/bench` + `cmd/kopibench run`** (KAN-796) — the headless benchmark, a
+  first-class front end and not a test utility. One invocation is one arm over the
+  frozen corpus; a paired A/B is two invocations of one binary. Every task gets a git
+  worktree of its own, detached at the frozen commit, plus a temp HOME, and the task's
+  own suite decides the verdict. **Worktrees are reclaimed and the reclamation is
+  reported**: removal is deferred on every path including panic and cancellation
+  (`Release` detaches from the run's context before it runs a single git command), every
+  run reclaims what a previous crash orphaned before it starts, and the counts land in
+  the result — because silent cleanup and silent accumulation look identical from
+  outside. The checkouts live at a stable path under `.kopicode/bench/worktrees`, which
+  is what makes reclamation structural rather than a heuristic and what puts a
+  developer's own worktrees and another agent's leases out of reach by construction.
+  Exit codes are read for a *benchmark*: a task the model simply failed is `0`, because
+  that is the measurement and not an error — if a failing oracle were a failing command
+  then `make bench-smoke`, which replays traffic that solves nothing, would be red by
+  construction and would measure nothing. **It is not a security boundary**:
+  model-authored shell runs in a worktree, not a container, and isolation is slice 3.
+- **Three-bucket failure attribution** (KAN-797), derived from journal events and never
+  judged — it asks no model, matches no prose, and every rule reads a typed field of a
+  typed event. SLICE-1 §9 does not say which rule wins when a session trips several, so
+  the order is decided in one place and argued there: nothing-to-attribute first (a task
+  whose oracle passed did not fail, and a cancelled one was abandoned rather than
+  answered, so charging either would put rows into a tally meant to count failures),
+  then `harness`, then `unattributed`, then `model`. `harness` outranks `unattributed`
+  because the two make opposite-strength claims — one says we know the failure was ours,
+  the other says nobody can tell — and letting the taint swallow a known harness failure
+  moves it out of the only bucket with an acceptance bar of zero, which is the
+  flattering direction. A failing task whose journal cannot be read is
+  `BucketUnclassified` and an error, not a bucket: every bucket is a claim, and an
+  unreadable record supports none of them. The paired McNemar scorer takes outcomes as
+  data and knows nothing about how they were produced, so the statistics are driven
+  against known contingency tables with no provider, corpus or git repository in sight;
+  it is still scaffold, because slice 1 registers one harness configuration and there is
+  no second arm to feed it.
 - **`bench/tasks` + `internal/corpus`** — the frozen 10-task corpus (build plan step
   15) and the loader that validates it. Data, not code: a task is a starting tree, a
   statement in the form a user would type, and an argv oracle that exits non-zero
@@ -182,20 +426,45 @@ What is real now (2026-08-11):
   `go list ./...` and therefore out of every root gate; reference fixes live in
   `bench/_solutions/`, outside the corpus tree and behind a `_` the Go tool ignores.
 
-What does **not** exist: the engine loop (`internal/engine` holds the provider interface
-and the context assembler, and no loop that drives them), the REPL itself, the bench
-runner. `cmd/kopicode` and
-`cmd/kopibench` are stubs that exit **4** rather than 0 — an unimplemented binary exiting
-cleanly is how a broken harness passes a smoke test.
+What does **not** exist. Three open cards, and they are the ones that matter because
+each is a claim this project makes and has not yet demonstrated:
 
-This list was wrong on four counts when KAN-776 checked it on 2026-08-14, which is what
-"trust the code over the docs" is for: `internal/tools`, `internal/syntax`,
-`internal/permission`, `FileJournal` and blob spill all exist and are tested, and the
-OpenRouter client landed with this card. Read `ls internal/` before believing a paragraph
-about what is there.
+- **A real diff in a real repo (KAN-799)** and **a full corpus run (KAN-800)** — build
+  plan step 18 and the two halves of §Demo. Everything they need is built and nobody has
+  run either, so **no number in this repository has ever come from the real provider**.
+  `make bench`'s ~$2 is arithmetic over a published price list, not a measurement, and
+  the first run's reported usage replaces it. Treat any claim about the harness's effect
+  on a model as untested until these land.
+- **Tool definitions on the wire (KAN-844).** `provider.Request` carries none. The
+  system prompt is therefore the *only* description of the tools the model gets — do not
+  assume it is being handed a catalogue. The argument *names* are not the prompt's own
+  invention (they come off the `json` tags the dispatcher decodes and the repair loop
+  quotes back), but the per-tool and per-argument descriptions a wire format wants have
+  no home yet, and `parse.Schema` has no room for them, which is why the shape is a card
+  rather than a transcription.
 
-Build order is [`docs/SLICE-1.md`](docs/SLICE-1.md) §Build Plan. Step 1 is done, and
-steps 2–6 are partially landed as listed above.
+Absent with a card behind it: the fixture **recorder** (KAN-774), which is why every
+fixture is still hand-authored; a second registered model (KAN-850), and therefore no
+second arm for the scorer; `slog` inside the engine (KAN-771) — the `--debug` flag and
+the stderr handler are wired on both front ends, but the engine itself logs nothing yet.
+Absent with **no** card: the `.kopicode/lock` advisory lock SLICE-1 §8 describes.
+Nothing stops two sessions in one repository today; `internal/journal/file.go` carries
+the forward reference to it, so the gap is known rather than overlooked. Snapshot
+**restore** and session **fork** are slice 2 by design and are not gaps.
+
+**How this section goes wrong, which is worth more than the list above.** It described
+"foundations landed, no loop yet" on 2026-08-11. By 2026-08-14 KAN-776 found it wrong on
+four counts. By 2026-08-17 KAN-846 found it wrong about the loop, the REPL, both
+binaries, forced verification, the bench runner, attribution, cancellation, the system
+prompt and `make ci` — and six separate agents had been misled by it first. The pattern
+never varies: this list describes the repository as of whenever somebody last had a
+reason to look at it, and cards land faster than that. So `ls internal/`, `git log
+--oneline -30` and the package's own doc comment beat any paragraph here, including this
+one. Most packages open with a doc comment that argues its design; it is faster to read
+than this section and it cannot be stale relative to the code it sits in.
+
+Build order is [`docs/SLICE-1.md`](docs/SLICE-1.md) §Build Plan. Steps 1–17 are landed;
+step 18, the real-repo demo, is KAN-799.
 
 Do not add a test count here. It goes stale on the next PR. `make test` prints the real
 number, and a red suite — not a changed count — is the signal something is wrong.
@@ -227,28 +496,42 @@ not run the same **set**: the hook is deliberately the cheap subset. See below.
 
 ```bash
 make dev          # go mod download + tool install
-make fmt          # gofmt -w ./...
+make fmt          # gofmt -w over the package directories `go list` reports
+make fmtcheck     # the same set, read-only; fails on any unformatted file
 make lint         # golangci-lint run  (staticcheck is one of its linters — not a separate tool)
 make vet          # go vet ./...
-make check        # gofmt -l (fails on any unformatted file) + vet + lint
+make tidycheck    # fails if go.mod/go.sum are not tidy, without leaving them changed
+make check        # fmtcheck + vet + lint + tidycheck — every cheap static gate
 make test         # go test -short -race -count=1 ./...  — the fast inner loop, mock provider only
 make test-all     # the FULL suite as CI runs it: -race, integration build tag, e2e git fixtures
-make xbuild       # cross-compile every GOOS/GOARCH target — catches platform-specific code early
+make xbuild       # cross-compile AND vet every GOOS/GOARCH target — platform breaks surface here
 make bench-smoke  # the 10-task corpus against the MOCK provider — zero tokens
 make bench        # the corpus against the real pinned provider — COSTS MONEY
+make smoke-live   # ONE 16-token request against the pinned endpoint — costs cents, behind `live`
 make secrets      # gitleaks over history + tree
+make vuln         # govulncheck over the module
 make ci           # check + test-all + bench-smoke + xbuild
 make install-hooks
 ```
 
+**`fmt` and `fmtcheck` are fed `go list` output rather than `.`, and that is not
+cosmetic.** gofmt takes directories literally and walks all of them, while `go build`,
+`go vet`, `go test` and golangci-lint all skip directories whose name starts with `.` or
+`_`. On a machine running parallel agents that difference means every sibling checkout
+under `.claude/worktrees/` — so another agent's half-written file failed *your* pre-push
+hook, with a message giving no hint where the file came from. Both recipes also refuse
+to run on an empty list, because `go list` fails whenever the module does not load and
+`gofmt -l` handed nothing reads stdin, finds nothing and exits 0: a gate that reports
+success having checked no files is worse than the failure it was covering for.
+
 **What actually runs where, because three agents have now reasoned from a wrong version
 of this.** `make ci` is `check test-all bench-smoke xbuild`. `bench-smoke` joined it in
 KAN-801, once KAN-796 landed the runner and `cmd/kopibench` stopped being the stub that
-exits 4; it is also a CI job now. It is the **mock**-provider target — no network, no
-tokens, a couple of seconds — and `make bench`, the paid one, is in neither `ci` nor the
-hook. `make ci` is still not a literal mirror of the workflow: the `secrets` and `vuln`
-jobs stay out of it, because the hook already runs `secrets` and both want a tool the
-target does not install. The **pre-push hook** runs
+exits 4; it is a **required** CI check now, one of seven jobs. It is the
+**mock**-provider target — no network, no tokens, a couple of seconds — and `make bench`,
+the paid one, is in neither `ci` nor the hook. `make ci` is still not a literal mirror of
+the workflow: the `secrets` and `vuln` jobs stay out of it, because the hook already runs
+`secrets` and both want a tool the target does not install. The **pre-push hook** runs
 `check`, `test` and `secrets` — not `test-all`, not `xbuild`, not `bench-smoke` — by
 design, because the hook exists to catch cheap mistakes and CI exists to catch the rest.
 So a green pre-push does not predict a green CI, and `--no-verify` is not the way to get
@@ -272,6 +555,14 @@ a measurement: no bench run has happened, and the first one's reported usage rep
 See [`docs/provider-pin.md`](docs/provider-pin.md). `make bench-smoke` is the free
 equivalent and is what gates a PR.
 
+`make smoke-live` is the other target that spends money, and it spends cents rather than
+dollars: one 16-token request against the pinned endpoint, behind the `live` build tag so
+that neither `test` nor `test-all` can pick it up and the default suite stays hermetic
+and free. Its output is the point rather than its pass — it exists to record what the
+real API actually returns, including the exact casing of the response's `provider` field,
+which OpenRouter documents nowhere and `docs/provider-pin.md` has to record rather than
+guess. It has not been run yet (KAN-852).
+
 `OPENROUTER_API_KEY` is read from the environment. It must never appear in the journal,
 in a blob, in a log line, or in a test fixture.
 
@@ -284,7 +575,7 @@ in a blob, in a log line, or in a test fixture.
 - Commit trailer: `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`.
 - **Strict branch protection serialises landings.** Every merge puts the other open PRs
   out of date, so each one needs `gh pr update-branch <n>` and a full re-run before it
-  can merge. Wait for all six checks to be *created and resolved*, not merely
+  can merge. Wait for all seven checks to be *created and resolved*, not merely
   "not pending" — a loop that only greps for `pending` exits immediately in the window
   after `update-branch` when the checks do not exist yet.
 
@@ -335,25 +626,38 @@ default, expect harness worktrees to need the manual path above.
 ## Module map
 
 ```
-cmd/kopicode/        REPL surface — main package
+cmd/kopicode/        both surfaces — main package: `repl`, `run --print`, `version`
   lineedit/          raw-mode line editing for the prompt: history, arrows, Ctrl-A/E/K/U
+  repl/              the interactive surface: streaming, consent prompt, Ctrl-C
 cmd/kopibench/       headless bench runner — main package
 internal/
+  arch/              the static guards: import hygiene, ldflags targets, subprocess Dir/Env
   build/             the binary's identity: version, commit, dirty bit
-  engine/            agent loop, turn state, context assembly; the Provider interface
+  engine/            the turn loop, context assembly, dispatch, Open, the event stream
+  harness/           the registry, the harness config and its hash, the system prompt
   provider/          the wire format, SSE streaming, and the OpenRouter client
   provider/fixture/  recorded (today: hand-authored) provider traffic + its loader
   provider/mock/     the replay provider — the primary test seam
   parse/             tool-call extraction and repair
-  tools/             read, write, edit, list, grep, shell
-  journal/           Journal interface, FileJournal, blob spill, event types
-  repo/              git shadow refs, worktrees, diff rendering
+  anchor/            the anchor format — derivation and rendering, kept together
+  tools/             read, list, grep, write, edit, edit-fuzzy, shell
+  syntax/            the post-edit language gate
+  verify/            forced verification: discovery and the run
+  procgroup/         start a subprocess in its own group, end the whole group
+  journal/           Journal interface, FileJournal, blob spill, redaction, event types
+  repo/              git shadow refs — write-only in slice 1
   permission/        policy decisions
-  bench/             runner, oracle execution, McNemar scoring
+  corpus/            the loader, validator and digest for bench/tasks
+  bench/             runner, worktrees, oracle execution, attribution, McNemar scoring
 bench/tasks/         the frozen task corpus (data, not code)
+bench/_solutions/    reference fixes, outside the corpus tree and behind a `_`
 docs/adr/            decisions of record
 docs/SLICE-1.md      the current slice
 ```
+
+Two entries used to promise more than they hold, so they say less now. `repo/` writes
+shadow refs and nothing else — the bench runner owns worktrees, and the one diff that is
+journaled is built in process by `internal/tools/edit.go` (see the diff rule below).
 
 `bench/` in ADR-0003's sketch is split here into `cmd/kopibench/` plus
 `internal/bench/`, following Go's convention that main packages live under `cmd/`. The
@@ -370,9 +674,12 @@ These are the product's structural promises. Hold them.
 - **Both front ends talk to the engine through its interface only.** An import-hygiene
   test asserts `cmd/*` never reaches into engine internals. Keep it green — it is the
   only thing holding a boundary that has no network or module edge to enforce it. The
-  allowlist has exactly one non-engine entry, `internal/build`, because `--version` is a
-  surface concern and that package holds no behaviour; it is allowed only for as long as
-  it stays a leaf, which a second test enforces. Do not add a third entry without an ADR.
+  allowlist has three entries: `internal/engine` and `internal/bench`, which are the two
+  surfaces' engines, and `internal/build`, which is the one exception, because
+  `--version` is a surface concern and that package holds no behaviour. It is allowed
+  only for as long as it stays a leaf, which a second test enforces. Do not add a fourth
+  without an ADR — and note that `engine.Open` exists precisely so that a front end can
+  start a session without needing one.
 - **One session record, and it is the journal.** Do not build a parallel transcript.
   Everything the REPL prints and everything `--print` emits is **derived** from journal
   events. This is the lesson from sibei-flow
@@ -442,7 +749,11 @@ These are the product's structural promises. Hold them.
   which binary runs at all — and the syntax gate spawns all three.
   `internal/arch/subprocess_test.go` holds every `exec.Command`/`exec.CommandContext` in
   the tree to both halves, whatever it runs, and fails closed on a `Cmd` it cannot
-  follow. The git half was **not** relaxed to fit the general case: the rule is
+  follow. **A `Cmd` built as a struct literal counts** (KAN-853): `&exec.Cmd{Path: git,
+  Args: …}` spawns what `exec.Command` spawns and inherits exactly the same way, and it
+  passed all three rules until the guard learned to see it — including the elided form
+  inside a slice of `Cmd`s, where the type name never appears. The git half was **not**
+  relaxed to fit the general case: the rule is
   identical and only the failure message differs. Sites where the inherited directory or
   environment genuinely is the right one carry `//kopicode:allow-nodir: <reason>` or
   `//kopicode:allow-noenv: <reason>` in place. The two are independent, a waiver with no
@@ -455,10 +766,16 @@ These are the product's structural promises. Hold them.
   exactly four syntactic forms — `os.Environ()`, an `append` over one, `nil`, and a local
   variable in the same function assigned one of those — and **says nothing about any
   other shape**, which is not a gap to be closed but the funnel: every other shape means
-  a named builder, and the name and its doc comment are the review surface. This
-  repository has four — `repo.baseEnv`, `syntax.baseEnv`, `tools.childEnv`, and
-  `passThrough`/`oracleEnv` in `internal/corpus`. Build an environment from one of those,
-  never from the one you were handed.
+  a named builder, and the name and its doc comment are the review surface. The builders
+  live one per package that spawns something — `repo.baseEnv`, `syntax.baseEnv` (with
+  `goEnv`/`nodeEnv` over it), `tools.childEnv`, `verify.baseEnv`, `bench`'s `gitEnv`,
+  `goQueryEnv` and `oracleEnv`, and the `passThrough` allowlist in `internal/corpus`.
+  Build an environment from one of those, never from the one you were handed, and note
+  that they are not all the same shape by accident: an **allowlist** is right for
+  secrets, where the cost of missing one is unbounded, and wrong for a toolchain, where
+  `PATH`, `TMPDIR`, `SSL_CERT_FILE` and a dozen distribution-specific variables all have
+  to survive or the command does not run at all. `verify.baseEnv` and `syntax.baseEnv`
+  are therefore denylists, and say so where they are declared.
 - **Pin the provider on every benchmark request.** `provider.order`,
   `allow_fallbacks: false`, fixed `quantizations`, all recorded per result. An unpinned
   A/B number is not evidence.
@@ -476,7 +793,10 @@ question about the journal and the diff, not about which method got called.
 
 The mock provider **replays recorded traffic rather than synthesising it**. If it drifts
 from real provider behaviour, green plumbing tests will mask real breakage, so recorded
-fixtures come from actual runs and get refreshed when the provider changes.
+fixtures come from actual runs and get refreshed when the provider changes. That is the
+rule; today it is a rule with an exception, because the recorder is KAN-774 and every
+shipped fixture is still hand-authored. Read the fixture bullet above before you rely on
+a green suite as evidence about live behaviour.
 
 ## Pointers
 
