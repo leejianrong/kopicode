@@ -261,6 +261,63 @@ func TestRunShellRunsInTheRequestedDirectoryWithoutTheAPIKey(t *testing.T) {
 	}
 }
 
+// TestRunShellHomeOverride is KAN-874's acceptance criterion: a tool set with
+// Home set — the shape internal/bench builds for a task, so the model's shell
+// and the oracle that judges the tree agree on where it lives — gives
+// run_shell's child that HOME and USERPROFILE, not the real ones.
+func TestRunShellHomeOverride(t *testing.T) {
+	f := newFixture(t, nil)
+	s := f.set(t)
+
+	realHome := t.TempDir()
+	t.Setenv("HOME", realHome)
+	fakeHome := t.TempDir()
+	if fakeHome == realHome {
+		t.Fatal("t.TempDir() returned the same path twice; the test proves nothing")
+	}
+	s.Home = fakeHome
+
+	res, err := s.RunShell(t.Context(), tools.ShellRequest{
+		Command: `echo "home=[$HOME]"; echo "profile=[$USERPROFILE]"`,
+	})
+	if err != nil {
+		t.Fatalf("RunShell: %v", err)
+	}
+	out := lines(res.Stdout)
+	if len(out) != 2 {
+		t.Fatalf("stdout = %q, want two lines", res.Stdout)
+	}
+	if want := "home=[" + fakeHome + "]"; out[0] != want {
+		t.Errorf("HOME = %q, want %q — the real %s must not reach the child", out[0], want, realHome)
+	}
+	if want := "profile=[" + fakeHome + "]"; out[1] != want {
+		t.Errorf("USERPROFILE = %q, want %q", out[1], want)
+	}
+}
+
+// TestRunShellWithNoHomeOverrideSeesTheRealHOME pins the other half: a tool set
+// built the way the REPL builds one — tools.NewSet with Home left at its zero
+// value — must not be affected by this card. A real user's shell still sees
+// their real HOME.
+func TestRunShellWithNoHomeOverrideSeesTheRealHOME(t *testing.T) {
+	f := newFixture(t, nil)
+	s := f.set(t)
+	if s.Home != "" {
+		t.Fatalf("Home = %q, want the zero value on a freshly opened set", s.Home)
+	}
+
+	realHome := t.TempDir()
+	t.Setenv("HOME", realHome)
+
+	res, err := s.RunShell(t.Context(), tools.ShellRequest{Command: `echo "home=[$HOME]"`})
+	if err != nil {
+		t.Fatalf("RunShell: %v", err)
+	}
+	if want := "home=[" + realHome + "]\n"; res.Stdout != want {
+		t.Errorf("stdout = %q, want %q — the REPL path must see its real HOME unchanged", res.Stdout, want)
+	}
+}
+
 // TestRunShellReportsAKillFromOutside keeps "killed by a signal" distinct from
 // "exited non-zero". A test suite that was OOM-killed did not fail its task.
 func TestRunShellReportsAKillFromOutside(t *testing.T) {
