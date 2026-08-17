@@ -114,7 +114,16 @@ func (a EngineAgent) Run(ctx context.Context, spec SessionSpec) (SessionOutcome,
 	if err != nil {
 		return SessionOutcome{}, err
 	}
+	return a.runSession(ctx, prov, spec)
+}
 
+// runSession is Run's body once the provider has been chosen. Split out so a
+// test in this package can drive it with a hand-built mock.Provider — a native
+// run_shell tool call rather than one of the two shipped fixtures — without
+// teaching EngineAgent.provider a third ProviderKind for one test. See
+// session_internal_test.go's TestEngineAgentRunShellSeesTheTaskTempHOME
+// (KAN-874).
+func (a EngineAgent) runSession(ctx context.Context, prov engine.Provider, spec SessionSpec) (SessionOutcome, error) {
 	// The working tree's session lock (docs/SLICE-1.md §8), first and released
 	// last, exactly as engine.Open takes it for the REPL. Two things about it
 	// are worth stating here rather than leaving to be inferred.
@@ -151,6 +160,14 @@ func (a EngineAgent) Run(ctx context.Context, spec SessionSpec) (SessionOutcome,
 		return SessionOutcome{}, fmt.Errorf("bench: opening the tool set for %s: %w", spec.Task.ID, err)
 	}
 	defer func() { _ = set.Close() }()
+	// The temp HOME goes on the tool set too, and not only on the oracle
+	// (oracleEnv in oracle.go): without it, model-authored run_shell sees the
+	// operator's real HOME while the suite that judges the task runs against a
+	// clean one, and a task can "pass" only because its shell reached the
+	// operator's ~/.gitconfig or toolchain caches — a result that will not
+	// reproduce elsewhere (KAN-874). See tools.Set.Home and childEnv in
+	// internal/tools/shell.go.
+	set.Home = spec.Home
 
 	// The bench policy auto-approves inside the task's worktree and denies
 	// outside it. It exists in internal/permission precisely so the headless

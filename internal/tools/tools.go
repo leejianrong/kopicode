@@ -154,6 +154,24 @@ type Set struct {
 	Limits Limits
 	// Clock is where run_shell's timeout comes from. Nil means the real one.
 	Clock Clock
+
+	// Home overrides HOME (and USERPROFILE) in the environment run_shell's
+	// child sees. Empty means inherit the ambient one — the REPL path, where a
+	// real user's shell must see their real HOME.
+	//
+	// internal/bench sets this per task to the task's temp HOME, so
+	// model-authored shell and the oracle that judges the tree afterwards
+	// agree on where dotfiles, toolchain caches and git config live (KAN-874).
+	// Without it a task could pass only because its shell reached the
+	// operator's real ~/.gitconfig or ~/.cache while the oracle ran against a
+	// clean one — a result that would not reproduce on another machine, which
+	// is a measurement defect and not (yet) a security one; isolation is
+	// slice 3 per ADR-0005.
+	//
+	// This is not a sandbox: it changes one variable in the child's
+	// environment, nothing else, and a command can still reach outside it by
+	// naming an absolute path. See childEnv in shell.go.
+	Home string
 }
 
 // NewSet opens dir as a repository root and returns the tools bound to it. The

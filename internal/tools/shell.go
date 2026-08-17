@@ -201,7 +201,7 @@ func (s *Set) RunShell(ctx context.Context, req ShellRequest) (ShellResult, erro
 	var stdout, stderr bytes.Buffer
 	cmd := newShellCmd(req.Command)
 	cmd.Dir = p.Abs
-	cmd.Env = childEnv()
+	cmd.Env = childEnv(s.Home)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	// A backstop for the one case the group kill cannot reach: a descendant
@@ -291,22 +291,37 @@ func (s *Set) stopGroup(cmd *exec.Cmd, waited <-chan error) (string, error) {
 	return procgroup.Stop(cmd, waited, s.clock(), s.Limits.ShellGrace)
 }
 
-// childEnv is the parent environment minus the provider credential.
+// childEnv is the parent environment minus the provider credential, with HOME
+// and USERPROFILE substituted by home when it is not empty.
 //
-// Everything else is inherited, because a coding agent's commands need PATH,
-// HOME and whatever the project's toolchain reads, and an allowlist would break
+// Everything else is inherited, because a coding agent's commands need PATH
+// and whatever the project's toolchain reads, and an allowlist would break
 // real builds for no gain — the command itself is arbitrary, so this is not a
 // sandbox and pretending otherwise would be the dishonest version. The one
-// removal is the one thing CLAUDE.md says must appear in no journal, no blob
-// and no log.
-func childEnv() []string {
+// unconditional removal is the one thing CLAUDE.md says must appear in no
+// journal, no blob and no log.
+//
+// home is [Set.Home]. It is empty on the REPL path, so a real user's shell
+// keeps their real HOME; internal/bench sets it per task, mirroring the
+// allowlisted oracleEnv's own HOME substitution in oracle.go so the two halves
+// of one task — the model's shell and the suite that judges what it left
+// behind — agree on where it lives (KAN-874). Both names are set together
+// because Windows programs read USERPROFILE rather than HOME, the same pairing
+// oracleEnv uses.
+func childEnv(home string) []string {
 	env := os.Environ()
-	out := make([]string, 0, len(env))
+	out := make([]string, 0, len(env)+2)
 	for _, kv := range env {
 		if strings.HasPrefix(kv, apiKeyEnv+"=") {
 			continue
 		}
+		if home != "" && (strings.HasPrefix(kv, "HOME=") || strings.HasPrefix(kv, "USERPROFILE=")) {
+			continue
+		}
 		out = append(out, kv)
+	}
+	if home != "" {
+		out = append(out, "HOME="+home, "USERPROFILE="+home)
 	}
 	return out
 }
