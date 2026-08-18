@@ -48,11 +48,14 @@
 // # No credentials, by construction
 //
 // A recorded fixture is real HTTP and real request headers carry
-// OPENROUTER_API_KEY, which is why the recorder scrubs at write time through a
-// header allowlist rather than a denylist (docs/SLICE-1.md §Build Plan step 3).
-// Fixtures here carry no request headers at all and the response header map is
-// bounded by [allowedResponseHeaders]. There is nothing to scrub because there
-// is nowhere to put it.
+// OPENROUTER_API_KEY, which is why [Recorder] scrubs at write time through a
+// header allowlist rather than a denylist (docs/SLICE-1.md §Build Plan step 3):
+// Exchange.RequestHeaders is bounded by [allowedRequestHeaders] and the
+// response header map by [allowedResponseHeaders]. Authorization is on neither
+// list and [Validate] refuses a fixture that carries a header outside them, so
+// a mistake here fails to load rather than failing to be noticed. Every
+// hand-authored fixture in the data directory carries no request at all,
+// since it never had a real one to scrub.
 package fixture
 
 import (
@@ -264,6 +267,15 @@ type Exchange struct {
 	// test rather than for the machine.
 	Note string `json:"note"`
 
+	// RequestHeaders are the request headers worth keeping, allowlisted by
+	// [allowedRequestHeaders]. It is the request-side counterpart of
+	// Response.Headers, and empty on every fixture the recorder does not
+	// write: a hand-authored fixture carries no request at all, since it never
+	// had one. The credential travels in a header this allowlist excludes —
+	// see [Recorder] — and it is dropped rather than redacted, so there is
+	// never a masked value on disk to un-mask by mistake.
+	RequestHeaders map[string]string `json:"request_headers,omitempty"`
+
 	// Response is what came back.
 	Response Response `json:"response"`
 
@@ -360,6 +372,19 @@ type Usage struct {
 var allowedResponseHeaders = map[string]bool{
 	"content-type": true,
 	"x-request-id": true,
+}
+
+// allowedRequestHeaders is the allowlist of request headers a fixture may
+// carry, the request-side counterpart of [allowedResponseHeaders] and for the
+// identical reason: it names what is safe to keep rather than what to
+// exclude, so it stays correct the day OpenRouter or this project adds a new
+// auth header nobody thought to add to a denylist. Authorization — where
+// OPENROUTER_API_KEY actually travels (internal/provider/client.go,
+// newHTTPRequest) — is deliberately absent and must never be added: see
+// [Recorder].
+var allowedRequestHeaders = map[string]bool{
+	"content-type": true,
+	"accept":       true,
 }
 
 // ErrNotFound reports a fixture name with no file behind it.
