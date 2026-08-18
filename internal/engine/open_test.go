@@ -28,6 +28,16 @@ func openIn(t *testing.T, fixture string, opts engine.Options) (*engine.Session,
 	if err != nil {
 		t.Fatalf("loading fixture %s: %v", fixture, err)
 	}
+	return openWithProvider(t, prov, opts)
+}
+
+// openWithProvider is openIn's shared body, over a provider the caller already
+// has — a loaded fixture, or one built in memory with script (harness_test.go)
+// for a shape no shipped fixture holds, such as a run_shell call. It exists so
+// a test that needs the latter still drives the real engine.Open path rather
+// than reinventing the setup around it.
+func openWithProvider(t *testing.T, prov *mock.Provider, opts engine.Options) (*engine.Session, *mock.Provider) {
+	t.Helper()
 
 	dir := t.TempDir()
 	write(t, dir, "internal/greet/greet.go", greetGo)

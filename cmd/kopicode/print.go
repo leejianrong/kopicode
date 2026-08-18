@@ -174,6 +174,11 @@ func headless(prompt string, stdout, stderr io.Writer, opts engine.Options) int 
 	out := newEmitter(stdout)
 	opts.Events = out.observe
 	opts.Consent = denyHeadless
+	// Nobody is at a terminal here (KAN-885): denyHeadless is the harness
+	// answering its own question, not a person's, so every PermissionDecided
+	// this session journals must be attributed to the policy and not to a
+	// user who was never asked.
+	opts.ConsentMode = engine.ConsentUnattended
 
 	ctx := context.Background()
 
@@ -231,7 +236,11 @@ func headless(prompt string, stdout, stderr io.Writer, opts engine.Options) int 
 // no — is the one behaviour the permission package exists to make unreachable.
 // Sandboxing is slice 3 (docs/SLICE-1.md §9); until then the honest headless
 // answer is no, and it is on the record as a PermissionDecided rather than
-// swallowed as an error, so a reader can see what the model asked for.
+// swallowed as an error, so a reader can see what the model asked for. Pairing
+// this with Options.ConsentMode set to engine.ConsentUnattended (see headless,
+// above) is what stamps that PermissionDecided permission.SourcePolicy instead
+// of permission.SourceUser — KAN-885: this function refusing is not a person
+// refusing.
 func denyHeadless(context.Context, engine.ConsentRequest) (engine.ConsentAnswer, error) {
 	return engine.ConsentDeny, nil
 }

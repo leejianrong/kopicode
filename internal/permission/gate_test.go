@@ -66,7 +66,7 @@ func (a *verdictAsker) requests() []permission.Request {
 
 func mustAsk(t *testing.T, v permission.Verdict) permission.Policy {
 	t.Helper()
-	p, err := permission.NewAsk(&verdictAsker{verdict: v})
+	p, err := permission.NewAsk(&verdictAsker{verdict: v}, permission.SourceUser)
 	if err != nil {
 		t.Fatalf("building ask policy: %v", err)
 	}
@@ -464,7 +464,7 @@ func TestRootIsResolvedThroughTheResolver(t *testing.T) {
 func TestSessionGrantIsExactMatch(t *testing.T) {
 	d := newDirs(t)
 	asker := &verdictAsker{verdict: permission.VerdictAllowSession}
-	policy, err := permission.NewAsk(asker)
+	policy, err := permission.NewAsk(asker, permission.SourceUser)
 	if err != nil {
 		t.Fatalf("building ask policy: %v", err)
 	}

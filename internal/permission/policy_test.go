@@ -171,7 +171,7 @@ func TestBenchSurfacesAResolverFailure(t *testing.T) {
 func TestAskAttributesToTheUser(t *testing.T) {
 	for _, v := range []permission.Verdict{permission.VerdictAllow, permission.VerdictDeny, permission.VerdictAllowSession} {
 		t.Run(v.String(), func(t *testing.T) {
-			policy, err := permission.NewAsk(&verdictAsker{verdict: v})
+			policy, err := permission.NewAsk(&verdictAsker{verdict: v}, permission.SourceUser)
 			if err != nil {
 				t.Fatalf("building ask policy: %v", err)
 			}
@@ -189,10 +189,49 @@ func TestAskAttributesToTheUser(t *testing.T) {
 	}
 }
 
+// TestAskAttributesToTheConfiguredSource is TestAskAttributesToTheUser's
+// mirror image (KAN-885): the same forwarding policy, built with
+// permission.SourcePolicy instead, must never stamp SourceUser — a headless
+// run's own answer recorded as though a human gave it is a false fact in the
+// one session record there is.
+func TestAskAttributesToTheConfiguredSource(t *testing.T) {
+	for _, v := range []permission.Verdict{permission.VerdictAllow, permission.VerdictDeny, permission.VerdictAllowSession} {
+		t.Run(v.String(), func(t *testing.T) {
+			policy, err := permission.NewAsk(&verdictAsker{verdict: v}, permission.SourcePolicy)
+			if err != nil {
+				t.Fatalf("building ask policy: %v", err)
+			}
+			dec, err := policy.Decide(t.Context(), permission.Request{Kind: permission.KindRunShell})
+			if err != nil {
+				t.Fatalf("Decide failed: %v", err)
+			}
+			if dec.Verdict != v {
+				t.Errorf("verdict = %s, want %s", dec.Verdict, v)
+			}
+			if dec.Source != permission.SourcePolicy {
+				t.Errorf("source = %s, want policy — nobody was asked, so nobody may be credited", dec.Source)
+			}
+		})
+	}
+}
+
+// TestAskRefusesAnUnattributableSource: a policy that could not say who
+// answers here would produce decisions the gate cannot attribute, which is
+// exactly the failure Gate.Check already refuses once it reads
+// Decision.Source.
+func TestAskRefusesAnUnattributableSource(t *testing.T) {
+	if _, err := permission.NewAsk(&verdictAsker{}, permission.SourceUnspecified); err == nil {
+		t.Fatal("NewAsk with SourceUnspecified succeeded")
+	}
+	if _, err := permission.NewAsk(&verdictAsker{}, permission.Source(42)); err == nil {
+		t.Fatal("NewAsk with an undeclared source succeeded")
+	}
+}
+
 // TestAskSurfacesTheAskerFailure: an unanswerable question is not a yes.
 func TestAskSurfacesTheAskerFailure(t *testing.T) {
 	sentinel := errors.New("stdin closed")
-	policy, err := permission.NewAsk(&verdictAsker{verdict: permission.VerdictAllow, err: sentinel})
+	policy, err := permission.NewAsk(&verdictAsker{verdict: permission.VerdictAllow, err: sentinel}, permission.SourceUser)
 	if err != nil {
 		t.Fatalf("building ask policy: %v", err)
 	}
@@ -208,7 +247,7 @@ func TestAskSurfacesTheAskerFailure(t *testing.T) {
 // TestAskRefusesConstructionWithoutAnAsker: an interactive policy with nobody
 // to ask can only invent an answer.
 func TestAskRefusesConstructionWithoutAnAsker(t *testing.T) {
-	if _, err := permission.NewAsk(nil); err == nil {
+	if _, err := permission.NewAsk(nil, permission.SourceUser); err == nil {
 		t.Fatal("NewAsk(nil) succeeded")
 	}
 }
@@ -219,7 +258,7 @@ func TestAskRefusesConstructionWithoutAnAsker(t *testing.T) {
 func TestAskerSeesTheRequestUnchanged(t *testing.T) {
 	d := newDirs(t)
 	asker := &verdictAsker{verdict: permission.VerdictAllow}
-	policy, err := permission.NewAsk(asker)
+	policy, err := permission.NewAsk(asker, permission.SourceUser)
 	if err != nil {
 		t.Fatalf("building ask policy: %v", err)
 	}
