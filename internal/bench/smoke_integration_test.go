@@ -114,6 +114,11 @@ func TestSmokeRunOverTheRealCorpus(t *testing.T) {
 		fmt.Sprintf("attribution over %d failed task(s): harness 0, unattributed 0, model %d, "+
 			"unclassified 0", corpus.MinTasks, corpus.MinTasks),
 		"unattributed = 0",
+		// KAN-905: this is `make bench-smoke`'s actual run, so the footer
+		// explaining a 0-pass mock run must appear on the real thing and not
+		// only in a hand-built unit test.
+		"SMOKE BASELINE",
+		fmt.Sprintf("0/%d passing is EXPECTED", corpus.MinTasks),
 	} {
 		if !strings.Contains(report.String(), want) {
 			t.Errorf("the report does not say %q:\n%s", want, report.String())

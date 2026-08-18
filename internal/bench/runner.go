@@ -122,6 +122,14 @@ type Runner struct {
 	// Agent runs one task's session. Required.
 	Agent Agent
 
+	// Provider is where this run's traffic came from — mock (replayed
+	// fixtures) or live (the real provider). It is carried onto [RunResult]
+	// verbatim rather than derived from Agent, because Agent is an interface a
+	// test may satisfy without a notion of "mock" at all, and the report's
+	// smoke-baseline footer (KAN-905) needs an explicit signal to gate on
+	// rather than a guess from the pass count.
+	Provider ProviderKind
+
 	// Commit is the frozen commit worktrees are created from. Empty means
 	// HEAD of the repository holding the corpus.
 	Commit string
@@ -229,6 +237,7 @@ func (r *Runner) Run(ctx context.Context) (*RunResult, error) {
 		Jobs:          r.jobs(),
 		Started:       started,
 		OutDir:        outDir,
+		Provider:      r.Provider,
 	}
 
 	result.Tasks = r.runTasks(ctx, taskEnv{
