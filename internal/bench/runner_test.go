@@ -624,6 +624,111 @@ func TestReportNamesTheReclamation(t *testing.T) {
 			t.Errorf("the report does not mention %q:\n%s", want, report)
 		}
 	}
+	// This runner never set Provider, so the run is not identifiably a mock
+	// run — the footer must not appear on a guess.
+	if strings.Contains(report, "SMOKE BASELINE") {
+		t.Errorf("the report claims a smoke baseline for a run with no Provider set:\n%s", report)
+	}
+}
+
+// TestWriteReportSmokeBaseline is KAN-905: `make bench-smoke` prints ten
+// model-attributed failures and exits 0, correctly, but nothing said that was
+// expected. The footer this test drives is gated on [RunResult.Provider], an
+// explicit field, rather than on the pass count or the exit code — either of
+// which a genuine regression against the same fixture could coincidentally
+// match — and it must disappear the moment the run itself looks broken, so a
+// real regression still reads differently from the expected baseline.
+func TestWriteReportSmokeBaseline(t *testing.T) {
+	base := func() *bench.RunResult {
+		return &bench.RunResult{
+			RunID: "test-run",
+			Tasks: []bench.TaskResult{
+				{TaskID: "task-01", Passed: false, Bucket: bench.BucketModel},
+			},
+			Reclamation: bench.Reclamation{Created: 1, Removed: 1},
+		}
+	}
+
+	t.Run("mock and clean prints the footer", func(t *testing.T) {
+		r := base()
+		r.Provider = bench.ProviderMock
+		var b strings.Builder
+		if err := bench.WriteReport(&b, r); err != nil {
+			t.Fatalf("WriteReport: %v", err)
+		}
+		report := b.String()
+		for _, want := range []string{
+			"SMOKE BASELINE",
+			"0/1 passing is EXPECTED",
+			"not asserting that any task passed",
+		} {
+			if !strings.Contains(report, want) {
+				t.Errorf("the report does not mention %q:\n%s", want, report)
+			}
+		}
+	})
+
+	t.Run("live provider never gets the footer", func(t *testing.T) {
+		r := base()
+		r.Provider = bench.ProviderLive
+		var b strings.Builder
+		if err := bench.WriteReport(&b, r); err != nil {
+			t.Fatalf("WriteReport: %v", err)
+		}
+		if strings.Contains(b.String(), "SMOKE BASELINE") {
+			t.Errorf("a live-provider run must never print the smoke baseline:\n%s", b.String())
+		}
+	})
+
+	t.Run("unset provider never gets the footer", func(t *testing.T) {
+		r := base()
+		var b strings.Builder
+		if err := bench.WriteReport(&b, r); err != nil {
+			t.Fatalf("WriteReport: %v", err)
+		}
+		if strings.Contains(b.String(), "SMOKE BASELINE") {
+			t.Errorf("a run with no provider recorded must not guess it was the smoke run:\n%s", b.String())
+		}
+	})
+
+	t.Run("a session error suppresses the footer even under mock", func(t *testing.T) {
+		r := base()
+		r.Provider = bench.ProviderMock
+		r.Tasks[0].SessionErr = "the session panicked"
+		var b strings.Builder
+		if err := bench.WriteReport(&b, r); err != nil {
+			t.Fatalf("WriteReport: %v", err)
+		}
+		if strings.Contains(b.String(), "SMOKE BASELINE") {
+			t.Errorf("a real session error must read differently from the expected baseline:\n%s", b.String())
+		}
+	})
+
+	t.Run("a worktree that could not be created suppresses the footer", func(t *testing.T) {
+		r := base()
+		r.Provider = bench.ProviderMock
+		r.Reclamation.CreateFailed = []string{"task-02"}
+		var b strings.Builder
+		if err := bench.WriteReport(&b, r); err != nil {
+			t.Fatalf("WriteReport: %v", err)
+		}
+		if strings.Contains(b.String(), "SMOKE BASELINE") {
+			t.Errorf("a run that could not put every task a question must not claim the baseline:\n%s", b.String())
+		}
+	})
+
+	t.Run("a worktree that could not be reclaimed suppresses the footer", func(t *testing.T) {
+		r := base()
+		r.Provider = bench.ProviderMock
+		r.Reclamation.Failed = []string{"task-01"}
+		var b strings.Builder
+		if err := bench.WriteReport(&b, r); err != nil {
+			t.Fatalf("WriteReport: %v", err)
+		}
+		if strings.Contains(b.String(), "SMOKE BASELINE") {
+			t.Errorf("an unreclaimed worktree must not read as a clean smoke run:\n%s", b.String())
+		}
+	})
 }
 
 func first(s string, n int) string {
