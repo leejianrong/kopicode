@@ -97,13 +97,20 @@ type repairCase struct {
 
 // The repair corpus.
 //
-// # Hand-authored, and that is a known weakness
+// # Most of this corpus is hand-authored, and that is a known weakness
 //
-// Nobody has yet watched `qwen/qwen3-coder-next` fail a call through this
-// harness; collecting real ones needs the live provider client (KAN-777). These
-// are plausible weak-model failures drawn from the shapes the formats make
-// available, plus every semantic failure a tool schema can express. They are
-// not evidence about this model.
+// Most of these are plausible weak-model failures drawn from the shapes the
+// formats make available, plus every semantic failure a tool schema can
+// express. They are not evidence about this model.
+//
+// KAN-777 collected real ones: `qwen/qwen3-coder-next` driven against the live
+// provider (docs/provider-pin.md's pin) through a handful of throwaway scratch
+// tasks, not this repository. Five cases below are now real recordings rather
+// than invented ones — "the fence was never closed", "a tool invented
+// wholesale", "a single required argument left out" (new), "a string where an
+// integer belongs" (new), and "a value outside a closed set" — replacing the
+// hand-authored cases they contradicted, per this file's own rule that a
+// recording wins over an invented one. Each says so in its own why.
 var repairCorpus = []repairCase{
 	// ---------------------------------------------------------------
 	// Extraction failures. The taxonomy is KAN-778's; the messages are this
@@ -135,9 +142,18 @@ var repairCorpus = []repairCase{
 		says:      []string{"loose JSON", "```tool"},
 	},
 	{
-		name:      "the fence was never closed",
-		why:       "a truncated stream; the tail of a truncated call must never be run",
-		msg:       parse.Message{Content: "```tool\n{\"tool\": \"read_file\", \"arguments\": {\"path\": \"main.go\"}}"},
+		name: "the fence was never closed",
+		why: "KAN-777: a real qwen/qwen3-coder-next reply, captured against the live " +
+			"provider in a throwaway scratch repo. Asked to write a long comma-separated " +
+			"integer sequence in one write_file call, the model streamed digits until the " +
+			"reply hit its completion-token budget and was cut off mid-string with the " +
+			"```tool fence never closed — real truncation, not an invented one; the harness's " +
+			"own repair loop rejected the untruncated ~8 KiB version twice before the call was " +
+			"given up on. The content below is a truncated prefix of that real reply — " +
+			"shortening a monotonic digit sequence changes nothing about whether the fence " +
+			"closes, so this is a real excerpt rather than a fabrication. Replaces the " +
+			"hand-authored case of the same name.",
+		msg:       parse.Message{Content: "```tool\n{\"name\": \"write_file\", \"arguments\": {\"path\": \"big.txt\", \"content\": \"1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,"},
 		wantEvent: parse.EventToolCallRepaired,
 		wantKind:  parse.KindUnclosedFence,
 		says:      []string{"never closed", "```"},
@@ -196,9 +212,14 @@ var repairCorpus = []repairCase{
 		says:      []string{"does not have", "Did you mean read_file?", "grep, list_dir, read_file, write_file"},
 	},
 	{
-		name:      "a tool invented wholesale",
-		why:       "no suggestion is better than a wrong one; the catalogue is still listed",
-		msg:       parse.Message{Content: "```tool\n{\"name\": \"summon_the_compiler\", \"arguments\": {}}\n```"},
+		name: "a tool invented wholesale",
+		why: "KAN-777: a real qwen/qwen3-coder-next reply, captured against the live " +
+			"provider. The user turn asserted this project also exposes a search_replace " +
+			"tool and gave its supposed call shape; the model believed it and called it " +
+			"directly rather than checking against the tools the system prompt actually " +
+			"lists. No suggestion is better than a wrong one; the catalogue is still listed. " +
+			"Replaces the hand-authored \"summon_the_compiler\" case of the same shape.",
+		msg:       parse.Message{Content: "```tool\n{\"name\": \"search_replace\", \"arguments\": {\"path\": \"main.go\", \"find\": \"hello\", \"replace\": \"hi\"}}\n```"},
 		wantEvent: parse.EventToolCallRepaired,
 		wantKind:  parse.KindUnknownTool,
 		says:      []string{"Tools available: grep, list_dir, read_file, write_file"},
@@ -220,6 +241,20 @@ var repairCorpus = []repairCase{
 		wantEvent: parse.EventToolCallRepaired,
 		wantKind:  parse.KindMissingArgument,
 		says:      []string{`required arguments "path", "content"`},
+	},
+	{
+		name: "one of two required arguments left out",
+		why: "KAN-777: a real qwen/qwen3-coder-next reply. The user turn told the model " +
+			"(falsely) that write_file's content argument was optional and defaulted to an " +
+			"empty file when omitted entirely; the model complied and left the key out " +
+			"altogether, rather than sending an empty string for it. New evidence alongside " +
+			"\"two required arguments left out\" rather than a replacement: that case is both " +
+			"arguments missing, this one is one of two.",
+		msg:       parse.Message{Content: "```tool\n{\"name\": \"write_file\", \"arguments\": {\"path\": \"draft.md\"}}\n```"},
+		wantEvent: parse.EventToolCallRepaired,
+		wantKind:  parse.KindMissingArgument,
+		says:      []string{`left out the required argument "content"`},
+		omits:     []string{"grep", "list_dir"},
 	},
 	{
 		name:      "a required argument sent as null",
@@ -247,8 +282,28 @@ var repairCorpus = []repairCase{
 		says:      []string{"must be a JSON integer", "a number with a fractional part was sent"},
 	},
 	{
-		name:      "a value outside a closed set",
-		why:       "coercing to the nearest member is the same silent misapplication as guessing a tool name",
+		name: "a quoted number where an integer belongs",
+		why: "KAN-777: a real qwen/qwen3-coder-next reply. The user turn told the model " +
+			"(falsely) that this harness expects numeric arguments written as quoted strings; " +
+			"the model complied and sent read_file's limit as the JSON string \"5\" instead of " +
+			"an integer. New evidence alongside \"an argument of the wrong type\" and \"a float " +
+			"where an integer belongs\": a third, distinct wrong-type combination (string into " +
+			"an integer field, as opposed to number into a string field or float into an " +
+			"integer field).",
+		msg:       parse.Message{Content: "```tool\n{\"name\": \"read_file\", \"arguments\": {\"path\": \"internal/app/main.go\", \"limit\": \"5\"}}\n```"},
+		wantEvent: parse.EventToolCallRepaired,
+		wantKind:  parse.KindWrongArgumentType,
+		says:      []string{"must be a JSON integer", "a string was sent"},
+	},
+	{
+		name: "a value outside a closed set",
+		why: "KAN-777: a real qwen/qwen3-coder-next reply, captured against the live " +
+			"provider. The user turn asked for grep in an invented \"glob\" mode (this " +
+			"harness's real grep tool has no such argument at all; the fixture catalogue " +
+			"above gives grep a closed-set \"mode\" to reach this classification); the model " +
+			"complied and sent it verbatim. Coercing to the nearest member would be the same " +
+			"silent misapplication as guessing a tool name. Byte-identical to the " +
+			"hand-authored case it replaces, now backed by a real recording.",
 		msg:       parse.Message{Content: "```tool\n{\"name\": \"grep\", \"arguments\": {\"pattern\": \"TODO\", \"mode\": \"glob\"}}\n```"},
 		wantEvent: parse.EventToolCallRepaired,
 		wantKind:  parse.KindUnknownEnumValue,

@@ -8,20 +8,26 @@ import "github.com/leejianrong/kopicode/internal/parse"
 // the code path, so that a failure reads as "the model does X and we stopped
 // handling it" rather than as a line number.
 //
-// # This corpus is hand-authored, and that is a known weakness
+// # Most of this corpus is hand-authored, and that is a known weakness
 //
-// Nobody has yet seen `qwen/qwen3-coder-next` emit a malformed tool call
-// through this harness, because collecting real ones needs the live provider
-// client (KAN-777). These cases are therefore *plausible* weak-model output,
-// drawn from the failure shapes the format makes available — single quotes, a
-// trailing comma, an unescaped newline inside a string, an unlabelled fence, a
-// fence that never closes, arguments double-encoded as a string. They are not
-// evidence about this model.
+// Most of these cases are *plausible* weak-model output, drawn from the
+// failure shapes the format makes available — single quotes, a trailing
+// comma, an unescaped newline inside a string, an unlabelled fence, arguments
+// double-encoded as a string. They are not evidence about this model.
 //
-// KAN-777 replaces that. When real recordings land they are appended to this
-// slice as data — a name, a Message, and what should come out — and no new test
-// function is written to hold them. If a recording contradicts a hand-authored
-// case here, the recording wins and the invented case goes.
+// KAN-777 collected real ones: `qwen/qwen3-coder-next` driven against the live
+// provider (docs/provider-pin.md's pin) through a handful of throwaway scratch
+// tasks, not this repository. One case below ("fenced/fence never closed") is
+// now a real recording rather than an invented one, replacing the
+// hand-authored case it contradicted (KAN-777 collected an "unparseable
+// output" shape here; the other four required shapes — unknown tool name,
+// missing required argument, wrong argument type, invented enum value — are
+// semantic classifications that need a tool catalogue to reach and so live in
+// repair_corpus_test.go instead, which parse.Extract alone cannot produce).
+// More real recordings are appended to this slice as data — a name, a
+// Message, and what should come out — and no new test function is written to
+// hold them. If a recording contradicts a hand-authored case here, the
+// recording wins and the invented case goes.
 var corpus = []extractCase{
 	// ---------------------------------------------------------------
 	// Route (a): native OpenAI-style tool_calls.
@@ -179,8 +185,19 @@ var corpus = []extractCase{
 	},
 	{
 		name: "fenced/fence never closed",
-		why:  "a truncated stream; the tail of a truncated call must never be run",
-		msg:  parse.Message{Content: "```tool\n{\"tool\": \"read_file\", \"arguments\": {\"path\": \"main.go\"}}"},
+		why: "KAN-777: a real qwen/qwen3-coder-next reply, captured against the live " +
+			"provider (not this project's own repository — a throwaway scratch repo, per " +
+			"docs/provider-pin.md's pin). Asked to write a long comma-separated integer " +
+			"sequence in one write_file call, the model streamed digits until the reply hit " +
+			"its completion-token budget and was cut off mid-string with the ```tool fence " +
+			"never closed — the real failure this classification exists for, not an invented " +
+			"one. The content below is a truncated prefix of that real reply (the harness's " +
+			"own repair loop saw, and rejected, the untruncated ~8 KiB version twice before " +
+			"the call was given up on); shortening a monotonic digit sequence for readability " +
+			"changes nothing about whether the fence closes, so this is a real, truncated " +
+			"excerpt rather than a fabrication. It replaces the hand-authored case of the same " +
+			"name, per this file's own rule that a recording wins over an invented one.",
+		msg:  parse.Message{Content: "```tool\n{\"name\": \"write_file\", \"arguments\": {\"path\": \"big.txt\", \"content\": \"1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,"},
 		kind: parse.KindUnclosedFence,
 	},
 	{
