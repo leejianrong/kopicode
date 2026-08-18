@@ -171,6 +171,13 @@ func TestClassifyReadsTheJournal(t *testing.T) {
 // that could not run is the harness's — it proceeded with no evidence —
 // *unless* the project simply has no verification command, which is a project
 // shape and not a defect.
+//
+// KAN-876 put internal/verify's own five-way Skip vocabulary on the record, so
+// this table exercises verifyNotRun's real per-reason rule rather than the
+// coarse "Source != none && ExitCode < 0" inference it replaced: each harness
+// skip reason (tool_missing, command_broken, timed_out) gets its own case, and
+// a cancelled Skip is proven *not* harness on this rule's own merits — separate
+// from the fact that a real cancellation is also filtered upstream by rule 0.
 func TestClassifySplitsVerificationThatCouldNotRun(t *testing.T) {
 	cases := map[string]struct {
 		run  journal.VerificationRun
@@ -178,23 +185,48 @@ func TestClassifySplitsVerificationThatCouldNotRun(t *testing.T) {
 		want bench.Bucket
 	}{
 		"no command configured and none discovered is not a harness failure": {
-			run:  journal.VerificationRun{Source: string(verify.SourceNone), ExitCode: -1},
+			run: journal.VerificationRun{
+				Source: string(verify.SourceNone), ExitCode: -1, Skip: string(verify.SkipNoCommand),
+			},
 			stop: engine.StopCompleted.Reason(),
 			want: bench.BucketModel,
 		},
-		"a configured command that could not run is": {
+		"a missing toolchain is a harness failure": {
 			run: journal.VerificationRun{
-				Command: []string{"uv", "run", "pytest"}, Source: string(verify.SourceConfigured), ExitCode: -1,
+				Command: []string{"uv", "run", "pytest"}, Source: string(verify.SourceConfigured),
+				ExitCode: -1, Skip: string(verify.SkipToolMissing),
 			},
 			stop: engine.StopCompleted.Reason(),
 			want: bench.BucketHarness,
 		},
-		"a discovered command that could not run is": {
+		"a command that could not be started or was ended by a signal is a harness failure": {
 			run: journal.VerificationRun{
-				Command: []string{"make", "test"}, Source: string(verify.SourceDiscovered), ExitCode: -1,
+				Command: []string{"make", "test"}, Source: string(verify.SourceDiscovered),
+				ExitCode: -1, Skip: string(verify.SkipCommandBroken),
 			},
 			stop: engine.StopCompleted.Reason(),
 			want: bench.BucketHarness,
+		},
+		"a timed-out verification is a harness failure": {
+			run: journal.VerificationRun{
+				Command: []string{"go", "test", "./..."}, Source: string(verify.SourceDiscovered),
+				ExitCode: -1, Skip: string(verify.SkipTimedOut),
+			},
+			stop: engine.StopCompleted.Reason(),
+			want: bench.BucketHarness,
+		},
+		"a cancelled verification is not a harness failure on this rule alone": {
+			// No journal.TurnCancelled or SessionEnded{Reason: "cancelled"}
+			// accompanies this event, so rule 0's upstream filter does not fire
+			// either — this isolates verifyNotRun's own answer for
+			// verify.SkipCancelled from the filter that would otherwise also
+			// keep a real cancellation out of this bucket.
+			run: journal.VerificationRun{
+				Command: []string{"go", "test", "./..."}, Source: string(verify.SourceConfigured),
+				ExitCode: -1, Skip: string(verify.SkipCancelled),
+			},
+			stop: engine.StopCompleted.Reason(),
+			want: bench.BucketModel,
 		},
 		"a command that ran and failed is the model's": {
 			run: journal.VerificationRun{

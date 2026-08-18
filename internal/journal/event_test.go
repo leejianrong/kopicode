@@ -161,10 +161,11 @@ func fixtures() map[journal.Type]journal.Payload {
 			Parent: "3333333333333333333333333333333333333333",
 		},
 		journal.TypeVerificationRun: journal.VerificationRun{
-			Command:  []string{"go", "test", "./..."},
-			Source:   "discovered",
-			ExitCode: 0,
-			Output:   text("ok  github.com/leejianrong/kopicode  1.2s"),
+			Command:  []string{"uv", "run", "pytest"},
+			Source:   "configured",
+			ExitCode: -1,
+			Skip:     "tool_missing",
+			Output:   text("verification: nothing ran, so nothing here is a pass — `uv` is not installed"),
 		},
 		journal.TypeTurnCancelled: journal.TurnCancelled{
 			Phase:  "provider_stream",

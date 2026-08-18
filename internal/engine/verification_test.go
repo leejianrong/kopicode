@@ -375,6 +375,10 @@ func TestAVerificationThatCouldNotRunIsRecordedAndDoesNotBlock(t *testing.T) {
 		t.Errorf("VerificationRun exit code = %d for a command that never ran; 0 there reads as a "+
 			"pass to anything that does not also read Source", run.ExitCode)
 	}
+	if run.Skip != string(verify.SkipNoCommand) {
+		t.Errorf("VerificationRun skip = %q, want %q — KAN-876's field must reach the journal from "+
+			"the engine loop, not just from internal/verify's own Result", run.Skip, verify.SkipNoCommand)
+	}
 	if !strings.Contains(run.Output.Inline, "nothing here is a pass") {
 		t.Errorf("the record does not say in words that nothing vouched for this tree:\n%s",
 			run.Output.Inline)

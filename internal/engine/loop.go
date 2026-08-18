@@ -446,7 +446,12 @@ func (e *Engine) verify(ctx context.Context, turn int) (Stop, error) {
 		// Never 0 for a run that did not happen: internal/verify guarantees -1,
 		// and this copies rather than recomputes so the two cannot disagree.
 		ExitCode: res.ExitCode,
-		Output:   journal.InlineText(res.Output),
+		// Skip carries verify.Result.Skip's reason across, "" when the run
+		// concluded — KAN-876, so a tool-missing, broken-command, timed-out or
+		// cancelled non-verdict is distinguishable on the record rather than
+		// collapsing into "ExitCode < 0".
+		Skip:   string(res.Skip),
+		Output: journal.InlineText(res.Output),
 	}); err != nil {
 		return StopHarnessError, err
 	}

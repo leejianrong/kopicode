@@ -500,7 +500,20 @@ type VerificationRun struct {
 	// "it passed". ExitCode is -1, never 0, for any run that did not conclude.
 	Source   string `json:"source"`
 	ExitCode int    `json:"exit_code"`
-	Output   Text   `json:"output"`
+	// Skip is internal/verify's verify.Skip rendered as a string — "no_command",
+	// "tool_missing", "command_broken", "timed_out" or "cancelled" — and "" when
+	// the run concluded (ExitCode is 0 or positive). It is a plain string and not
+	// verify.Skip itself: this package must not import internal/verify (the
+	// engine journals data, packages do not journal themselves), so the field
+	// carries the classification's wire form the same way Source does.
+	//
+	// KAN-876: before this field, ExitCode < 0 could say only that nothing
+	// concluded, not *why* — so a missing toolchain, a broken command, a timeout
+	// and a cancellation were indistinguishable on the record. Skip is what lets
+	// internal/bench's classifier read the reason directly instead of inferring
+	// a conservative catch-all from Source and ExitCode alone.
+	Skip   string `json:"skip,omitempty"`
+	Output Text   `json:"output"`
 }
 
 func (VerificationRun) Type() Type { return TypeVerificationRun }
