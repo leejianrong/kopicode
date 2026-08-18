@@ -198,8 +198,30 @@ type Config struct {
 	// untestable by the one arm that exists. KAN-855 is what varies it.
 	AdvertiseNativeTools bool
 
-	// ParseRoutes is the tool-call extraction order, in parse.Route's wire
-	// spelling, first success wins (docs/SLICE-1.md §3).
+	// ParseRoutes is the tool-call extraction order this arm is willing to
+	// accept a reply through, in parse.Route's wire spelling, first success
+	// wins (docs/SLICE-1.md §3). It stays a duplicate of parse.Route's own
+	// strings rather than an import of the type, for the reason [ToolSet]'s
+	// own comment gives: a configuration is a value, and a []parse.Route field
+	// would make internal/harness import internal/parse for a type this
+	// package only ever round-trips through text.
+	//
+	// This is the accepting-side companion to [AdvertiseNativeTools]'s
+	// telling side (KAN-855): whether the model is TOLD native tools exist
+	// versus which routes the harness will ACCEPT when it answers. Until
+	// KAN-855, this field was in the hash preimage and read by nothing —
+	// internal/parse.Extract tried a fixed, unexported order with no
+	// parameter, so an arm declaring a different ParseRoutes hashed
+	// differently and behaved identically, which is the worse direction to be
+	// wrong in: the hash claims a distinction the binary does not honour.
+	// internal/engine.New now decodes this once per session, at the same
+	// place it builds the tool catalogue, into the []parse.Route
+	// [parse.NewRepairer] is actually built with — see decodeParseRoutes in
+	// internal/engine/engine.go — and an entry that does not name a real
+	// route (checked by [parse.Route.UnmarshalText]) or an empty list is a
+	// startup [ErrConfig], not a silent fall-back to the package default: a
+	// misconfigured arm must fail loudly rather than quietly running the
+	// ordinary one under a different hash.
 	ParseRoutes []string
 
 	// RepairBudget is how many repair round trips a malformed call gets.

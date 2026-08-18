@@ -213,6 +213,15 @@ type Engine struct {
 	// describe the second interruption with the first one's phase. cancel.go
 	// owns the vocabulary and the reason first-observation wins.
 	cancelPhase string
+
+	// parseOrder is Selection.Config.ParseRoutes decoded once, here, rather
+	// than once per turn — see decodeParseRoutes. runTurn hands it to
+	// [parse.NewRepairer] on every turn, which is what makes ParseRoutes reach
+	// actual extraction behaviour instead of only the harness config hash
+	// (KAN-855): before this field existed, [parse.Extract] had no order
+	// parameter at all, so nothing in the binary read the field the hash
+	// claimed to be describing.
+	parseOrder []parse.Route
 }
 
 // New checks a configuration and returns the engine it describes. It journals
@@ -268,6 +277,16 @@ func New(cfg Config) (*Engine, error) {
 		cfg.Catalogue = cat
 	}
 
+	// Decoded once here rather than once per turn — see decodeParseRoutes and
+	// the parseOrder field's own comment. An arm naming a route that does not
+	// exist, or naming none at all, is a configuration bug and fails loudly at
+	// build time rather than silently running parse.DefaultRouteOrder() under
+	// a hash that claims otherwise (KAN-855).
+	parseOrder, err := decodeParseRoutes(cfg.Selection.Config.ParseRoutes)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrConfig, err)
+	}
+
 	// A missing verifier is filled in rather than treated as "no verification":
 	// see the field's own comment. Root and the configured command are read off
 	// what the engine was already given, so there is nothing here a surface has
@@ -281,10 +300,51 @@ func New(cfg Config) (*Engine, error) {
 	}
 
 	return &Engine{
-		cfg:     cfg,
-		asm:     NewAssembler(cfg.Selection.Config.SystemPrompt),
-		offered: offered,
+		cfg:        cfg,
+		asm:        NewAssembler(cfg.Selection.Config.SystemPrompt),
+		offered:    offered,
+		parseOrder: parseOrder,
 	}, nil
+}
+
+// decodeParseRoutes turns a harness configuration's ParseRoutes — kept as
+// plain strings in [harness.Config] so a configuration stays a value rather
+// than a view onto internal/parse's types, the same reason [harness.Config.ToolSet]
+// stays strings — into the []parse.Route [parse.NewRepairer] actually
+// consumes.
+//
+// It runs once, here, rather than once per turn: [parse.Repairer] is rebuilt
+// every turn (runTurn in loop.go), and re-running [parse.Route.UnmarshalText]
+// over the same three strings on every turn of every session would be work
+// with no payoff, since nothing about a resolved Selection can change
+// mid-session.
+//
+// An unparseable name is a configuration bug, not a model or provider fact, so
+// it is reported here — before the journal opens, the same reason ADR-0007
+// decision 4 puts model/harness resolution before a session starts — rather
+// than silently substituting [parse.DefaultRouteOrder] and letting the hash go
+// on claiming a distinction the binary does not honour, which is the defect
+// KAN-855 exists to close. An empty list is refused for the same reason: it is
+// a legal, if degenerate, value at the [parse.NewRepairer] level (no route is
+// ever tried, so every reply reads as prose), but an arm that can never
+// dispatch a tool call is a configuration decision serious enough that it must
+// be impossible to reach by leaving a field empty.
+func decodeParseRoutes(names []string) ([]parse.Route, error) {
+	if len(names) == 0 {
+		return nil, fmt.Errorf(
+			"the harness configuration names no parse routes; an arm with no route " +
+				"to try would read every reply as prose, which must be a considered " +
+				"choice and not an empty field")
+	}
+	order := make([]parse.Route, len(names))
+	for i, name := range names {
+		var r parse.Route
+		if err := r.UnmarshalText([]byte(name)); err != nil {
+			return nil, fmt.Errorf("the harness configuration's parse route %d (%q): %w", i, name, err)
+		}
+		order[i] = r
+	}
+	return order, nil
 }
 
 // Selection reports the arm this engine is running.

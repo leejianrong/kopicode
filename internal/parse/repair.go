@@ -126,12 +126,14 @@ func (o Outcome) Terminal() bool {
 type Repairer struct {
 	tools   Tools
 	budget  int
+	order   []Route
 	repairs int
 	done    bool
 }
 
 // NewRepairer returns a repair loop over tools, allowing at most budget repair
-// attempts before the call fails.
+// attempts before the call fails, and trying routes in order when it extracts
+// each reply.
 //
 // The budget is a parameter rather than a constant in the loop because varying
 // it is a bench arm: measuring what repair buys means being able to run with
@@ -139,17 +141,35 @@ type Repairer struct {
 // zero disables repair — the first malformed call fails immediately — and a
 // negative budget is read as zero.
 //
+// order is the same discipline applied to extraction route order (KAN-855): a
+// harness configuration's ParseRoutes names the routes an arm is willing to
+// accept, and this is the one place that name has to reach in order to mean
+// anything, because [Extract] itself always uses its own package default and
+// does not take an order — see its doc comment. nil means
+// [DefaultRouteOrder]; pass nil unless varying the order is the point, the same
+// convention [Extract] follows via [DefaultRouteOrder]. An explicit non-nil
+// empty slice is a real, if deliberately degenerate, arm: no route is ever
+// tried, so every reply this loop sees is read as prose, never as a call.
+//
 // tools may be nil, in which case the semantic classifications are unreachable
 // and only extraction failures are repaired.
-func NewRepairer(tools Tools, budget int) *Repairer {
+func NewRepairer(tools Tools, budget int, order []Route) *Repairer {
 	if budget < 0 {
 		budget = 0
 	}
-	return &Repairer{tools: tools, budget: budget}
+	if order == nil {
+		order = DefaultRouteOrder()
+	}
+	return &Repairer{tools: tools, budget: budget, order: order}
 }
 
 // Budget returns the repair budget this loop was built with.
 func (r *Repairer) Budget() int { return r.budget }
+
+// Order returns the extraction route order this loop was built with. It is a
+// copy: an order a caller mutated in place after handing it to [NewRepairer]
+// would be rewriting the arm's own bound out from under it.
+func (r *Repairer) Order() []Route { return append([]Route(nil), r.order...) }
 
 // Repairs returns how many repair attempts have been spent so far.
 func (r *Repairer) Repairs() int { return r.repairs }
@@ -171,7 +191,7 @@ func (r *Repairer) Step(msg Message) Outcome {
 		})
 	}
 
-	ext, err := Extract(msg)
+	ext, err := extractOrder(msg, r.order)
 	if err != nil {
 		return r.classify(err)
 	}

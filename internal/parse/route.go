@@ -28,9 +28,30 @@ const (
 	RouteXMLTag
 )
 
-// routeOrder is the order the routes are tried in. First success wins
-// (docs/SLICE-1.md §3).
+// routeOrder is the order [Extract] itself tries routes in, first success wins
+// (docs/SLICE-1.md §3). It is what a harness configuration's ParseRoutes names
+// when left at its shipped value (internal/harness's "default" configuration),
+// and [DefaultRouteOrder] is the copy of it a caller gets to build on.
+//
+// This is deliberately not the only order in the binary any more (KAN-855): a
+// [Repairer] runs on whatever order [NewRepairer] was given, which is how
+// Config.ParseRoutes reaches actual behaviour instead of only the hash
+// preimage. This var is Extract's own default and the zero-value fallback
+// NewRepairer uses when it is not told to vary — see both doc comments.
 var routeOrder = [...]Route{RouteNative, RouteFencedJSON, RouteXMLTag}
+
+// DefaultRouteOrder returns the order [Extract] tries routes in, as a fresh
+// slice a caller may hold onto and modify.
+//
+// It exists so that "the ordinary order" has a name outside this file: a
+// harness configuration's ParseRoutes decodes into a slice built by repeated
+// [Route.UnmarshalText], and the shipped configuration's three strings decode
+// to exactly what this returns, but nothing enforces that arithmetic — this
+// function is the one place both a caller and a test can name "the default"
+// without retyping the three constants.
+func DefaultRouteOrder() []Route {
+	return append([]Route(nil), routeOrder[:]...)
+}
 
 // routeText is the wire form of each route. These strings reach the journal, so
 // they are a compatibility surface: add to this map, never rename within it.
