@@ -692,3 +692,126 @@ func TestReadStopsOnACancelledContext(t *testing.T) {
 		t.Errorf("Read on a cancelled context: err = %v, want context.Canceled", got)
 	}
 }
+
+// collectSession drains ReadSession the way collect drains a FileJournal's own
+// Read, so a truncated tail's intact prefix is asserted the same way on both
+// paths.
+func collectSession(ctx context.Context, dir string) ([]journal.Event, error) {
+	var out []journal.Event
+	for ev, err := range journal.ReadSession(ctx, dir) {
+		if err != nil {
+			return out, err
+		}
+		out = append(out, ev)
+	}
+	return out, nil
+}
+
+// TestReadSessionCreatesNothing is KAN-877's whole point, found by KAN-797: a
+// classifier that describes a session must never be the thing that makes the
+// session's directory exist. Open MkdirAll's it and fsyncs it; ReadSession
+// must do neither, so a session that never ran stays entirely absent from
+// disk after being asked about.
+func TestReadSessionCreatesNothing(t *testing.T) {
+	root := t.TempDir()
+	dir := journal.SessionDir(root, "never-ran")
+
+	got, err := collectSession(context.Background(), dir)
+	if err == nil {
+		t.Fatalf("ReadSession over a session that never ran returned %d events with no error", len(got))
+	}
+	if _, statErr := os.Stat(dir); !os.IsNotExist(statErr) {
+		t.Fatalf("ReadSession created %s as a side effect of being asked to read it: stat err = %v", dir, statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(root, journal.StateDir)); !os.IsNotExist(statErr) {
+		t.Fatalf("ReadSession created %s: stat err = %v", filepath.Join(root, journal.StateDir), statErr)
+	}
+}
+
+// TestReadSessionSharesTheTruncatedTailGuard proves ReadSession is not a
+// second reader that can drift from FileJournal.Read: the same crash-in-flight
+// fixture, read through the dir-only entry point instead of an open journal,
+// produces the same sentinel and the same intact prefix.
+func TestReadSessionSharesTheTruncatedTailGuard(t *testing.T) {
+	root := t.TempDir()
+	j := open(t, root)
+	for i := 1; i <= 3; i++ {
+		if _, err := j.Append(context.Background(), i, msg(fmt.Sprintf("message %d", i))); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+	path := eventsPath(root)
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if err := os.Truncate(path, info.Size()-1); err != nil {
+		t.Fatalf("Truncate: %v", err)
+	}
+
+	dir := journal.SessionDir(root, testSessionID)
+	got, err := collectSession(context.Background(), dir)
+	if err == nil {
+		t.Fatalf("a truncated final line read clean through ReadSession: got %d events, no error", len(got))
+	}
+	if !errors.Is(err, journal.ErrTruncatedLine) {
+		t.Fatalf("errors.Is(err, ErrTruncatedLine) = false: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d events before the error, want the 2 intact ones", len(got))
+	}
+	if got[0].Seq != 1 || got[1].Seq != 2 {
+		t.Errorf("prefix seqs = %d,%d, want 1,2", got[0].Seq, got[1].Seq)
+	}
+}
+
+// TestReadSessionReadsAnOversizedLine is the guard KAN-797 built for
+// internal/bench and this card moved the guarantee behind: a field kept inline
+// (raising the blob threshold so it does not spill) produces a raw JSONL line
+// bigger than bufio.Scanner's default 65536-byte token limit, and ReadSession
+// must still read past it to the event that follows rather than losing the
+// rest of the record. The fixture asserts its own premise — that the line
+// really is oversized — because a test claiming to guard a buffer-size bug
+// that never triggers proves nothing.
+func TestReadSessionReadsAnOversizedLine(t *testing.T) {
+	const scannerLimit = 64 << 10 // bufio.Scanner's default MaxScanTokenSize
+	const threshold = 200 * 1024  // above the field, so it stays inline
+
+	root := t.TempDir()
+	j := open(t, root, journal.WithBlobThreshold(threshold))
+	big := strings.Repeat("x", 100*1024) // > scannerLimit, < threshold
+	if _, err := j.Append(context.Background(), 1, journal.ToolResult{
+		CallID: "c1", Tool: "run_shell", Output: journal.InlineText(big),
+	}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if _, err := j.Append(context.Background(), 1, msg("after the big line")); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if err := j.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	raw := readRaw(t, root)
+	firstLine := raw[:bytes.IndexByte(raw, '\n')]
+	if len(firstLine) <= scannerLimit {
+		t.Fatalf("first line is %d bytes, want more than %d — the fixture does not test what it claims",
+			len(firstLine), scannerLimit)
+	}
+
+	dir := journal.SessionDir(root, testSessionID)
+	got, err := collectSession(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("ReadSession: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d events, want 2 — the event after the oversized line must not be lost", len(got))
+	}
+	tr, ok := got[0].Payload.(journal.ToolResult)
+	if !ok {
+		t.Fatalf("first event payload = %T, want ToolResult", got[0].Payload)
+	}
+	if tr.Output.Inline != big {
+		t.Errorf("Output.Inline round-tripped as %d bytes, want %d", len(tr.Output.Inline), len(big))
+	}
+}
