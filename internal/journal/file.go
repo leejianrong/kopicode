@@ -368,6 +368,38 @@ func (j *FileJournal) Close() error {
 	return nil
 }
 
+// ReadSession reads an existing session's events without opening anything for
+// write.
+//
+// dir is the session directory (SessionDir's return value, or Session.Dir),
+// not the events file itself. ReadSession creates nothing: no MkdirAll, no
+// directory fsync, no O_CREATE. Open takes all three because appending needs
+// somewhere durable to append to; a reader that only wants to know what a
+// session recorded must never be the thing that makes the session directory
+// exist, or "the session wrote nothing" and "the session never ran" become the
+// same bytes on disk. A session directory or events file that is not there is
+// therefore a plain read error — os.Open's own — and not a side effect.
+//
+// It shares readEvents with Open's resumeSeq and FileJournal.Read, so this is
+// the one JSONL reader in the package rather than a second implementation that
+// can drift from the first: the truncated-tail guard (a final line with no
+// newline terminator is ErrTruncatedLine and is never handed to the decoder),
+// the seq-monotonic check, and the bufio.Reader-not-Scanner buffering that
+// survives an inline tool result past bufio.Scanner's default 64 KiB line
+// limit all apply here exactly as they do to Read.
+//
+// Blob content is not rehydrated. ReadSession is handed a session directory
+// alone, and the blob store lives at BlobDir(root), a sibling directory
+// (.kopicode/blobs) it has no way to name from dir. Every field a classifier
+// or similar read-only consumer needs — a mode, an error kind, an exit code, a
+// source — is a scalar already on the line; a caller that needs a spilled
+// field's actual content should open the session through Open/Read instead,
+// which know the root.
+func ReadSession(ctx context.Context, dir string) iter.Seq2[Event, error] {
+	path := filepath.Join(dir, EventsFile)
+	return readEvents(ctx, path, nil)
+}
+
 // readEvents is the one reader. Open uses it too, so the truncated-line guard
 // cannot hold on the read path while quietly not holding on the append path.
 //

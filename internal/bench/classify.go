@@ -1,13 +1,9 @@
 package bench
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"os"
 	"path/filepath"
 
 	"github.com/leejianrong/kopicode/internal/engine"
@@ -226,61 +222,32 @@ type signals struct {
 
 // readSignals walks a session's journal once and reports what the rules found.
 //
-// It reads the JSONL directly rather than through journal.Open, which opens the
-// record for *appending*: creating and fsyncing a session directory is not
+// It reads through journal.ReadSession rather than journal.Open, which opens
+// the record for *appending*: creating and fsyncing a session directory is not
 // something a classifier may do to the record it is describing, and a journal
 // created as a side effect of reading would make "the session wrote nothing"
-// and "the session never ran" the same bytes. Every field the rules read —
-// a mode, an error kind, an exit code, a source — is a scalar on the line, so
-// nothing here needs the blob rehydration that journal.Read performs.
+// and "the session never ran" the same bytes. ReadSession shares its reader
+// with Open and Read, so the truncated-tail guard and the bufio.Reader (not
+// Scanner) buffering that survives an inline tool result past 64 KiB live in
+// one place rather than being re-implemented here where they could drift from
+// the original. Every field the rules read — a mode, an error kind, an exit
+// code, a source — is a scalar on the line, so nothing here needs the blob
+// rehydration that journal.Read performs and ReadSession deliberately omits.
 func readSignals(ctx context.Context, dir string) (signals, error) {
 	var sig signals
 	if dir == "" {
 		return sig, fmt.Errorf("bench: no journal directory on the result: %w", ErrNoRecord)
 	}
 
-	path := filepath.Join(dir, journal.EventsFile)
-	f, err := os.Open(path)
-	if err != nil {
-		return sig, fmt.Errorf("bench: opening %s: %w: %w", path, err, ErrNoRecord)
-	}
-	defer func() { _ = f.Close() }()
-
-	// bufio.Reader and not bufio.Scanner: an event line carries tool output
-	// inline up to the journal's blob threshold, which is larger than
-	// Scanner's default limit, and a Scanner that gave up on a long line would
-	// turn an oversized tool result into an unclassifiable session.
-	br := bufio.NewReader(f)
 	var prev journal.Type
-
-	for line := 1; ; line++ {
-		if err := ctx.Err(); err != nil {
-			return sig, fmt.Errorf("bench: reading %s: %w", path, err)
+	for ev, err := range journal.ReadSession(ctx, dir) {
+		if err != nil {
+			path := filepath.Join(dir, journal.EventsFile)
+			return sig, fmt.Errorf("bench: reading %s: %w: %w", path, err, ErrNoRecord)
 		}
-
-		chunk, rerr := br.ReadBytes('\n')
-		if len(chunk) > 0 && rerr == nil {
-			var ev journal.Event
-			if err := json.Unmarshal(chunk, &ev); err != nil {
-				return sig, fmt.Errorf("bench: %s line %d: %w: %w", path, line, err, ErrNoRecord)
-			}
-			apply(&sig, &prev, ev.Payload)
-			continue
-		}
-		if errors.Is(rerr, io.EOF) {
-			if len(chunk) > 0 {
-				// A final line with no terminator is a write a crash caught in
-				// flight. internal/journal refuses to parse it and so does
-				// this: a partial line that happens to be valid JSON parses
-				// perfectly and is silently wrong.
-				return sig, fmt.Errorf(
-					"bench: %s line %d has no newline terminator, so the record ends mid-write: %w",
-					path, line, ErrNoRecord)
-			}
-			return sig, nil
-		}
-		return sig, fmt.Errorf("bench: reading %s: %w: %w", path, rerr, ErrNoRecord)
+		apply(&sig, &prev, ev.Payload)
 	}
+	return sig, nil
 }
 
 // apply folds one event into the signals, and remembers its type so the next
