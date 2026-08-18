@@ -215,12 +215,11 @@ func TestMaxTurnsCapIsJournaledAndClassifiesAsHarness(t *testing.T) {
 // bound whose only authoritative input arrives after the request that spends
 // it.
 //
-// The budget is spend-to-date, checked before every provider call. Two replies
-// of 15 tokens with a budget of 20 must therefore send exactly one request: the
-// first is sent under a spend of zero, the second is refused under a spend of
-// 15... no — 15 is below 20, so the second is sent, and the third is refused
-// under 30. The script carries three replies and the last must go unserved,
-// which is what Drained reports.
+// The budget is spend-to-date, checked before every provider call. With a
+// budget of 20 and replies costing 15 each, the check passes twice — at a
+// spend of 0, then at 15, both under 20 — so the first two requests are sent;
+// the third is refused once spend would reach 30. The script carries three
+// replies so the last goes unserved, which is what Drained reports.
 func TestTokenBudgetStopsBeforeTheNextRequest(t *testing.T) {
 	replies := repeat(scriptedReply{
 		calls: []wireCall{nativeCall("call-1", tools.ToolReadFile, `{"path":"greet.go"}`)},
