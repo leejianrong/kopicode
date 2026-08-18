@@ -50,8 +50,13 @@ type toolEntry struct {
 
 // entryOf builds a [toolEntry] for a tool whose arguments are A, so the type
 // assertions from the `any`-typed dispatch table live in exactly one place.
+//
+// desc is the tool's own one-clause description, threaded straight to
+// [schemaOf] — see catalogue.go's doc comment on why a tool-level description
+// is a parameter here rather than a struct field or a second lookup table.
 func entryOf[A any](
 	name string,
+	desc string,
 	op permission.Operation,
 	mutates bool,
 	action func(args *A, root string, act *permission.Action),
@@ -61,7 +66,7 @@ func entryOf[A any](
 	return toolEntry{
 		name:    name,
 		op:      op,
-		schema:  schemaOf(name, zero),
+		schema:  schemaOf(name, desc, zero),
 		mutates: mutates,
 		newArgs: func() any { return new(A) },
 		action: func(args any, root string, act *permission.Action) {
@@ -78,21 +83,27 @@ func entryOf[A any](
 // toolEntries is the dispatch table, in a slice so the catalogue's name list
 // has a defined order before it is sorted.
 var toolEntries = []toolEntry{
-	entryOf(tools.ToolReadFile, permission.OperationRead, false,
+	entryOf(tools.ToolReadFile,
+		"Read a text file from the repository, returning each line with an anchor you can later edit by.",
+		permission.OperationRead, false,
 		func(a *readFileArgs, _ string, act *permission.Action) { act.Path = a.Path },
 		func(ctx context.Context, e *Engine, _ int, _ string, a *readFileArgs) (toolOutcome, error) {
 			out, err := e.cfg.Tools.ReadFile(ctx, tools.ReadRequest{Path: a.Path, Offset: a.Offset, Limit: a.Limit})
 			return toolOutcome{output: modelText(out, err), err: err}, nil
 		}),
 
-	entryOf(tools.ToolListDir, permission.OperationRead, false,
+	entryOf(tools.ToolListDir,
+		"List a directory's entries, optionally recursively and filtered by a glob pattern.",
+		permission.OperationRead, false,
 		func(a *listDirArgs, _ string, act *permission.Action) { act.Path = a.Path },
 		func(ctx context.Context, e *Engine, _ int, _ string, a *listDirArgs) (toolOutcome, error) {
 			out, err := e.cfg.Tools.ListDir(ctx, tools.ListRequest{Path: a.Path, Recursive: a.Recursive, Pattern: a.Pattern})
 			return toolOutcome{output: modelText(out, err), err: err}, nil
 		}),
 
-	entryOf(tools.ToolGrep, permission.OperationRead, false,
+	entryOf(tools.ToolGrep,
+		"Search text files for a regular expression, returning matching lines with their file and line number.",
+		permission.OperationRead, false,
 		func(a *grepArgs, _ string, act *permission.Action) { act.Path = a.Path },
 		func(ctx context.Context, e *Engine, _ int, _ string, a *grepArgs) (toolOutcome, error) {
 			out, err := e.cfg.Tools.Grep(ctx, tools.GrepRequest{
@@ -101,14 +112,18 @@ var toolEntries = []toolEntry{
 			return toolOutcome{output: modelText(out, err), err: err}, nil
 		}),
 
-	entryOf(tools.ToolWriteFile, permission.OperationWrite, true,
+	entryOf(tools.ToolWriteFile,
+		"Create a file or replace its entire contents, creating parent directories as needed.",
+		permission.OperationWrite, true,
 		func(a *writeFileArgs, _ string, act *permission.Action) { act.Path = a.Path },
 		func(ctx context.Context, e *Engine, _ int, _ string, a *writeFileArgs) (toolOutcome, error) {
 			res, err := e.cfg.Tools.WriteFile(ctx, tools.WriteRequest{Path: a.Path, Content: a.Content})
 			return toolOutcome{output: modelText(res.Output, err), err: err}, nil
 		}),
 
-	entryOf(tools.ToolEditFile, permission.OperationWrite, true,
+	entryOf(tools.ToolEditFile,
+		"Replace one anchored region of a file with new text, using anchors printed by a prior read_file call.",
+		permission.OperationWrite, true,
 		func(a *editFileArgs, _ string, act *permission.Action) { act.Path = a.Path },
 		func(ctx context.Context, e *Engine, turn int, callID string, a *editFileArgs) (toolOutcome, error) {
 			res, err := e.cfg.Tools.EditFile(ctx, tools.EditRequest{
@@ -120,7 +135,9 @@ var toolEntries = []toolEntry{
 			return toolOutcome{output: modelText(res.Output, err), err: err}, nil
 		}),
 
-	entryOf(tools.ToolEditFileFuzzy, permission.OperationWrite, true,
+	entryOf(tools.ToolEditFileFuzzy,
+		"Replace text matched by similarity when no anchor is available; refuses an ambiguous or too-weak match. Prefer edit_file.",
+		permission.OperationWrite, true,
 		func(a *editFileFuzzyArgs, _ string, act *permission.Action) { act.Path = a.Path },
 		func(ctx context.Context, e *Engine, turn int, callID string, a *editFileFuzzyArgs) (toolOutcome, error) {
 			res, err := e.cfg.Tools.EditFileFuzzy(ctx, tools.FuzzyEditRequest{
@@ -132,7 +149,9 @@ var toolEntries = []toolEntry{
 			return toolOutcome{output: modelText(res.Output, err), err: err}, nil
 		}),
 
-	entryOf(tools.ToolRunShell, permission.OperationShell, true,
+	entryOf(tools.ToolRunShell,
+		"Run a command line through the platform shell and return its combined output and exit status.",
+		permission.OperationShell, true,
 		func(a *runShellArgs, root string, act *permission.Action) {
 			// The argv comes from internal/tools so the thing consented to and
 			// the thing executed cannot disagree.

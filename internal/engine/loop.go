@@ -241,6 +241,40 @@ func (e *Engine) observe(text string) error {
 	return nil
 }
 
+// wireTools is the tool catalogue to advertise on the wire this request, or
+// nil to advertise none.
+//
+// Whether native tool-calling is advertised at all is
+// Selection.Config.AdvertiseNativeTools — a harness value, not a constant
+// here, because SLICE-1 §3 has three extraction routes precisely because not
+// every model reliably uses the native one: whether an arm *offers* the native
+// route is exactly the kind of thing a second arm might vary, and a bool this
+// package decided for itself would be a bound outside the hash the same way a
+// turn cap held in the loop instead of the config would be (see [Config]'s own
+// doc comment on that point). false does not narrow what the loop will
+// dispatch: Selection.Config.ToolSet still decides that on its own, same as
+// overriding Config.Catalogue does not widen it.
+//
+// The order is ToolSet's, not Catalogue.Names()'s: [Catalogue] sorts its name
+// list for a stable unknown-tool message, but ToolSet is presentation order —
+// the same order the system prompt's sections follow (KAN-843) — and a wire
+// catalogue is presentation too. A name ToolSet lists that the catalogue has
+// no schema for is skipped rather than erred on: [Config.Catalogue] can be
+// overridden to a narrower stand-in in a test, and a wire-rendering path is
+// not the place to enforce the completeness [New] already checked once.
+func (e *Engine) wireTools() []parse.Schema {
+	if !e.cfg.Selection.Config.AdvertiseNativeTools {
+		return nil
+	}
+	var out []parse.Schema
+	for _, name := range e.cfg.Selection.Config.ToolSet {
+		if schema, ok := e.cfg.Catalogue.Schema(name); ok {
+			out = append(out, schema)
+		}
+	}
+	return out
+}
+
 // call sends one request and returns the reply, journaling both.
 func (e *Engine) call(ctx context.Context, turn, attempt int) (provider.Reply, Stop, error) {
 	// An OpenAI-compatible provider refuses a request whose assistant message
@@ -259,6 +293,7 @@ func (e *Engine) call(ctx context.Context, turn, attempt int) (provider.Reply, S
 		Pin:      e.cfg.Selection.Pin,
 		Sampling: sampling,
 		Messages: e.asm.Messages(),
+		Tools:    e.wireTools(),
 		Turn:     turn,
 		Attempt:  attempt,
 	}

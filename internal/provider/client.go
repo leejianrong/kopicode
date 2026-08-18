@@ -547,17 +547,19 @@ func isEventStream(contentType string) bool {
 
 // wireRequest is the chat-completions request body.
 //
-// Only what this build sends. A tool catalogue is *not* here: rendering the
-// harness's tools into the wire's tool-definition objects needs per-tool and
-// per-argument descriptions that parse.Schema does not carry, which makes it a
-// decision about the model-facing contract rather than a transcription — and
-// that contract is hashed into SessionStarted's harness config (ADR-0007
-// decision 6). It belongs with the loop that owns the catalogue.
+// Tools is the wire's tool-definition array (KAN-844), rendered from
+// [Request.Tools] by [RenderTools] — the harness's parse.Schema catalogue
+// translated into the JSON Schema shape a provider expects, at this
+// wire-building boundary and nowhere upstream, the same discipline
+// [Request.Tools]'s own doc comment states. Omitted from the wire when empty:
+// see that comment for why "no key" and "empty array" are not offered as the
+// same thing here.
 type wireRequest struct {
-	Model    string        `json:"model"`
-	Messages []wireMessage `json:"messages"`
-	Stream   bool          `json:"stream"`
-	Provider Pin           `json:"provider"`
+	Model    string           `json:"model"`
+	Messages []wireMessage    `json:"messages"`
+	Stream   bool             `json:"stream"`
+	Provider Pin              `json:"provider"`
+	Tools    []ToolDefinition `json:"tools,omitempty"`
 
 	// Temperature is always sent: 0 is a meaningful value (greedy decoding) and
 	// omitting it would silently take the provider's default instead.
@@ -599,6 +601,7 @@ func (c *Client) encode(req Request) ([]byte, error) {
 		Model:       req.ModelID,
 		Stream:      true,
 		Provider:    req.Pin,
+		Tools:       RenderTools(req.Tools),
 		Temperature: req.Sampling.Temperature,
 		TopP:        req.Sampling.TopP,
 		MaxTokens:   req.Sampling.MaxTokens,

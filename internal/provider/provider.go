@@ -147,11 +147,21 @@ type ToolCall struct {
 
 // Request is one call to the model.
 //
-// It deliberately carries no tool catalogue yet. Rendering the harness's tools
-// into the wire's tool-definition objects is KAN-776's, and parse.Schema —
-// the only tool description this repo has — has no room for the per-tool and
-// per-argument descriptions that wire format wants, so choosing that shape is a
-// decision rather than a transcription. The replay provider needs none of it.
+// Tools carries the catalogue to advertise on the wire, as parse.Schema —
+// the harness's own tool description, unrendered — rather than as the wire's
+// [ToolDefinition] shape. That keeps this package's translation discipline:
+// [Client.encode] is where a Request becomes wire bytes, and rendering the
+// catalogue there too ([RenderTools]) means there is exactly one place a
+// parse.Schema becomes a JSON Schema object, the same way there is exactly one
+// place a [Message] becomes a wireMessage. Nil means "advertise nothing",
+// which omits the `tools` key entirely rather than sending an empty array —
+// the two are not the same claim to a provider, and only the harness knows
+// which one an arm is making (see [Config.AdvertiseNativeTools] in
+// internal/harness). The replay provider ignores this field: a canned reply
+// does not change because of what was advertised, and internal/provider/mock
+// asserts nothing about it (docs/SLICE-1.md §3 is why three extraction routes
+// exist at all — not every model reliably uses the native route even when it
+// is offered).
 type Request struct {
 	// ModelID is the provider's model identifier for this arm.
 	ModelID string
@@ -161,6 +171,9 @@ type Request struct {
 	Sampling Sampling
 	// Messages is the assembled conversation, oldest first.
 	Messages []Message
+	// Tools is the tool catalogue to advertise, or nil to advertise none. See
+	// the type's own doc comment above.
+	Tools []parse.Schema
 
 	// Turn is the 1-based loop turn this request belongs to, matching the
 	// journal envelope's turn. Attempt is 1 for the first send of a turn and

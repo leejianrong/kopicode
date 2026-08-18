@@ -137,16 +137,66 @@ type Config struct {
 	SystemPrompt string
 
 	// ToolSet is the tools presented to the model, in the order they are
-	// presented.
+	// presented — the order the system prompt's sections follow (KAN-843) and
+	// the order [ToolCatalogue] renders in.
 	//
-	// ADR-0007 decision 6 puts "names, schemas, descriptions" in the preimage.
-	// Only the names exist today: there is no tool catalogue rendered for the
-	// wire anywhere in this repository (provider.Request carries none, and
-	// KAN-776 owns that shape), and hashing an invented rendering would be a
-	// preimage that describes nothing. So this is names only, and it is
-	// deliberately narrower than the ADR asks for — see the note in
-	// hash.go. Whoever lands the catalogue extends this field.
+	// This stays names only, and stays a duplicate of internal/tools' own
+	// constants rather than an import of them, for the reason the package doc
+	// comment gives: a configuration is a value, not a view onto another
+	// package's registry. TestToolSetMatchesInternalTools (registry_test.go)
+	// holds it to internal/tools by a test instead of an import.
 	ToolSet []string
+
+	// ToolCatalogue is the wire's tool-definition array (KAN-844): every
+	// tool's name, one-clause description, and per-argument name, type,
+	// required flag and one-clause description, in [ToolSet]'s order.
+	//
+	// ADR-0007 decision 6 puts "names, schemas, descriptions" in the preimage,
+	// and until this field existed only the names did (see the note this
+	// replaced, still readable in hash.go's history, and the still-narrower
+	// note that used to sit here). This is the whole of what ADR-0007 asked
+	// for, not a step towards it.
+	//
+	// It is a literal here rather than something computed by calling into
+	// internal/engine, for the same reason [ToolSet] is a literal rather than
+	// an import: internal/engine imports internal/harness
+	// (internal/engine/selection.go), so the dependency cannot run the other
+	// way, and a configuration that could only be built by calling into the
+	// package that resolves it would not be a value ADR-0007 decision 5 can
+	// hold up. internal/engine/toolcatalogue_test.go closes the loop the other
+	// direction it can be closed: it renders the *real* engine catalogue —
+	// engine.Catalogue(cfg.ToolSet), the same schemas engine.schemaOf derives
+	// by reflection off the argument structs in catalogue.go, through
+	// provider.RenderTools — and requires the result to equal this field
+	// exactly. A description edited on one side and not the other fails there,
+	// the same way TestSystemPromptDocumentsEveryToolArgument catches a prompt
+	// and a struct tag disagreeing.
+	//
+	// No map anywhere in it: TestConfigHoldsNoMap walks the whole type graph
+	// under Config, not just its direct fields, and provider.ToolParameters
+	// renders JSON Schema's `properties` object from an ordered
+	// []provider.ToolProperty for exactly this reason — see that type's doc
+	// comment.
+	ToolCatalogue []provider.ToolDefinition
+
+	// AdvertiseNativeTools says whether [ToolCatalogue] is sent on the wire at
+	// all as the request's native tool-definition array.
+	//
+	// This is the "arm variable" KAN-844's card names explicitly: SLICE-1 §3
+	// has three tool-call extraction routes — native, fenced JSON, XML-tagged —
+	// precisely because not every model reliably uses the native route, and
+	// whether an arm *offers* that route in the first place is exactly the
+	// kind of thing a second arm might vary deliberately, to measure whether
+	// advertising it changes which route a model reaches for. A bool the loop
+	// decided for itself would be a bound outside the hash, the same reason
+	// MaxTurns and the rest live here and not as constants in internal/engine.
+	//
+	// true for the one configuration slice 1 registers: there is exactly one
+	// arm today, so "always advertise" and "sometimes advertise" are not yet
+	// different claims to have evidence about, and false would make this
+	// card's whole point — that a rendered catalogue reaches the wire —
+	// untestable by the one arm that exists. KAN-855 is what varies it.
+	AdvertiseNativeTools bool
 
 	// ParseRoutes is the tool-call extraction order, in parse.Route's wire
 	// spelling, first success wins (docs/SLICE-1.md §3).
@@ -229,6 +279,105 @@ var configs = map[string]Config{
 			"edit_file_fuzzy",
 			"run_shell",
 		},
+
+		// The wire's tool-definition catalogue (KAN-844), in ToolSet's
+		// order. Every name, description and argument here is a literal
+		// copy of what internal/engine/catalogue.go's argument structs
+		// declare in their `json`, `kopicode` and `kopicode_desc` tags —
+		// duplicated for the reason ToolSet's own note gives, and held
+		// equal to the source by internal/engine/toolcatalogue_test.go
+		// rather than by trust.
+		ToolCatalogue: []provider.ToolDefinition{
+			{Type: "function", Function: provider.ToolFunction{
+				Name:        "read_file",
+				Description: "Read a text file from the repository, returning each line with an anchor you can later edit by.",
+				Parameters: provider.ToolParameters{
+					Properties: []provider.ToolProperty{
+						{Name: "path", Type: "string", Description: "the file's path, relative to the repository root"},
+						{Name: "offset", Type: "integer", Description: "1-based line number to start returning from; 0 or omitted means the beginning of the file"},
+						{Name: "limit", Type: "integer", Description: "maximum number of lines to return; 0 or omitted uses the tool's per-call maximum"},
+					},
+					Required: []string{"path"},
+				},
+			}},
+			{Type: "function", Function: provider.ToolFunction{
+				Name:        "list_dir",
+				Description: "List a directory's entries, optionally recursively and filtered by a glob pattern.",
+				Parameters: provider.ToolParameters{
+					Properties: []provider.ToolProperty{
+						{Name: "path", Type: "string", Description: "the directory's path, relative to the repository root; empty means the repository root"},
+						{Name: "recursive", Type: "boolean", Description: "when true, also list nested directories, skipping .git and .kopicode"},
+						{Name: "pattern", Type: "string", Description: "a glob matched against an entry's file name, or its whole relative path when the pattern contains a slash"},
+					},
+				},
+			}},
+			{Type: "function", Function: provider.ToolFunction{
+				Name:        "grep",
+				Description: "Search text files for a regular expression, returning matching lines with their file and line number.",
+				Parameters: provider.ToolParameters{
+					Properties: []provider.ToolProperty{
+						{Name: "pattern", Type: "string", Description: "the RE2 regular expression to search for; no backreferences or lookahead"},
+						{Name: "path", Type: "string", Description: "the file or directory to search, relative to the repository root; empty means the whole repository"},
+						{Name: "include", Type: "string", Description: "a glob restricting which file names are searched"},
+						{Name: "ignore_case", Type: "boolean", Description: "when true, match case-insensitively"},
+					},
+					Required: []string{"pattern"},
+				},
+			}},
+			{Type: "function", Function: provider.ToolFunction{
+				Name:        "write_file",
+				Description: "Create a file or replace its entire contents, creating parent directories as needed.",
+				Parameters: provider.ToolParameters{
+					Properties: []provider.ToolProperty{
+						{Name: "path", Type: "string", Description: "the file's path, relative to the repository root"},
+						{Name: "content", Type: "string", Description: "the file's complete new contents, replacing anything already there"},
+					},
+					Required: []string{"path", "content"},
+				},
+			}},
+			{Type: "function", Function: provider.ToolFunction{
+				Name:        "edit_file",
+				Description: "Replace one anchored region of a file with new text, using anchors printed by a prior read_file call.",
+				Parameters: provider.ToolParameters{
+					Properties: []provider.ToolProperty{
+						{Name: "path", Type: "string", Description: "the file's path, relative to the repository root"},
+						{Name: "anchor_start", Type: "string", Description: "the anchor of the region's first line, printed by a prior read_file call"},
+						{Name: "anchor_end", Type: "string", Description: "the anchor of the region's last line, printed by a prior read_file call; the same anchor twice replaces one line"},
+						{Name: "new_text", Type: "string", Description: "the replacement text for the anchored region; empty deletes it"},
+					},
+					Required: []string{"path", "anchor_start", "anchor_end", "new_text"},
+				},
+			}},
+			{Type: "function", Function: provider.ToolFunction{
+				Name:        "edit_file_fuzzy",
+				Description: "Replace text matched by similarity when no anchor is available; refuses an ambiguous or too-weak match. Prefer edit_file.",
+				Parameters: provider.ToolParameters{
+					Properties: []provider.ToolProperty{
+						{Name: "path", Type: "string", Description: "the file's path, relative to the repository root"},
+						{Name: "before", Type: "string", Description: "text believed to be in the file, matched by similarity with whitespace normalised"},
+						{Name: "after", Type: "string", Description: "the replacement text for whatever before matched"},
+					},
+					Required: []string{"path", "before", "after"},
+				},
+			}},
+			{Type: "function", Function: provider.ToolFunction{
+				Name:        "run_shell",
+				Description: "Run a command line through the platform shell and return its combined output and exit status.",
+				Parameters: provider.ToolParameters{
+					Properties: []provider.ToolProperty{
+						{Name: "command", Type: "string", Description: "the command line to run, interpreted by the platform shell"},
+						{Name: "dir", Type: "string", Description: "the working directory, relative to the repository root; empty means the repository root"},
+						{Name: "timeout_seconds", Type: "integer", Description: "how many seconds to allow the command to run; 0 or omitted uses the tool's default of 120"},
+					},
+					Required: []string{"command"},
+				},
+			}},
+		},
+
+		// One arm exists; it advertises the native route. See
+		// AdvertiseNativeTools's own doc comment for why this is a
+		// configuration value and not a constant.
+		AdvertiseNativeTools: true,
 
 		// parse's own order, first success wins (docs/SLICE-1.md §3).
 		ParseRoutes:  []string{"native", "fenced_json", "xml_tag"},
