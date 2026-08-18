@@ -300,22 +300,39 @@ func apply(sig *signals, prev *journal.Type, payload journal.Payload) {
 // *model*, while a verification that could not run does not block at all. That
 // second case is not one thing, and the split matters more than it looks:
 //
-//   - no command configured and none discovered (verify.SourceNone) is a
+//   - no command configured and none discovered (verify.SkipNoCommand) is a
 //     legitimate project shape, not a defect. Not harness;
-//   - a missing toolchain, a command that could not be started, a signal, or a
-//     timeout is the harness proceeding with no evidence, and SLICE-1's
-//     acceptance bar of zero `harness` failures would be flattered by every one
-//     of them. Harness.
+//   - a missing toolchain (verify.SkipToolMissing), a command that could not be
+//     started or was ended by a signal (verify.SkipCommandBroken), or one that
+//     outlived its timeout (verify.SkipTimedOut) is the harness proceeding with
+//     no evidence, and SLICE-1's acceptance bar of zero `harness` failures would
+//     be flattered by every one of them. Harness, each for its own reason;
+//   - a cancelled verification (verify.SkipCancelled) is not charged here: rule
+//     0 in [Attribution.Classify] filters a cancelled session out before apply
+//     ever calls this function, because nobody failed — whoever started the
+//     turn decided to stop it. This rule agrees rather than duplicating that
+//     filter, in case a Skip of "cancelled" ever reaches it without the
+//     corresponding TurnCancelled or SessionEnded event.
 //
-// **What the record can and cannot say.** internal/verify distinguishes all of
-// these on verify.Result.Skip. journal.VerificationRun has no field for it, so
-// what survives to here is Source plus an ExitCode that internal/verify
-// guarantees is -1, never 0, for anything that did not conclude. That is enough
-// to separate the legitimate shape from the rest and not enough to separate the
-// rest from each other, so this rule is the conservative one the missing field
-// forces: any not-run with a command behind it is charged to the harness. A
-// cancelled verification would land here too and does not, because a cancelled
-// session is filtered before any of this runs.
+// **KAN-876 replaced the inference this rule used to make.** Before
+// journal.VerificationRun carried Skip, all that survived to here was Source
+// plus an ExitCode that internal/verify guarantees is -1, never 0, for
+// anything that did not conclude — enough to separate the legitimate shape
+// (SourceNone) from the rest, and not enough to separate the rest from each
+// other. So the old rule was deliberately conservative: any not-run with a
+// command behind it was charged to the harness, which absorbed a cancelled or
+// broken-toolchain verification into the same bucket without being able to say
+// which. Now that Skip is on the record, the rule reads it directly instead of
+// reconstructing a coarser signal from Source and ExitCode.
 func verifyNotRun(v journal.VerificationRun) bool {
-	return v.Source != string(verify.SourceNone) && v.ExitCode < 0
+	switch verify.Skip(v.Skip) {
+	case verify.SkipToolMissing, verify.SkipCommandBroken, verify.SkipTimedOut:
+		return true
+	default:
+		// Covers verify.SkipNone (the run concluded — Passed or Failed, neither
+		// this rule's concern), verify.SkipNoCommand (a legitimate project
+		// shape) and verify.SkipCancelled (filtered upstream, and not harness on
+		// its own merits either).
+		return false
+	}
 }
