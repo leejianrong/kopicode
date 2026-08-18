@@ -116,6 +116,13 @@ func validateExchange(f Fixture, i int, ex Exchange) error {
 				"one that carries the credential", where, name)
 		}
 	}
+	for name := range ex.RequestHeaders {
+		if !allowedRequestHeaders[strings.ToLower(name)] {
+			return invalid(f, "%s: request header %q is not on the allowlist — recorded headers are "+
+				"allowlisted rather than denylisted, because the header nobody thought to exclude is the "+
+				"one that carries the credential", where, name)
+		}
+	}
 
 	body, err := decodeBody(ex.Response.Body)
 	if err != nil {
