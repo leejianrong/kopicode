@@ -32,17 +32,42 @@
 //
 // Both, in that order, because neither is sufficient alone.
 //
-// The linker path is primary: it is the only one that can carry `git describe`
-// output, so it is the only one that knows about tags. Go's own VCS stamping
-// records a revision and a modified bit and nothing else.
+// The linker path is primary: only the Makefile's `git describe` call names a
+// version relative to a tag reliably, in every checkout state. That
+// "reliably" is load-bearing rather than decorative — `git describe` gives
+// the same answer whether HEAD is attached to a branch or detached at a
+// commit, and a tag-triggered release build (`git checkout <tag>`, or
+// `actions/checkout` on a `push: tags` event, `.github/workflows/release.yml`)
+// always detaches HEAD. This package's fallback below does not have that
+// property, which is the reason it stays a fallback.
 //
 // runtime/debug.ReadBuildInfo is the fallback, and it covers the case the
 // Makefile cannot reach at all: `go build ./cmd/kopicode` or `go install
 // github.com/leejianrong/kopicode/cmd/kopicode@latest` by a user who never runs
-// make. Go stamps vcs.revision and vcs.modified into any binary built from a
-// VCS checkout, and stamps a module version into one built from the module
-// cache. That is strictly better than "unknown", so it is used when the linker
-// said nothing.
+// make. It always stamps vcs.revision and vcs.modified from a VCS checkout.
+// What it stamps as bi.Main.Version is less uniform, and this is measured
+// against this repo's pinned Go 1.26.5 rather than assumed:
+//
+//   - `go install .../cmd/kopicode@vX.Y.Z` resolves through the module
+//     system and reports the resolved tag verbatim — a real semver, and the
+//     realistic path for a user with no release binary to fetch.
+//   - `go build ./cmd/kopicode` from a local checkout with HEAD attached to
+//     a branch reports the nearest reachable tag too: exactly the tag string
+//     at that commit, or a pseudo-version naming it as ancestor
+//     (`vX.Y.(Z+1)-0.<timestamp>-<commit12>`) past it. Both are real
+//     information handed to moduleVersion unfiltered.
+//   - The same build with HEAD detached — the exact state a tag-triggered CI
+//     checkout leaves it in — reports "(devel)" even sitting on the tagged
+//     commit with a clean tree. Go does not consider a detached checkout
+//     eligible for its own tag derivation, which is precisely why the
+//     release build (`make xbuild`, driven by ldflags) does not depend on
+//     this path ever seeing a tag: it doesn't need to.
+//
+// "(devel)" and an empty Main.Version are filtered to Unknown; anything else
+// — pseudo-version or exact tag alike — passes through moduleVersion as-is,
+// because it is real information the toolchain supplied and this package
+// does not second-guess it. That is strictly better than "unknown", so it is
+// used when the linker said nothing.
 //
 // The two are never mixed. A record whose Source is "ldflags" describes one
 // coherent build; splicing a revision from one source onto a version from
