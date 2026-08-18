@@ -128,10 +128,26 @@ func (a ArgEncoding) String() string {
 // that any JSON encoding of the value renders the stable name rather than an
 // integer a future reordering of the constants would silently redefine, which is
 // the same reason [Route.MarshalText] exists.
+//
+// The failure case returns fmt.Errorf, like [Route.MarshalText] and
+// [Kind.MarshalText], and not a *[Error] (KAN-849). A *Error is an EXTRACTION
+// classification: SLICE-1 §9's three-bucket attribution and the repair loop
+// both key off Error.Kind, which is why every extraction failure carries one.
+// A value this method cannot name did not fail to extract — it already
+// extracted cleanly and reached serialisation time as an ArgEncoding the model
+// is not even aware of. Wrapping that in a *Error would put KindUnspecified on
+// an error a caller doing errors.As(err, &parseErr) has every reason to treat
+// as an extraction outcome, which is a harness-internal marshalling defect
+// laundering itself toward the unattributed/model boundary ADR-0006 §3 exists
+// to keep clean. Nothing in this repo currently reaches this branch outside
+// its own test (argEncodingText covers every declared constant, and no
+// production code calls MarshalText directly — the journal always goes
+// through String), so the risk is latent rather than active; the type is
+// fixed now so it stays that way if that ever changes.
 func (a ArgEncoding) MarshalText() ([]byte, error) {
 	s, ok := argEncodingText[a]
 	if !ok {
-		return nil, &Error{Kind: KindUnspecified, Detail: "cannot marshal unknown argument encoding"}
+		return nil, fmt.Errorf("parse: cannot marshal unknown argument encoding %d", uint8(a))
 	}
 	return []byte(s), nil
 }
