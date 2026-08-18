@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -314,6 +315,16 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 		id = newSessionID(now())
 	}
 
+	// Process lifecycle, not session content: which directory, which session
+	// id and which arm this invocation resolved to, not anything the model or
+	// the user said. The resolution itself already ran in the caller
+	// (ResolveSelection) and is journaled on SessionStarted; this line is the
+	// diagnostic echo of it, off by default and to stderr (CLAUDE.md, "slog
+	// never duplicates the journal").
+	slog.Debug("opening session",
+		"dir", abs, "session", id,
+		"model", opts.Selection.ModelID, "harness", opts.Selection.Config.Name)
+
 	// The credential check first, because a missing one is the one failure
 	// that costs nothing to detect and would otherwise be found after a
 	// directory had been created and a record opened. It is only the check:
@@ -349,8 +360,21 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 		Record:  journal.SessionDir(abs, id),
 	})
 	if err != nil {
+		// The log call lives here and not inside internal/lock: that package
+		// stays a leaf with no new dependency, and the engine is the one place
+		// that already knows this is a session-opening step worth narrating.
+		// A refusal names the holder — a fact about another process, not about
+		// this session's content — so it is exactly what CLAUDE.md's boundary
+		// calls a diagnostic fact.
+		var heldErr *lock.HeldError
+		if errors.As(err, &heldErr) {
+			slog.Debug("session lock refused", "root", lockRoot, "holder", heldErr.Holder.String())
+		} else {
+			slog.Debug("session lock acquisition failed", "root", lockRoot, "error", err)
+		}
 		return nil, err
 	}
+	slog.Debug("session lock acquired", "root", lockRoot, "session", id)
 
 	s := &Session{id: id, dir: abs}
 	// The lock is released last, because closers unwind in reverse: the record
@@ -493,6 +517,10 @@ func requireProviderCredential(opts Options) error {
 // during Session.Run, ever reaches it.
 func openProvider(opts Options, jrn journal.Journal) (Provider, error) {
 	if opts.Provider != nil {
+		// A caller substituted its own Provider — the mock/replay path in
+		// tests, or the bench runner's recorded traffic. No endpoint to name,
+		// so the model id is the only fact worth echoing.
+		slog.Debug("provider supplied by caller", "model", opts.Selection.ModelID)
 		return opts.Provider, nil
 	}
 
@@ -504,12 +532,24 @@ func openProvider(opts Options, jrn journal.Journal) (Provider, error) {
 		return nil, ErrNoAPIKey
 	}
 
+	baseURL := provider.DefaultBaseURL
 	clientOpts := []provider.ClientOption{
 		provider.WithRetryObserver(journalRetryObserver(jrn)),
+		// The client's own attempt/status/backoff diagnostics (KAN-776's
+		// WithLogger) reach the same sink as everything else in this file —
+		// engine-internal, never a message, a reply or a tool call.
+		provider.WithLogger(slog.Default()),
 	}
 	if opts.ProviderBaseURL != "" {
+		baseURL = opts.ProviderBaseURL
 		clientOpts = append(clientOpts, provider.WithBaseURL(opts.ProviderBaseURL))
 	}
+	// The endpoint and the model, never the key: provider.APIKey redacts
+	// itself through every rendering path including LogValue (KAN-776), but
+	// the safer rule is not to hand it to slog at all when a call site has
+	// nothing to gain from trying.
+	slog.Debug("connecting to provider",
+		"base_url", baseURL, "model", opts.Selection.ModelID, "pin", opts.Selection.Pin.String())
 	c, err := provider.NewClient(provider.NewAPIKey(key), clientOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("engine: building the provider client: %w", err)
