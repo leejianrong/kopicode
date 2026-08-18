@@ -47,12 +47,23 @@ type Entry struct {
 // A slice and not a map, so listing it is deterministic without sorting and so
 // the row order in the source is the row order in an error message.
 //
-// It has one row. The README names three further models — two A/B candidates
-// and a frontier ceiling — and they are deliberately absent: a row carries a
-// provider pin, only qwen/qwen3-coder-next has one that was chosen from observed
-// traffic (docs/provider-pin.md), and inventing pins for the other three would
-// be exactly the fabrication that document warns about. Adding a model is a row
-// and a pull request.
+// It has three rows (KAN-850). The README names a fourth: "a current frontier
+// model" is a *role*, not a model — the README's own text says naming one now
+// would only date the table, and that it "is picked and added to the registry
+// when the ceiling run is actually scheduled." That row stays absent on
+// purpose and is not a gap this file owes anyone.
+//
+// The other two — minimax/minimax-m2 and z-ai/glm-5.2 — were absent for the
+// same reason qwen/qwen3-coder-next was once the only row: a row carries a
+// provider pin, and inventing one is exactly the fabrication
+// docs/provider-pin.md warns against. Both now have a pin chosen from observed
+// OpenRouter endpoint data on 2026-08-18, argued in docs/provider-pin.md
+// alongside the first. Both map to DefaultConfigName: a second harness
+// configuration is explicitly slice 2 (docs/SLICE-1.md, "Explicitly
+// deferred"), and nothing observed while choosing either pin gave a concrete
+// reason the existing configuration is wrong for these models — so a new row
+// is a row, not a second configuration. Adding a model is a row and a pull
+// request.
 var registry = []Entry{
 	{
 		// Spelled out rather than written as DefaultModelID, so that "this
@@ -71,6 +82,42 @@ var registry = []Entry{
 		// trivial while there is one configuration; the date is honest about
 		// what was actually checked.
 		Validated: "2026-08-14",
+	},
+	{
+		// A/B candidate (README's Role column). No endpoint reports a
+		// full-precision quantization for this model at all — fp8 is the best
+		// real quantization on offer, and Minimax's own first-party endpoint
+		// is the cheapest fp8 row, strictly on both prompt and completion
+		// halves. It does not support `seed`; docs/provider-pin.md records
+		// that honestly rather than picking the seed-supporting alternative
+		// silently. Full argument and the endpoint table: docs/provider-pin.md
+		// §minimax/minimax-m2.
+		ModelID:       "minimax/minimax-m2",
+		HarnessConfig: DefaultConfigName,
+		Pin: provider.Pin{
+			Order:          []string{"minimax/fp8"},
+			AllowFallbacks: false,
+			Quantizations:  []string{"fp8"},
+		},
+		Validated: "2026-08-18",
+	},
+	{
+		// A/B candidate, long-context (README's Role column). No
+		// full-precision quantization is offered for this model either; fp8
+		// is the higher-fidelity of the two real tiers on offer (fp8, fp4).
+		// Sail Research is the cheapest fp8 endpoint under the prompt-heavy
+		// token ratio this project has actually observed (KAN-800), reports
+		// the model's full 1,048,576-token context — matching the
+		// long-context role — and supports `seed`. Full argument and the
+		// endpoint table: docs/provider-pin.md §z-ai/glm-5.2.
+		ModelID:       "z-ai/glm-5.2",
+		HarnessConfig: DefaultConfigName,
+		Pin: provider.Pin{
+			Order:          []string{"sail-research/fp8"},
+			AllowFallbacks: false,
+			Quantizations:  []string{"fp8"},
+		},
+		Validated: "2026-08-18",
 	},
 }
 
@@ -122,12 +169,14 @@ func ConfigNames() []string {
 // nearest returns the candidate closest to want, when one is close enough to be
 // worth suggesting, and "" otherwise.
 //
-// The bound is deliberate. With one registered model, a confident wrong
-// suggestion is worse than no suggestion: "did you mean qwen/qwen3-coder-next?"
-// in answer to `gpt-5` reads as though the harness knows something it does not,
-// and the supported list — which is always printed — already says everything
-// true. So a suggestion has to be a plausible typo of the candidate: at most
-// three single-character edits, and at most a fifth of the candidate's length.
+// The bound is deliberate. A confident wrong suggestion is worse than no
+// suggestion: "did you mean qwen/qwen3-coder-next?" in answer to `gpt-5` reads
+// as though the harness knows something it does not, and the supported list —
+// which is always printed — already says everything true. That does not
+// change with a bigger registry: three candidates means three chances at a
+// wrong guess rather than one, not license for a looser bound. So a suggestion
+// has to be a plausible typo of *some* candidate: at most three
+// single-character edits, and at most a fifth of that candidate's length.
 func nearest(want string, candidates []string) string {
 	const maxEdits = 3
 
