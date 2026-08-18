@@ -118,9 +118,13 @@ type Config struct {
 	// decides that on its own, so a catalogue offering more cannot smuggle a
 	// tool into an arm that does not present it.
 	//
-	// This is **not** the tool catalogue as rendered on the wire.
-	// provider.Request carries no tool definitions and this card does not add
-	// any; KAN-844 decides that shape.
+	// This is also what [Engine.wireTools] reads from to build the wire's
+	// tool-definition catalogue (KAN-844): the same schemas the repair loop
+	// validates a call against are what a provider is told the call should
+	// look like, so the two cannot describe an argument differently. Whether
+	// they are sent at all is Selection.Config.AdvertiseNativeTools, not this
+	// field — overriding Catalogue changes what a repair message says, never
+	// whether the wire carries a `tools` array.
 	Catalogue parse.Tools
 
 	// Stream, when non-nil, is called once per delta as the reply arrives, on

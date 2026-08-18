@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/leejianrong/kopicode/internal/parse"
 	"github.com/leejianrong/kopicode/internal/provider"
 	"github.com/leejianrong/kopicode/internal/provider/fixture"
 )
@@ -279,6 +280,101 @@ func TestRequestCarriesThePinAndTheCredential(t *testing.T) {
 	}
 	if len(sent.Messages) != 2 || sent.Messages[0].Role != "system" || sent.Messages[1].Content != "add a test" {
 		t.Errorf("messages did not survive the encoding: %+v", sent.Messages)
+	}
+}
+
+// TestRequestCarriesTheToolCatalogue is KAN-844's wire-level acceptance check:
+// a populated Request.Tools reaches the `tools` array on the actual bytes this
+// client sends, rendered as OpenAI's documented function-calling shape.
+func TestRequestCarriesTheToolCatalogue(t *testing.T) {
+	f := loadFixture(t)
+
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		writeSSE(t, w, f.Exchanges[0].Response.Stream)
+	}))
+	defer srv.Close()
+
+	req := request(f)
+	req.Tools = []parse.Schema{
+		{
+			Name:        "read_file",
+			Description: "Read a text file.",
+			Params: []parse.Param{
+				{Name: "path", Type: parse.TypeString, Required: true, Description: "the file's path"},
+			},
+		},
+	}
+
+	stream, err := newClient(t, srv).Complete(t.Context(), req)
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	drain(t, stream)
+	_ = stream.Close()
+
+	var sent struct {
+		Tools []struct {
+			Type     string `json:"type"`
+			Function struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+				Parameters  struct {
+					Properties map[string]json.RawMessage `json:"properties"`
+					Required   []string                   `json:"required"`
+				} `json:"parameters"`
+			} `json:"function"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(gotBody, &sent); err != nil {
+		t.Fatalf("decoding the request this client sent: %v\n%s", err, gotBody)
+	}
+	if len(sent.Tools) != 1 {
+		t.Fatalf("tools array has %d entries, want 1\n%s", len(sent.Tools), gotBody)
+	}
+	tool := sent.Tools[0]
+	if tool.Type != "function" || tool.Function.Name != "read_file" {
+		t.Errorf("tool = %+v", tool)
+	}
+	if _, ok := tool.Function.Parameters.Properties["path"]; !ok {
+		t.Errorf(`tools[0].function.parameters.properties has no "path" key: %s`, gotBody)
+	}
+	if len(tool.Function.Parameters.Required) != 1 || tool.Function.Parameters.Required[0] != "path" {
+		t.Errorf("tools[0].function.parameters.required = %v, want [path]", tool.Function.Parameters.Required)
+	}
+}
+
+// TestNoToolsOmitsTheKeyEntirely holds [provider.Request.Tools]'s doc comment:
+// nil advertises nothing, which means the `tools` key is absent from the wire
+// body rather than present as an empty array — a provider is not guaranteed to
+// treat the two the same.
+func TestNoToolsOmitsTheKeyEntirely(t *testing.T) {
+	f := loadFixture(t)
+
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		writeSSE(t, w, f.Exchanges[0].Response.Stream)
+	}))
+	defer srv.Close()
+
+	req := request(f)
+	req.Tools = nil
+
+	stream, err := newClient(t, srv).Complete(t.Context(), req)
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	drain(t, stream)
+	_ = stream.Close()
+
+	var sent map[string]json.RawMessage
+	if err := json.Unmarshal(gotBody, &sent); err != nil {
+		t.Fatalf("decoding the request this client sent: %v\n%s", err, gotBody)
+	}
+	if _, ok := sent["tools"]; ok {
+		t.Errorf(`the wire body carries a "tools" key with no tools to advertise: %s`, gotBody)
 	}
 }
 

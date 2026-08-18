@@ -44,6 +44,19 @@ type Schema struct {
 	// Name is the tool's name as the model must spell it.
 	Name string
 
+	// Description is one clause saying what the tool does. It exists for the
+	// wire's tool-definition catalogue (KAN-844) — internal/provider's
+	// RenderTools puts it in a ToolFunction's "description" field — and is
+	// deliberately not rendered into [Schema.shape]'s repair message: a repair
+	// is a call-shape reminder for a model that already got the shape wrong
+	// once, and re-sending the description it already had the first time is
+	// the "not the whole catalogue again" cost this format was built to avoid
+	// (docs/SLICE-1.md §3). It is populated for every tool this binary
+	// dispatches; engine.schemaOf panics at package init on a tool it cannot
+	// describe, on the same "declared, never silent" principle as the type
+	// panics beside it.
+	Description string
+
 	// Params are the tool's arguments, in the order a repair message should
 	// show them. Order is the tool's choice, not sorted here: the tool knows
 	// which argument a reader looks for first.
@@ -64,6 +77,13 @@ type Param struct {
 
 	// Enum, when non-empty, is the closed set of string values accepted.
 	Enum []string
+
+	// Description is one clause saying what the argument means — not merely
+	// its name and type, which is all a rendered catalogue could tell a model
+	// without this field (KAN-844). Left out of [Param.placeholder] for the
+	// same reason [Schema.Description] is left out of the repair shape: a
+	// repair message quotes the call shape back, not the tool's manual.
+	Description string
 }
 
 // ParamType is the JSON type an argument accepts.

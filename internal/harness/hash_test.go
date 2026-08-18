@@ -33,14 +33,23 @@ func defaultConfig(t *testing.T) harness.Config {
 // harness.PreimageVersion has to move with it — otherwise two binaries write
 // different hashes for the same arm and their results silently stop pooling.
 //
-// The literal has moved once, on KAN-843, when Config.SystemPrompt went from
-// the empty placeholder to prompt_default.md. That is a configuration *value*
+// The literal moved once, on KAN-843, when Config.SystemPrompt went from the
+// empty placeholder to prompt_default.md. That is a configuration *value*
 // changing and not an encoding change, so PreimageVersion stayed at 1 — and no
-// result was invalidated by it, because no bench run had happened. A future
-// move needs the same two sentences: which value changed, and what it means for
-// results recorded under the old hash.
+// result was invalidated by it, because no bench run had happened.
+//
+// It moved a second time on KAN-844, and that move *is* an encoding change:
+// Config.ToolCatalogue and Config.AdvertiseNativeTools are new fields the
+// preimage did not cover at all before (hash.go's hashWith gained the
+// p.toolCatalogue and the advertise_native_tools lines), so PreimageVersion
+// moved from 1 to 2 alongside it — the literal moving without the version
+// moving would have meant an old and a new binary silently disagreeing about
+// what the same configuration hashes to. Again, no bench run had happened
+// under version 1's hash, so nothing pools incorrectly either side of the
+// bump. A future move needs the same two sentences: which value or which
+// coverage changed, and what it means for results recorded under the old hash.
 func TestDefaultConfigHashIsStable(t *testing.T) {
-	const want = "07251b5de390664a88e5c45efa0e8bbe0218a95567699fc7753b61807a67417b"
+	const want = "5d7c99ef4bd34a2028a449dac942bfed8827e186ccc5726bfd5cef81713dc03a"
 
 	got := defaultConfig(t).Hash()
 	if got != want {
@@ -217,11 +226,22 @@ func mutate(t *testing.T, path string, v reflect.Value) {
 	case reflect.Bool:
 		v.SetBool(!v.Bool())
 	case reflect.Slice:
-		if v.Type().Elem().Kind() != reflect.String {
+		switch v.Type().Elem().Kind() {
+		case reflect.String:
+			v.Set(reflect.Append(v, reflect.ValueOf("mutated")))
+		case reflect.Struct:
+			// Appending the zero value is enough: it changes the slice's
+			// length, which changing anything requires (DeepEqual demands the
+			// mutation be real, not merely re-encoded the same way) and, for
+			// [Config.ToolCatalogue], the preimage's own ".len" prefix moves
+			// with it (hash.go's toolCatalogue), so the hash assertion below
+			// is not resting only on the length happening to coincide with a
+			// content difference.
+			v.Set(reflect.Append(v, reflect.Zero(v.Type().Elem())))
+		default:
 			t.Fatalf("%s is a slice of %s, which this test cannot vary; teach it, or the field "+
 				"may be outside the hash preimage and nothing would say so", path, v.Type().Elem())
 		}
-		v.Set(reflect.Append(v, reflect.ValueOf("mutated")))
 	default:
 		t.Fatalf("%s is a %s, which this test cannot vary; teach it, or the field may be "+
 			"outside the hash preimage and nothing would say so", path, v.Kind())

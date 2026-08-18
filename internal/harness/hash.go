@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/leejianrong/kopicode/internal/anchor"
+	"github.com/leejianrong/kopicode/internal/provider"
 )
 
 // PreimageVersion identifies the *encoding* below, not the configuration.
@@ -16,7 +17,17 @@ import (
 // produce a hash that collides with one written by an older binary. Bump it when
 // the encoding changes, which is a different event from a configuration value
 // changing.
-const PreimageVersion = 1
+//
+// 2, as of KAN-844: [Config.ToolCatalogue] and [Config.AdvertiseNativeTools]
+// entered the preimage below, which is what "the encoding changes" means here
+// — the preimage now *covers* something it did not before, as distinct from an
+// existing field's *value* changing (KAN-843's system prompt landing moved the
+// hash without moving this constant, and TestDefaultConfigHashIsStable's own
+// comment gives that as the worked contrast). No bench run had happened under
+// version 1's hash by the time this landed, so nothing pools incorrectly
+// either side of the bump — see the PR that introduced this comment for the
+// value the golden hash moved to.
+const PreimageVersion = 2
 
 // Hash is the harness config hash journal.SessionStarted records: the
 // comparison key ADR-0005's paired method pools on, and the mechanism that makes
@@ -53,15 +64,29 @@ func (c Config) hashWith(anchorVersion string) string {
 	// whole of what the comparison needs.
 	p.digest("system_prompt", c.SystemPrompt)
 
-	// Names only, and narrower than ADR-0007 decision 6 asks for: it wants the
-	// tool set "as presented to the model — names, schemas, descriptions", and
-	// no rendered catalogue exists in this repository yet (provider.Request
-	// carries none; KAN-776 owns that shape). Hashing an invented rendering
-	// would put bytes in the preimage that nothing ever sent. So the gap is
-	// stated rather than papered over: a description change is currently
-	// invisible to this hash, and whoever lands the catalogue must extend
-	// Config.ToolSet and bump PreimageVersion.
+	// Names only. The full rendering — schemas and descriptions — is
+	// [Config.ToolCatalogue] below; this stays because [Catalogue] (and the
+	// repair loop it serves) is keyed by name and a hash that could not tell
+	// two configurations naming the same tools in a different order apart
+	// would be hiding a real behavioural difference (ToolSet's order is
+	// presentation order).
 	p.strs("tool_set", c.ToolSet)
+
+	// The wire's tool-definition catalogue, in full: names, schemas and
+	// descriptions, which is what ADR-0007 decision 6 asks the tool set's
+	// presence in the preimage to cover (KAN-844 is what made a rendering
+	// exist to hash — see Config.ToolCatalogue's own doc comment). A
+	// description edited without touching a name or a type now moves this
+	// hash, which it could not before PreimageVersion 2.
+	p.toolCatalogue("tool_catalogue", c.ToolCatalogue)
+
+	// Whether ToolCatalogue reaches the wire at all. Two configurations
+	// presenting an identical catalogue that one advertises and the other
+	// withholds are different arms — SLICE-1 §3's three extraction routes
+	// exist because not every model reliably uses the native one, and whether
+	// an arm offers it is exactly the kind of thing a second arm might vary
+	// (see the field's own doc comment).
+	p.bool("advertise_native_tools", c.AdvertiseNativeTools)
 
 	p.strs("parse_routes", c.ParseRoutes)
 	p.num("repair_budget", c.RepairBudget)
@@ -130,4 +155,36 @@ func (p preimage) strs(key string, values []string) {
 func (p preimage) digest(key, value string) {
 	sum := sha256.Sum256([]byte(value))
 	p.write(key, hex.EncodeToString(sum[:]))
+}
+
+// toolCatalogue encodes the wire's tool-definition array field by field, in
+// order, the same length-prefixed discipline [strs] uses and for the same
+// reason: an indexed key so a reordering (of tools, or of one tool's
+// arguments) changes the hash rather than being absorbed by a set-like
+// encoding. No field of [provider.ToolDefinition]'s type graph is a map — see
+// [provider.ToolParameters]'s own doc comment — so there is nothing here that
+// could range one.
+func (p preimage) toolCatalogue(key string, defs []provider.ToolDefinition) {
+	p.num(key+".len", len(defs))
+	for i, d := range defs {
+		base := key + "." + strconv.Itoa(i)
+		p.str(base+".type", d.Type)
+		p.str(base+".name", d.Function.Name)
+		p.str(base+".description", d.Function.Description)
+
+		// Parameters.Type is not a field: it is always "object" (see
+		// provider.ToolParameters' own doc comment), so there is no value here
+		// that could vary and nothing to hash.
+		props := d.Function.Parameters.Properties
+		p.num(base+".properties.len", len(props))
+		for j, prop := range props {
+			pbase := base + ".properties." + strconv.Itoa(j)
+			p.str(pbase+".name", prop.Name)
+			p.str(pbase+".type", prop.Type)
+			p.str(pbase+".description", prop.Description)
+			p.strs(pbase+".enum", prop.Enum)
+		}
+
+		p.strs(base+".required", d.Function.Parameters.Required)
+	}
 }

@@ -287,6 +287,43 @@ What is real now (2026-08-17):
   to `07251b5de390…` when the prompt landed — a configuration *value* changing, so
   `PreimageVersion` stayed at 1, and nothing was invalidated because no bench run has
   happened.
+- **A tool catalogue reaches the wire, and the per-argument description gap is closed**
+  (KAN-844). `provider.Request.Tools` carries `[]parse.Schema`, translated at the
+  wire-building boundary (`internal/provider/client.go`'s `encode`, via the new
+  `provider.RenderTools`) into OpenAI's documented `tools: [{type: "function", function:
+  {name, description, parameters}}]` shape — the same contract
+  `internal/provider/fixture` already commits to for the streamed tool-call delta, so this
+  is a second use of a convention already chosen rather than a second dialect. `parse.Schema`
+  and `parse.Param` each gained a `Description`; `internal/engine/catalogue.go`'s argument
+  structs gained a `kopicode_desc` struct tag beside `kopicode:"required"` (a distinct key
+  because a description is free prose that may contain a comma), and a tool's own
+  description is a parameter to `entryOf`/`schemaOf` rather than a struct field, since it
+  describes the whole call and not one argument. `engine.schemaOf` panics at init on a
+  field or tool with no description, the same "declared, never silent" discipline as its
+  existing panic on an unmapped type — so the gap CLAUDE.md used to name here cannot
+  reopen quietly. Whether the catalogue is advertised at all is
+  `harness.Config.AdvertiseNativeTools`, true for the one configuration slice 1 registers
+  and false by default nowhere — SLICE-1 §3's three extraction routes exist because not
+  every model reliably uses the native one, so whether an arm *offers* it is itself an arm
+  variable (KAN-855 is what varies it). Both `Config.ToolCatalogue` (the full rendered
+  catalogue: names, descriptions, per-argument types/required/descriptions) and
+  `AdvertiseNativeTools` are in the harness config hash preimage — `ToolCatalogue` is a
+  literal in `internal/harness/harness.go`, duplicated from the struct tags for the same
+  reason `ToolSet`'s names already were (`internal/harness` cannot import
+  `internal/engine`; the dependency runs the other way), and held equal to the real
+  rendered catalogue by `internal/engine/toolcatalogue_test.go` rather than by trust. No
+  map anywhere in the type graph under `Config`: JSON Schema's `properties` keyword wants
+  an object, so `provider.ToolParameters` renders one by hand in a custom `MarshalJSON`
+  over an ordered `[]ToolProperty`, and `TestConfigHoldsNoMap` (which walks the whole type
+  graph, not just `Config`'s direct fields) is what proves that holds. Adding fields the
+  preimage did not cover before is an *encoding* change and not a configuration-value
+  change, so `PreimageVersion` moved from 1 to 2 — unlike the prompt's own landing above,
+  which only moved a value — and the golden hash moved to `5d7c99ef4bd3…` with it; no bench
+  run had happened under either hash, so nothing pools incorrectly across the move. The
+  mock/replay provider ignores `Request.Tools` entirely (a canned reply does not change
+  because of what was advertised), so this reaches the wire only through the live client —
+  `make bench-smoke` stayed green across the change, which is the check that the mock path
+  still runs end to end with a `Request` shape it does not otherwise look at.
 - **The live OpenRouter client** (`internal/provider/client.go`, KAN-776) — one POST to
   `/chat/completions` with `stream=true`, decoded by the *same* SSE reader the replay
   provider drives, and driven in tests by an `httptest` server replaying the fixtures'
@@ -467,22 +504,12 @@ the correct direction to be wrong in"). Full journal-level root-cause trace is i
 KAN-800 card's comments. This is the harness's first honest number, not a clean one — and
 that is the point of running it before claiming anything about model capability.
 
-What does **not** exist. One open card, and it is the one that matters because it is a
-claim this project makes and has not yet demonstrated:
-
-- **Tool definitions on the wire (KAN-844).** `provider.Request` carries none. The
-  system prompt is therefore the *only* description of the tools the model gets — do not
-  assume it is being handed a catalogue. The argument *names* are not the prompt's own
-  invention (they come off the `json` tags the dispatcher decodes and the repair loop
-  quotes back), but the per-tool and per-argument descriptions a wire format wants have
-  no home yet, and `parse.Schema` has no room for them, which is why the shape is a card
-  rather than a transcription.
-
-Absent with a card behind it: the fixture **recorder** (KAN-774), which is why every
-fixture is still hand-authored; a second registered model (KAN-850), and therefore no
-second arm for the scorer; `slog` inside the engine (KAN-771) — the `--debug` flag and
-the stderr handler are wired on both front ends, but the engine itself logs nothing yet.
-Absent with **no** card: the `.kopicode/lock` advisory lock SLICE-1 §8 describes.
+What does **not** exist, with a card behind it: the fixture **recorder** (KAN-774), which
+is why every fixture is still hand-authored; a second registered model (KAN-850), and
+therefore no second arm for the scorer; `slog` inside the engine (KAN-771) — the
+`--debug` flag and the stderr handler are wired on both front ends, but the engine
+itself logs nothing yet. Absent with **no** card: the `.kopicode/lock` advisory lock
+SLICE-1 §8 describes.
 Nothing stops two sessions in one repository today; `internal/journal/file.go` carries
 the forward reference to it, so the gap is known rather than overlooked. Snapshot
 **restore** and session **fork** are slice 2 by design and are not gaps.
