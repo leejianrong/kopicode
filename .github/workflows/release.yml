@@ -1,0 +1,98 @@
+name: Release
+
+# Fires on a pushed tag matching v*, e.g. v0.1.0 or v1.2.3-rc1. Nothing else
+# tags a commit, runs it, and publishes the artifacts today (KAN-931) — this
+# is that workflow. Pushing the tag itself stays a deliberate, separate act
+# by a human; this file only reacts to one once it exists.
+on:
+  push:
+    tags:
+      - "v*"
+
+# A tag is normally pushed once, but a re-run (manual retry, or a force-pushed
+# tag) should not race a still-running release for the same tag and leave a
+# release with half its assets attached. Unlike ci.yml's per-ref group, this
+# one does NOT cancel-in-progress: cancelling mid-upload is how a release ends
+# up with three of five binaries attached and no signal that it happened.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+# contents: write is the one thing this workflow needs beyond ci.yml's
+# default read — creating a release and uploading assets to it both write to
+# the repository's contents API.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # xbuild's binaries are stamped with `git describe --tags` (see the
+          # Makefile's VERSION). actions/checkout defaults to a shallow,
+          # tag-less clone, which would make that describe fall back to a
+          # bare commit hash and ship a binary that can't name its own
+          # version. fetch-depth: 0 fetches full history; fetch-tags: true
+          # is redundant with it today but kept explicit so this checkout
+          # does not silently start skipping tags if that default ever
+          # changes upstream.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Builds AND vets all 5 platform/arch combos for both cmd/kopicode and
+      # cmd/kopibench, CGO_ENABLED=0 — the same target xbuild's CI job runs,
+      # so a tag that reaches this workflow has already been proven to
+      # cross-compile by the commit's own CI run. Re-running it here rather
+      # than reusing that run's output is what makes this job self-contained
+      # and reproducible from the tag alone.
+      - run: make xbuild
+
+      # xbuild's own layout (bin/<os>-<arch>/{kopicode,kopibench}[.exe]) is
+      # fine for local use but not for a release page: a downloader has to
+      # guess which of ten identically-named files is theirs. Stage a copy
+      # per platform under one clear name instead, e.g.
+      # kopicode-linux-amd64, kopibench-windows-amd64.exe. Driven by
+      # whatever xbuild actually produced rather than a hardcoded platform
+      # list, so this step can't silently drift from the Makefile's
+      # PLATFORMS if that list ever changes.
+      - name: Stage release assets
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          for dir in bin/*/; do
+            plat=$(basename "$dir")
+            for bin in kopicode kopibench; do
+              if [ -f "${dir}${bin}" ]; then
+                cp "${dir}${bin}" "release-assets/${bin}-${plat}"
+              elif [ -f "${dir}${bin}.exe" ]; then
+                cp "${dir}${bin}.exe" "release-assets/${bin}-${plat}.exe"
+              fi
+            done
+          done
+          echo "staged assets:"
+          ls -la release-assets
+
+      # gh is preinstalled on GitHub-hosted runners and talks to the same
+      # repository through the built-in GITHUB_TOKEN, so this needs no
+      # third-party Action and no credential beyond the one the runner
+      # already has scoped to this run. That keeps the "dependencies stay
+      # near-zero" instinct CLAUDE.md states for Go modules applied to the
+      # CI-Action surface too, rather than reaching for
+      # softprops/action-gh-release for what is a two-command job.
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${{ github.ref_name }}" \
+            release-assets/* \
+            --title "${{ github.ref_name }}" \
+            --generate-notes
