@@ -52,15 +52,6 @@ var zeroExemptions = []zeroExemption{
 			"AllowFallbacks above: false is what every real request carries.",
 	},
 	{
-		Type: journal.TypeVerificationRun,
-		Path: "ExitCode",
-		Reason: "0 is verification passing, which is a legitimate and " +
-			"common outcome to fixture — internal/verify's Outcome docs make " +
-			"NotRun, not Passed, the zero value at the Outcome level, but the " +
-			"wire ExitCode itself is a plain int and 0 genuinely means " +
-			"success here.",
-	},
-	{
 		Type: journal.TypeSessionEnded,
 		Path: "ExitCode",
 		Reason: "0 is the process exit code for a session that completed " +
