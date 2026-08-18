@@ -2,9 +2,116 @@
 
 A coding agent for the terminal, and a harness you can tune per model.
 
-Nothing is built yet. This README records the decisions already taken, so the
-first commit of real code starts from them rather than re-deriving them. The
-reasoning behind each one is in [`docs/adr/`](docs/adr/).
+Slice 1 is built and has been run against a real repository and against the frozen
+benchmark corpus: a REPL and a headless bench runner drive one engine, with tool-call
+parse-and-repair, hash-anchored edits that reject on drift rather than guessing, a
+post-edit syntax gate, forced verification, and a permission gate in front of anything
+that runs a shell command or writes outside the project. This README records the
+decisions behind that build; the reasoning behind each one is in
+[`docs/adr/`](docs/adr/), and `CLAUDE.md`'s "Build status" section is the fuller,
+more current account of what exists — trust it over this file where the two disagree.
+
+## Quickstart
+
+Getting from nothing installed to a first turn in the interactive REPL. This assumes
+Go is already on your machine; if it isn't, install Go 1.26 or later first.
+
+### 1. Build from source
+
+There is no pre-built binary yet — see the note at the end of this section.
+
+```bash
+git clone https://github.com/leejianrong/kopicode.git
+cd kopicode
+make build   # or: go build -o bin/kopicode ./cmd/kopicode
+```
+
+This produces `bin/kopicode` (and `bin/kopibench`, the headless benchmark runner,
+which this quickstart does not cover).
+
+### 2. Set your API key
+
+kopicode talks to models through [OpenRouter](https://openrouter.ai/). Set
+`OPENROUTER_API_KEY` in your environment before starting a session — where to get a
+key is out of scope here, but without it kopicode has no provider to talk to and
+refuses to open a session:
+
+```bash
+export OPENROUTER_API_KEY="..."
+```
+
+### 3. Pick a model
+
+Three model ids are registered today:
+
+| Model id | Notes |
+| --- | --- |
+| `qwen/qwen3-coder-next` | the default — used if `--model` is omitted |
+| `minimax/minimax-m2` | |
+| `z-ai/glm-5.2` | long context |
+
+```bash
+bin/kopicode --model qwen/qwen3-coder-next
+```
+
+Omit `--model` to get the default. A model id outside this list is refused at
+startup, before anything else happens, with the supported list printed back —
+never a provider error one request later.
+
+### 4. First run
+
+A bare `bin/kopicode` starts the interactive REPL in the current directory. Type a
+task in plain English at the prompt; the model reads files, proposes edits and, where
+it decides it needs to, runs a shell command.
+
+Two kinds of action always stop and ask for your consent first: running a shell
+command, and writing to a path outside the project directory. Ordinary edits and
+writes *inside* the project are not gated — that's the agent's job, not a decision the
+loop asks you to make turn after turn. The prompt looks like this:
+
+```
+[perm] run_shell needs your consent
+       command: go test ./...
+allow? [y]es / [N]o / [a]lways for this exact request:
+```
+
+- `y` allows this one call.
+- Anything else — including a bare Enter — denies it, which is the deliberately safe
+  default.
+- `a` allows this *exact* request (same tool, same exact command or path) for the
+  rest of the session. It's an exact match, not a standing grant over a directory or
+  a command prefix — a different shell command still asks again.
+
+`Ctrl-C` while a turn is in flight cancels that turn — the model's in-progress reply,
+or a running shell command — without ending the session; you'll see a `[cancelled]`
+line and get the prompt back. `Ctrl-C` at an empty prompt just discards whatever
+you'd typed.
+
+### 5. `.kopicode/config.toml`
+
+A repository can pin its own model and harness, so that everyone who runs kopicode in
+it gets the same arm without typing flags:
+
+```toml
+model = "minimax/minimax-m2"
+```
+
+Precedence, highest first: `--model` / `--harness` on the command line, then this
+file, then the built-in default. There is no environment variable anywhere in that
+chain — `OPENROUTER_API_KEY` above is the one thing kopicode reads from the
+environment, and it's a credential, not a configuration choice.
+
+### 6. Scripting
+
+`kopicode run --print` is the headless, scriptable surface: it runs one prompt and
+emits newline-delimited JSON events on stdout instead of driving a terminal. Out of
+scope for this quickstart — see `cmd/kopicode/print.go`'s doc comment for the schema.
+
+### Pre-built binaries
+
+There is no GitHub Release yet, so building from source above is the only path
+today. Pre-built binaries for the usual platforms are coming via GitHub Releases;
+check the repository's Releases page once one exists.
 
 ## The thesis
 
@@ -260,5 +367,8 @@ Apache-2.0, matching Satay and sibei-flow.
 
 ## Status
 
-Planned. See the [Abang page](https://leejianrong.github.io/abang-landing-page/) for
-where this sits among the rest.
+Slice 1 is built: one engine, two front ends, one model measured end to end against a
+real repository and the frozen benchmark corpus. See the "Build status" section of
+`CLAUDE.md` for what exists today and the "Quickstart" section above to try it. See
+the [Abang page](https://leejianrong.github.io/abang-landing-page/) for where this
+sits among the rest.
