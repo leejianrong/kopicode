@@ -675,26 +675,58 @@ func build(t *testing.T, fe frontEnd) string {
 	return out
 }
 
+// toolchainPassThrough is what `go build` needs to find itself and its
+// caches. Everything else is dropped, and the drops are the whole point of
+// the list.
+//
+// This mirrors internal/build's toolchainPassThrough (inject_test.go) and
+// internal/corpus's passThrough (oracle_integration_test.go) rather than
+// importing either: internal/build's copy is an unexported variable in a
+// _test.go file, so it is not reachable even though cmd/kopicode already
+// imports the internal/build package proper for --version, and
+// internal/corpus is a sibling test package with the same problem. Three
+// call sites, three copies — KAN-854 is the record of that being deliberate,
+// so read this before adding a fourth builder rather than reaching for
+// os.Environ() again.
+//
+// KAN-854 replaced this list's predecessor, a denylist that dropped only
+// GOFLAGS, GOOS and GOARCH from the inherited environment. A denylist is a
+// claim that every variable able to change what `go build` produces has been
+// enumerated, and the Go toolchain keeps adding ones that were not on it —
+// GOEXPERIMENT changes which language/runtime experiments compile in,
+// GOPRIVATE changes module resolution, GOTOOLCHAIN changes which compiler
+// runs, and GOWORK changes whether a workspace file overrides the module
+// this test means to build. An allowlist does not need to have anticipated
+// any of them; it need only be missing an entry the build turns out to
+// require, which fails loudly as a broken test rather than silently as a
+// build that used the wrong toolchain.
+var toolchainPassThrough = []string{
+	"PATH", "HOME", "TMPDIR", "TEMP", "TMP",
+	"GOROOT", "GOPATH", "GOCACHE", "GOMODCACHE", "GOPROXY",
+	// GOTOOLCHAIN decides which compiler runs. It is passed through rather
+	// than pinned because the `go test` process that got here resolved it
+	// the same way, and forcing a different answer would test a build
+	// nobody makes.
+	"GOTOOLCHAIN",
+	// Windows needs these to start a process at all.
+	"SystemRoot", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "ComSpec",
+}
+
 // toolchainEnv is the environment `go build` runs under.
 //
-// It is built rather than inherited, because an inherited GOFLAGS, GOOS or
-// GOARCH silently changes what gets compiled and the command still reads
-// correctly (CLAUDE.md, and internal/arch/subprocess_test.go). The rest of the
-// ambient environment is kept deliberately: GOCACHE, GOMODCACHE, PATH and HOME
-// are how the toolchain finds itself, and a build without them is a build of
-// nothing.
+// GOFLAGS is set empty rather than merely omitted, matching internal/build's
+// toolchainEnv: an allowlist keeps an inherited GOFLAGS out of the child's
+// environment, but `go env -w GOFLAGS=…` writes it to a file the toolchain
+// reads on its own, which no allowlist over the environment can reach; an
+// explicit empty value in the environment overrides that file.
 func toolchainEnv() []string {
-	var env []string
-	for _, kv := range os.Environ() {
-		switch {
-		case strings.HasPrefix(kv, "GOFLAGS="),
-			strings.HasPrefix(kv, "GOOS="),
-			strings.HasPrefix(kv, "GOARCH="):
-			continue
+	env := make([]string, 0, len(toolchainPassThrough)+1)
+	for _, name := range toolchainPassThrough {
+		if value, ok := os.LookupEnv(name); ok {
+			env = append(env, name+"="+value)
 		}
-		env = append(env, kv)
 	}
-	return env
+	return append(env, "GOFLAGS=")
 }
 
 type result struct {

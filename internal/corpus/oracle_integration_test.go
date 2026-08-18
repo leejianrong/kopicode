@@ -132,6 +132,16 @@ func runOracle(t *testing.T, task corpus.Task, dir string) (int, string) {
 
 // passThrough are the variables a toolchain needs to find itself and its
 // caches. Everything else is dropped.
+//
+// internal/build keeps an almost identical list (toolchainPassThrough in
+// inject_test.go) for the same reason, and cmd/kopicode's
+// frontends_integration_test.go keeps a third (KAN-854). All three are
+// duplicated rather than shared: internal/build's copy is unexported in a
+// _test.go file and so is not importable even by a package on ADR-0003's
+// allowlist, and this package's oracle env has its own per-task overlay
+// (task.Oracle.Env, below) that the other two do not need. Adding a fourth
+// toolchain-subprocess builder — read all three first, and see KAN-854 for
+// why the shape is an allowlist and not a denylist over os.Environ().
 var passThrough = []string{
 	"PATH", "HOME", "TMPDIR", "TEMP", "TMP",
 	"GOROOT", "GOPATH", "GOCACHE", "GOMODCACHE",
