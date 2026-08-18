@@ -158,7 +158,12 @@ func runPrint(args []string, stdout, stderr io.Writer) int {
 		return exitHarness
 	}
 
-	return headless(prompt, stdout, stderr, engine.Options{Dir: dir, Selection: selection})
+	// context.Background() is built here rather than inside headless, so that
+	// the boundary a test can substitute a cancellable context at is this
+	// call and not a line buried inside the function it calls (KAN-904):
+	// headless takes a context instead of manufacturing its own, the same
+	// discipline main.go's session already holds for the REPL path.
+	return headless(context.Background(), prompt, stdout, stderr, engine.Options{Dir: dir, Selection: selection})
 }
 
 // headless runs one exchange and writes the record to stdout as JSON.
@@ -167,10 +172,18 @@ func runPrint(args []string, stdout, stderr io.Writer) int {
 // a test supplies a directory and a provider endpoint, and everything about
 // *how* a session is assembled stays the engine's.
 //
+// ctx is the caller's — runPrint's context.Background() in production, a
+// cancellable one in a test that drives a real cancellation end to end
+// (KAN-904, mirroring internal/engine's TestAMidStreamCancellationIsOnTheRecordOnDisk
+// for this surface). headless used to build its own context.Background()
+// internally, which meant the --print side of cancellation could only be
+// tested at the projection level; there was no seam to cancel a real run
+// through.
+//
 // The exit code comes from the [engine.Stop] the exchange settled on, through
 // engine.Stop.ExitCode and nothing else. There is no second table here — exit.go
 // says why.
-func headless(prompt string, stdout, stderr io.Writer, opts engine.Options) int {
+func headless(ctx context.Context, prompt string, stdout, stderr io.Writer, opts engine.Options) int {
 	out := newEmitter(stdout)
 	opts.Events = out.observe
 	opts.Consent = denyHeadless
@@ -179,8 +192,6 @@ func headless(prompt string, stdout, stderr io.Writer, opts engine.Options) int 
 	// this session journals must be attributed to the policy and not to a
 	// user who was never asked.
 	opts.ConsentMode = engine.ConsentUnattended
-
-	ctx := context.Background()
 
 	sess, err := engine.Open(ctx, opts)
 	if err != nil {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -96,7 +97,19 @@ func refusingProvider(t *testing.T, status int, message string) *httptest.Server
 
 // headlessIn runs one headless exchange in dir and returns stdout, stderr and
 // the exit code.
+//
+// It runs on t.Context() — cancelled at the end of the test, never mid-run —
+// so every existing caller keeps behaving exactly as it did when headless
+// built context.Background() internally. headlessInCtx below is the variant
+// that hands the run a context a test can cancel itself.
 func headlessIn(t *testing.T, dir, prompt string, opts engine.Options) (string, string, int) {
+	t.Helper()
+	return headlessInCtx(t, t.Context(), dir, prompt, opts)
+}
+
+// headlessInCtx is headlessIn with the context made explicit, for a test that
+// needs to cancel a real run mid-turn (KAN-904).
+func headlessInCtx(t *testing.T, ctx context.Context, dir, prompt string, opts engine.Options) (string, string, int) {
 	t.Helper()
 
 	selection, err := engine.ResolveSelection(dir, engine.SelectionOverrides{})
@@ -107,7 +120,7 @@ func headlessIn(t *testing.T, dir, prompt string, opts engine.Options) (string, 
 	opts.Selection = selection
 
 	var out, errOut strings.Builder
-	code := headless(prompt, &out, &errOut, opts)
+	code := headless(ctx, prompt, &out, &errOut, opts)
 	return out.String(), errOut.String(), code
 }
 
@@ -485,7 +498,7 @@ func TestAStreamThatCouldNotBeWrittenIsAHarnessError(t *testing.T) {
 	}
 
 	var stderr strings.Builder
-	code := headless("fix it", brokenWriter{}, &stderr, engine.Options{
+	code := headless(t.Context(), "fix it", brokenWriter{}, &stderr, engine.Options{
 		Dir:             dir,
 		Selection:       selection,
 		ProviderBaseURL: srv.URL,
@@ -574,14 +587,15 @@ func TestTheStreamIsOneJSONObjectPerLine(t *testing.T) {
 // TestACancellationReachesTheStream.
 //
 // KAN-857's line on this surface, asserted on the projection rather than end to
-// end: `headless` runs on context.Background() and a test has no way to cancel
-// it, so causing a real interruption here would mean inventing a seam for it.
-// The real cancellation is caused and asserted where it happens — internal/
-// engine's TestAMidStreamCancellationIsOnTheRecordOnDisk drives one and reads
-// the journal off disk. What is left to hold here is that the event survives the
-// projection: the kind, the turn, the phase and the detail all reach the line,
-// and none of them is dropped by an `omitempty` that made sense for another
-// kind.
+// end. It stays a unit test even after KAN-904 gave `headless` a context seam:
+// TestAHeadlessRunCancelledMidStreamIsOnTheRecordOnDisk, below, is the real
+// end-to-end version, and this one is cheaper and narrower on purpose — what it
+// holds is that the event survives the projection specifically: the kind, the
+// turn, the phase and the detail all reach the line, and none of them is
+// dropped by an `omitempty` that made sense for another kind. A hand-built
+// engine.Event exercises that in one call with no server, no goroutine and no
+// synchronisation to get right, which is exactly the property a projection
+// test should be cheap to state.
 func TestACancellationReachesTheStream(t *testing.T) {
 	r := recordOf(engine.Event{
 		Kind:   engine.EventTurnCancelled,
@@ -623,6 +637,127 @@ func TestACancellationReachesTheStream(t *testing.T) {
 	}
 	if _, ok := got["exit_code"]; ok {
 		t.Errorf("a cancellation has no exit code and the line invented one: %s", line)
+	}
+}
+
+// pausingProvider serves one SSE frame — a content delta with no finish
+// reason — flushes it, signals startedCh, and then blocks until the request's
+// own context is done.
+//
+// It cannot outlive a test: the only way out of the block is the client
+// cancelling the request, which is what the test that uses this does
+// deliberately, and net/http tears the handler's request context down the
+// moment that happens. There is nothing here for a leaked goroutine to hold
+// open.
+func pausingProvider(t *testing.T, startedCh chan<- struct{}) *httptest.Server {
+	t.Helper()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		frame := `data: {"id":"gen-1","object":"chat.completion.chunk","model":"qwen/qwen3-coder-next",` +
+			`"provider":"Parasail","choices":[{"index":0,"delta":{"role":"assistant","content":"still ` +
+			`thinking"},"finish_reason":null}]}` + "\n\n"
+		_, _ = w.Write([]byte(frame))
+		if fl, ok := w.(http.Flusher); ok {
+			fl.Flush()
+		}
+		// Blocks until the send below is received, so the test can never read
+		// "started" before the frame has actually reached the wire.
+		startedCh <- struct{}{}
+		<-r.Context().Done()
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestAHeadlessRunCancelledMidStreamIsOnTheRecordOnDisk is KAN-904's card.
+//
+// headless used to build its own context.Background(), so the only way to
+// assert anything about a --print cancellation was at the projection level —
+// TestACancellationReachesTheStream, above, over a hand-built engine.Event.
+// headless now takes a context, which is the seam this test drives: a real
+// reply is still streaming over a real HTTP connection when the context is
+// cancelled, mirroring internal/engine's
+// TestAMidStreamCancellationIsOnTheRecordOnDisk for this surface rather than
+// asserting about it once removed.
+//
+// Two things have to be true, the same two that test holds for the REPL path:
+// the emitted NDJSON says the turn was cancelled and why, and the journal
+// **on disk** — read as bytes, the way findJournal always has, because a front
+// end may not import internal/journal — carries the TurnCancelled event
+// independently of whatever this file's projection did with it.
+func TestAHeadlessRunCancelledMidStreamIsOnTheRecordOnDisk(t *testing.T) {
+	started := make(chan struct{})
+	srv := pausingProvider(t, started)
+	t.Setenv(engine.APIKeyEnv, "kopicode-test-credential")
+
+	dir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Cancels only once the server has actually flushed a chunk of the reply,
+	// so this is a cancellation of a reply that is genuinely still arriving
+	// and not a race against a request that has not been sent yet.
+	go func() {
+		<-started
+		cancel()
+	}()
+
+	stdout, stderr, code := headlessInCtx(t, ctx, dir, "read it", engine.Options{
+		ProviderBaseURL: srv.URL,
+	})
+
+	if code != engine.StopCancelled.ExitCode() {
+		t.Fatalf("exit code = %d, want %d (engine.StopCancelled). stderr:\n%s\nstdout:\n%s",
+			code, engine.StopCancelled.ExitCode(), stderr, stdout)
+	}
+
+	// --- what the stream says ------------------------------------------------
+
+	ls := stream(t, stdout)
+	var cancelled line
+	for _, l := range ls {
+		if l["kind"] == "turn_cancelled" {
+			cancelled = l
+			break
+		}
+	}
+	if cancelled == nil {
+		t.Fatalf("the stream carries no turn_cancelled line: %v\nstdout:\n%s", kinds(ls), stdout)
+	}
+	if cancelled["reason"] != "provider_stream" {
+		t.Errorf("turn_cancelled reason = %v, want provider_stream — the reply was still arriving",
+			cancelled["reason"])
+	}
+	if _, ok := cancelled["exit_code"]; ok {
+		t.Errorf("a turn_cancelled line invented an exit_code: %v", cancelled)
+	}
+
+	end := last(t, ls)
+	if end["kind"] != "session_ended" || end["reason"] != "cancelled" {
+		t.Errorf("the last line is %v, want a session_ended with reason cancelled", end)
+	}
+	if got := number(t, end, "exit_code"); got != code {
+		t.Errorf("the record says exit %d and the process returned %d; both come from one "+
+			"engine.Stop and must not disagree", got, code)
+	}
+
+	// --- what the journal holds, on disk -------------------------------------
+	//
+	// Not the stream this test already checked above: the file the session
+	// actually wrote, so a bug that only broke the projection could not hide
+	// behind an assertion that only ever looked at stdout.
+	events := findJournal(t, dir)
+	if !strings.Contains(events, `"type":"TurnCancelled"`) {
+		t.Fatalf("the on-disk journal carries no TurnCancelled event, so a cancelled turn "+
+			"is still only an absence:\n%s", events)
+	}
+	if !strings.Contains(events, `"phase":"provider_stream"`) {
+		t.Errorf("the on-disk TurnCancelled does not carry phase \"provider_stream\":\n%s", events)
+	}
+	if !strings.Contains(events, `"type":"SessionEnded"`) {
+		t.Fatalf("the on-disk journal has no SessionEnded, so the record was never closed:\n%s", events)
 	}
 }
 
