@@ -99,6 +99,20 @@ type Options struct {
 	// fail-closed direction — see [asker.Ask].
 	Consent Consenter
 
+	// ConsentMode says who Consent's answers are attributed to on the record:
+	// a human, or the harness itself with nobody present. The zero value,
+	// [ConsentInteractive], is what a caller gets by not setting the field,
+	// and it is what the REPL wants — see [ConsentMode].
+	//
+	// This is KAN-885's fix: `run --print` has no terminal and no human, and
+	// its Consent (see denyHeadless in cmd/kopicode) answers on its own, so it
+	// sets this to [ConsentUnattended] and every resulting
+	// journal.PermissionDecided is stamped permission.SourcePolicy instead of
+	// permission.SourceUser. Without this field the engine had no way to tell
+	// the two apart, and every headless denial was recorded as though a human
+	// had made it.
+	ConsentMode ConsentMode
+
 	// Provider overrides the model provider. Nil builds the live OpenRouter
 	// client from OPENROUTER_API_KEY.
 	//
@@ -123,6 +137,38 @@ type Options struct {
 	// commits with. Nil means time.Now.
 	Now func() time.Time
 }
+
+// ConsentMode says whether [Options.Consent]'s answers are a human's or the
+// harness's own, so [Open] can tell permission.NewAsk which [permission.Source]
+// to stamp on every resulting journal.PermissionDecided.
+//
+// It exists opposite [Options.Consent] rather than as a field the surface
+// stuffs into the Consenter's own answer, because attribution is not the
+// surface's fact to assert about itself — it is the one thing the engine has
+// to get right for the record to be trustworthy, and a self-reported "I am a
+// human" is not a control. A surface says how it was built (REPL vs. headless);
+// the engine decides what that means for the journal (CLAUDE.md, "the engine
+// decides policy, the surfaces decide presentation").
+type ConsentMode uint8
+
+const (
+	// ConsentInteractive is the zero value: Consent's answers came from a
+	// human relayed by a surface, and every PermissionDecided this session
+	// journals is stamped permission.SourceUser. This is what the REPL uses,
+	// and — because it is the zero value — what a caller gets by not setting
+	// the field at all, which is what keeps the REPL unchanged by this field
+	// existing.
+	ConsentInteractive ConsentMode = iota
+
+	// ConsentUnattended says nobody is present to ask: Consent, if it answers
+	// at all, is the harness answering its own question — `run --print`'s
+	// denyHeadless, for instance — and every PermissionDecided this session
+	// journals is stamped permission.SourcePolicy instead. A caller sets this
+	// exactly when Options.Consent has no human behind it; setting it while
+	// Consent really does put the question to a person just misattributes in
+	// the opposite direction.
+	ConsentUnattended
+)
 
 // SnapshotMode says whether a session records the tree after a turn that could
 // have changed it (affordance G1, ADR-0002 §3).
@@ -328,7 +374,7 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 	}
 	s.closers = append(s.closers, set.Close)
 
-	gate, err := permission.New(set.Root.Path(), set.Root.Resolver(), mustAskPolicy(opts.Consent))
+	gate, err := permission.New(set.Root.Path(), set.Root.Resolver(), mustAskPolicy(opts.Consent, opts.ConsentMode))
 	if err != nil {
 		return fail(fmt.Errorf("engine: building the consent gate: %w", err))
 	}
@@ -399,15 +445,21 @@ func streamTo(obs Observer) func(int, provider.Delta) {
 	return func(turn int, d provider.Delta) { obs(deltaEvent(turn, d)) }
 }
 
-// mustAskPolicy builds the interactive policy. permission.NewAsk refuses a nil
-// asker, and this one is never nil: a nil Consenter is handled inside, by
-// denying and saying so, which keeps "nobody wired consent" distinct from
-// "consent was refused" on the record.
-func mustAskPolicy(c Consenter) permission.Policy {
-	p, err := permission.NewAsk(asker{consent: c})
+// mustAskPolicy builds the policy that forwards to Consent, attributing every
+// answer per mode (KAN-885). permission.NewAsk refuses a nil asker, and this
+// one is never nil: a nil Consenter is handled inside, by denying and saying
+// so, which keeps "nobody wired consent" distinct from "consent was refused"
+// on the record.
+func mustAskPolicy(c Consenter, mode ConsentMode) permission.Policy {
+	source := permission.SourceUser
+	if mode == ConsentUnattended {
+		source = permission.SourcePolicy
+	}
+	p, err := permission.NewAsk(asker{consent: c}, source)
 	if err != nil {
-		// Unreachable: asker{} is a non-nil value whatever c is. A panic rather
-		// than a swallowed error, because the alternative would be a session
+		// Unreachable: asker{} is a non-nil value whatever c is, and source is
+		// always one of the two permission.NewAsk accepts. A panic rather than
+		// a swallowed error, because the alternative would be a session
 		// running with no policy at all.
 		panic("engine: building the consent policy: " + err.Error())
 	}

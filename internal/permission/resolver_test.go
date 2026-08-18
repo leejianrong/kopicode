@@ -179,7 +179,7 @@ func TestProductionResolverDrivesTheGate(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			asker := &verdictAsker{verdict: permission.VerdictAllow}
-			policy, err := permission.NewAsk(asker)
+			policy, err := permission.NewAsk(asker, permission.SourceUser)
 			if err != nil {
 				t.Fatalf("building ask policy: %v", err)
 			}

@@ -36,34 +36,58 @@ type Asker interface {
 	Ask(ctx context.Context, req Request) (Verdict, error)
 }
 
-// AskPolicy is the interactive policy: it forwards every request to an [Asker]
-// and attributes the answer to the user.
+// AskPolicy forwards every request to an [Asker] and attributes the answer to
+// the [Source] it was built with.
+//
+// The same shape serves two surfaces that are not the same thing: a human at a
+// REPL, whose answers are [SourceUser], and `kopicode run --print`, which has
+// no human at all and answers its own questions (denying every one of them,
+// today) through the identical [Consenter]-shaped path — its answers are
+// [SourcePolicy]. The asker does not know which one it is; the source is what
+// the caller of [NewAsk] tells this policy to stamp, so a headless answer is
+// never recorded as though a person gave it (KAN-885). That is the mirror of
+// the concern journal.PermissionDecided's own doc comment raises about
+// auto-approval: an unattributed "yes" is not a yes anyone can be held to, and
+// an answer attributed to the wrong kind of nobody is the same defect the
+// other way round.
 type AskPolicy struct {
-	asker Asker
+	asker  Asker
+	source Source
 }
 
-// NewAsk builds an interactive policy over asker.
-func NewAsk(asker Asker) (*AskPolicy, error) {
+// NewAsk builds a policy over asker that attributes every answer to source.
+//
+// source must be [SourceUser] or [SourcePolicy] — the only two callers this
+// package knows how to build, a human surface or a headless one answering its
+// own question. Anything else, including the zero [SourceUnspecified], is
+// refused: a policy that could not say who it speaks for would produce
+// decisions the gate cannot attribute, which is exactly the failure
+// [Gate.Check] already refuses at the point it reads [Decision.Source].
+func NewAsk(asker Asker, source Source) (*AskPolicy, error) {
 	if asker == nil {
 		return nil, errors.New("permission: asker is required")
 	}
-	return &AskPolicy{asker: asker}, nil
+	if source != SourceUser && source != SourcePolicy {
+		return nil, fmt.Errorf("permission: NewAsk source must be SourceUser or SourcePolicy, got %s", source)
+	}
+	return &AskPolicy{asker: asker, source: source}, nil
 }
 
-// Decide asks the human.
+// Decide asks the asker and attributes the answer to the configured source.
 //
-// The answer is stamped [SourceUser] and nothing else, including when it is a
-// refusal: a decision that arrived through this path was made by a person, and
-// the journal has to be able to say so. An asker that fails — a closed stdin, a
-// cancelled turn — produces an error, which the gate turns into a refusal.
-// Treating an unanswerable question as a yes is the failure mode this whole
-// package exists to make impossible.
+// The answer is stamped with that source and nothing else, including when it
+// is a refusal: a decision that arrived through this path is attributed to
+// whoever [NewAsk] was told answers here, and the journal has to be able to
+// say so. An asker that fails — a closed stdin, a cancelled turn — produces an
+// error, which the gate turns into a refusal. Treating an unanswerable
+// question as a yes is the failure mode this whole package exists to make
+// impossible.
 func (p *AskPolicy) Decide(ctx context.Context, req Request) (Decision, error) {
 	v, err := p.asker.Ask(ctx, req)
 	if err != nil {
 		return Decision{}, fmt.Errorf("asking about %s: %w", req.Kind, err)
 	}
-	return Decision{Verdict: v, Source: SourceUser}, nil
+	return Decision{Verdict: v, Source: p.source}, nil
 }
 
 // BenchPolicy is the non-interactive policy the bench runner supplies. It

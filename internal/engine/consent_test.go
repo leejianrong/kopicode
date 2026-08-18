@@ -8,10 +8,13 @@ import (
 
 	"github.com/leejianrong/kopicode/internal/engine"
 	"github.com/leejianrong/kopicode/internal/journal"
+	"github.com/leejianrong/kopicode/internal/permission"
+	"github.com/leejianrong/kopicode/internal/tools"
 )
 
-// shellFixture is the recording whose second turn asks to run a command, so a
-// session driving it reaches the consent gate.
+// shellFixture is a read-only recording (it calls read_file and then stops),
+// so consentEvents never actually reaches the consent gate through it —
+// TestConsentIsNotAskedForAReadOnlySession is exactly that assertion.
 const shellFixture = "two_turn_native_tool_call"
 
 // consentTurn runs a session whose consent is answered by consent, and returns
@@ -34,6 +37,77 @@ func consentEvents(t *testing.T, consent engine.Consenter) []journal.Event {
 		t.Fatalf("Close: %v", err)
 	}
 	return readJournal(t, s.Path())
+}
+
+// shellConsentEvents runs a session against a scripted run_shell call —
+// no shipped fixture asks for one, so this builds one in memory with script
+// (harness_test.go) — through engine.Open with the given Consent and
+// ConsentMode, and returns what the record holds.
+//
+// Going through Open rather than newHarness/scriptHarness is deliberate: those
+// wire a test's own permission.Policy directly into engine.Config, which is
+// exactly the path KAN-885 is not about. What needs covering here is
+// mustAskPolicy — the wiring Open itself does from Options.Consent and
+// Options.ConsentMode — so the session has to be built by Open.
+func shellConsentEvents(t *testing.T, consent engine.Consenter, mode engine.ConsentMode) []journal.Event {
+	t.Helper()
+
+	replies := []scriptedReply{
+		{calls: []wireCall{nativeCall("call-shell", tools.ToolRunShell, `{"command":"echo hello"}`)},
+			usage: wireUsage{Prompt: 10, Completion: 5, Total: 15}},
+		{text: "Understood.", usage: wireUsage{Prompt: 20, Completion: 4, Total: 24}},
+	}
+	prov := script(t, replies, oneAttemptPerTurn(2))
+
+	s, _ := openWithProvider(t, prov, engine.Options{Consent: consent, ConsentMode: mode})
+	if _, err := s.Run(t.Context(), "run the tests"); err != nil {
+		// A refused tool is an observation, not a failure of the exchange, so
+		// this only fires when something genuinely broke.
+		t.Logf("Run: %v", err)
+	}
+	if err := s.Close(t.Context()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	return readJournal(t, s.Path())
+}
+
+// TestReplConsentIsAttributedToTheUser is the REPL side of KAN-885: with the
+// engine's default ConsentMode (ConsentInteractive, the zero value a caller
+// gets by not setting the field — exactly what cmd/kopicode/main.go's session
+// path does), a decision that came back through Consent must be recorded as a
+// human's.
+func TestReplConsentIsAttributedToTheUser(t *testing.T) {
+	events := shellConsentEvents(t, func(context.Context, engine.ConsentRequest) (engine.ConsentAnswer, error) {
+		return engine.ConsentDeny, nil
+	}, engine.ConsentInteractive)
+
+	dec := sole[journal.PermissionDecided](t, events)
+	if dec.Source != permission.SourceUser.String() {
+		t.Errorf("source = %q, want %q — the REPL's Consent speaks for a human", dec.Source, permission.SourceUser)
+	}
+}
+
+// TestHeadlessConsentIsAttributedToPolicyNotAUser holds the card: KAN-885
+// found that `run --print` had no way to tell the engine nobody was at a
+// terminal, so its denyHeadless refusal — a genuine harness decision — was
+// stamped as though a person had made it. This is the mirror of the concern
+// journal.PermissionDecided's own doc comment raises about auto-approval: an
+// answer attributed to the wrong kind of nobody is the same defect as one
+// attributed to no one at all, and either corrupts the one session record
+// there is.
+func TestHeadlessConsentIsAttributedToPolicyNotAUser(t *testing.T) {
+	events := shellConsentEvents(t, func(context.Context, engine.ConsentRequest) (engine.ConsentAnswer, error) {
+		return engine.ConsentDeny, nil
+	}, engine.ConsentUnattended)
+
+	dec := sole[journal.PermissionDecided](t, events)
+	if dec.Source != permission.SourcePolicy.String() {
+		t.Errorf("source = %q, want %q — nobody was at a terminal to be credited with this denial",
+			dec.Source, permission.SourcePolicy)
+	}
+	if dec.Source == permission.SourceUser.String() {
+		t.Fatal("a headless denial was recorded as though a human made it")
+	}
 }
 
 // TestANilConsenterRefuses is the fail-closed default, and it is the one that

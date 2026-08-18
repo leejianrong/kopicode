@@ -215,6 +215,9 @@ func session(std streams, opts engine.Options) int {
 
 	opts.Events = loop.Render
 	opts.Consent = loop.Ask
+	// opts.ConsentMode is left at its zero value, engine.ConsentInteractive: a
+	// human is answering through loop.Ask, so every PermissionDecided this
+	// session journals is stamped permission.SourceUser (KAN-885).
 
 	ctx := context.Background()
 	sess, err = engine.Open(ctx, opts)
