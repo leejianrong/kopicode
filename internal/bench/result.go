@@ -138,6 +138,13 @@ type RunResult struct {
 	Duration time.Duration
 	// OutDir is where the journals and the temp homes were written.
 	OutDir string
+	// Provider is where this run's traffic came from. It is carried through
+	// from [Options.Provider] rather than inferred from the pass count or the
+	// exit code, because either of those a real regression could coincidentally
+	// match — this field is the one honest signal that a run replayed the mock
+	// fixture rather than spending money against the live provider, and it is
+	// what [WriteReport] gates the smoke-baseline footer on (KAN-905).
+	Provider ProviderKind
 }
 
 // ArmIdentity is the arm a run measured, in the three parts ADR-0007 decision 7

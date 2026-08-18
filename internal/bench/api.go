@@ -88,6 +88,7 @@ func RunCorpus(ctx context.Context, opts Options) (*RunResult, error) {
 		Selection: opts.Selection,
 		Build:     opts.Build.journalInfo(),
 		Agent:     EngineAgent{Provider: opts.Provider, Fixture: opts.Fixture},
+		Provider:  opts.Provider,
 		// Every run through this entry point classifies. [Runner.Classifier]
 		// stays nil-able because a test driving the reclamation guarantees has
 		// no journal to read, but a front end must not be able to produce a

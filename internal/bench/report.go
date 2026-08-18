@@ -52,9 +52,49 @@ func WriteReport(w io.Writer, r *RunResult) error {
 	writeBuckets(&b, r.Buckets())
 	b.WriteString("\n")
 	writeReclamation(&b, r.Reclamation)
+	writeSmokeBaseline(&b, r)
 
 	_, err := io.WriteString(w, b.String())
 	return err
+}
+
+// writeSmokeBaseline is KAN-905: `make bench-smoke` replays a fixture that
+// solves nothing, so every task fails and the run above reads exactly like a
+// broken corpus unless something says otherwise.
+//
+// It prints only when [RunResult.Provider] is [ProviderMock] — an explicit
+// field carried from the front end's own `--provider` flag, not a guess from
+// the pass count or the task count, either of which a genuine regression
+// could coincidentally match. And it prints only when the run itself looked
+// clean: no session errored, panicked or timed out ([RunResult.Errored]), and
+// every worktree was both created and reclaimed. A run that failed any of
+// those already reads as broken — "NOT CREATED", "NOT RECLAIMED", a session
+// note — and this footer must not paper over that by asserting a baseline
+// that did not hold. That is what keeps a real regression against the mock
+// fixture looking different from the expected one: this footer is additive
+// and never overrides those signals, so a genuine harness crash during a
+// mock run gets no reassurance printed over it.
+func writeSmokeBaseline(b *strings.Builder, r *RunResult) {
+	if r.Provider != ProviderMock {
+		return
+	}
+	if r.Errored() > 0 || len(r.Reclamation.CreateFailed) > 0 || len(r.Reclamation.Failed) > 0 {
+		return
+	}
+
+	b.WriteString("\n")
+	b.WriteString("================================================================\n")
+	fmt.Fprintf(b, "SMOKE BASELINE (mock provider): %d/%d passing is EXPECTED here.\n",
+		r.Passed(), len(r.Tasks))
+	b.WriteString("The replayed fixture answers every task in prose without touching\n")
+	b.WriteString("the file its oracle checks for, so every oracle is designed to\n")
+	b.WriteString("fail. This is not a regression.\n")
+	b.WriteString("\n")
+	b.WriteString("What this gate actually asserts: the corpus ran end-to-end without a\n")
+	b.WriteString("harness crash — every task got its own worktree, its session ran to\n")
+	b.WriteString("a stop, its oracle executed, its failure was attributed, and every\n")
+	b.WriteString("worktree was reclaimed. It is not asserting that any task passed.\n")
+	b.WriteString("================================================================\n")
 }
 
 func writeTasks(b *strings.Builder, r *RunResult) {
