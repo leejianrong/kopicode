@@ -138,6 +138,76 @@ func TestHashCoversEveryConfigField(t *testing.T) {
 	}
 }
 
+// # Is the reverse direction mechanisable? (KAN-855)
+//
+// KAN-855 found the defect this test cannot catch: Config.ParseRoutes was in
+// every preimage above and read by nothing, because internal/parse.Extract had
+// no order parameter at all. TestHashCoversEveryConfigField proves "every field
+// reaches the hash"; it says nothing about "every field reaches behaviour", and
+// that is the direction a forgotten wire actually fails in — the hash claims a
+// distinction the binary does not honour, which is the worse of the two ways
+// to be wrong (a stricter hash than reality, rather than a laxer one).
+//
+// Having now built the fix — internal/engine.decodeParseRoutes plus
+// parse.NewRepairer's new order parameter, proven load-bearing by
+// TestRouteOrderIsLoadBearing in internal/parse/repair_test.go — here is a
+// concrete answer, not a deferred one.
+//
+// **A mutate-and-observe test symmetric with the one above is not feasible**,
+// for a reason sharper than "harder": Hash() is one pure function every field
+// provably passes through, because hashWith is a fixed sequence of p.* calls
+// over the whole struct and the field-path walker only has to prove each
+// field's bytes reach *that* function. "Behaviour" has no equivalent single
+// function to mutate against. It is whatever internal/engine's loop, the
+// journal it writes and the calls it dispatches end up doing over a whole
+// session, and different fields change *different, incomparable* observables:
+// MaxTurns changes a loop-iteration count, SystemPrompt changes the first
+// message's bytes, ParseRoutes changes which Route an ambiguous reply resolves
+// to, Sampling.Seed changes nothing at all unless the provider on the other end
+// chooses to honour it. A generic walker would have to know, per field, which
+// canned session and which assertion is sensitive to it — which is exactly the
+// bespoke work TestRouteOrderIsLoadBearing did by hand (a message deliberately
+// carrying both a native call and a fenced one, so reordering routes provably
+// changes which tool gets dispatched). That is per-field judgement, not
+// reflection, and no amount of struct-walking substitutes for it.
+//
+// It is also not merely a labour problem. A naive proxy for "reaches
+// behaviour" — grep internal/engine's source for the literal field name — is
+// unsound in both directions on fields this package already wires correctly.
+// It has false negatives on Config itself: Sampling's fields reach the wire
+// only through Config.RequestSampling, a method on this package, so
+// internal/engine never spells "Sampling.Temperature" at all and a checker
+// scoped to *reads the exact field name* would flag a correctly-wired field as
+// unread. And it has no way to tell "read and used" from "read and its result
+// silently discarded" — the shape of bug a name search cannot distinguish from
+// KAN-855's actual defect. Recognising the difference needs a human to say
+// what "reaches behaviour" even means for that one field, which is the
+// judgement call this whole note is answering: yes, it is fundamentally a
+// per-field call, and no sound, general, non-vacuous mechanisation of it
+// exists that would not just be TestHashCoversEveryConfigField's walker
+// wearing a new docstring.
+//
+// **What is mechanisable, and worth doing as a follow-on, is weaker and honest
+// about being weaker.** This repository already has the pattern: not "prove
+// the behaviour", but "prove someone claims it, by name" — the same shape as
+// TestToolSetMatchesInternalTools (ToolSet held equal to internal/tools) and
+// internal/engine/toolcatalogue_test.go (ToolCatalogue held equal to the real
+// engine catalogue). The analogous guard here is a small, hand-maintained
+// registry — one entry per Config field naming the test that is its
+// behavioural evidence (ParseRoutes → parse_test.TestRouteOrderIsLoadBearing,
+// MaxTurns → whichever engine test drives the turn cap, and so on) — checked by
+// reflection for *completeness* (every field has an entry, the same walk this
+// test already performs) but never for *correctness* (nothing can verify the
+// named test actually exercises the field beyond a human having written it
+// thinking about that field). That converts "a forgotten wire is invisible
+// until someone reads the card queue and asks the question KAN-855 asked" into
+// "a completeness test fails with the field's name in it until a human
+// supplies the answer" — which is real leverage, and honestly short of a proof.
+// It was not built as part of KAN-855: the registry Sampling's method-based
+// wiring argues for is a second scoping decision (which package's source may a
+// field's evidence live in?) that deserves its own card rather than riding in
+// on this one's diff.
+
 // TestConfigHoldsNoMap keeps the preimage out of reach of Go's randomised map
 // iteration order.
 //

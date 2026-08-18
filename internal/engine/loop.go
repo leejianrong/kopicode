@@ -136,7 +136,7 @@ func (e *Engine) runTurn(ctx context.Context, turn int) (Stop, error) {
 	// dispatched, so nothing is dispatched until all of it parses
 	// (docs/SLICE-1.md §3). Sharing one across turns would share the budget,
 	// which is the bound quietly ceasing to be one.
-	rep := parse.NewRepairer(e.cfg.Catalogue, e.cfg.Selection.Config.RepairBudget)
+	rep := parse.NewRepairer(e.cfg.Catalogue, e.cfg.Selection.Config.RepairBudget, e.parseOrder)
 	site := callSiteID(turn)
 
 	for attempt := 1; ; attempt++ {

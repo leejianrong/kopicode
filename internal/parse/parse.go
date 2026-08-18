@@ -243,8 +243,8 @@ func newExtraction(route Route, calls []ToolCall) (Extraction, *Error) {
 	return Extraction{route: route, calls: calls}, nil
 }
 
-// Extract pulls tool calls out of a model reply, trying the routes in order and
-// stopping at the first that produces one.
+// Extract pulls tool calls out of a model reply, trying the routes in
+// [DefaultRouteOrder] and stopping at the first that produces one.
 //
 // A route whose marker is absent is skipped silently. A route whose marker is
 // present but whose content is broken fails the whole extraction with a typed
@@ -252,8 +252,24 @@ func newExtraction(route Route, calls []ToolCall) (Extraction, *Error) {
 //
 // When no route's marker appears at all, the error wraps [ErrNoToolCall], which
 // is the only failure that means "the model just replied in prose".
+//
+// This always uses the package's own default order. [NewRepairer] is the
+// caller with a reason to vary it: a harness configuration's ParseRoutes
+// decodes into an order and threads it to [Repairer] rather than through this
+// function, because every direct caller of Extract today (the fuzz corpus, the
+// extraction test suite) is asserting a property of extraction itself and has
+// no arm to vary (KAN-855).
 func Extract(msg Message) (Extraction, error) {
-	for _, route := range routeOrder {
+	return extractOrder(msg, routeOrder[:])
+}
+
+// extractOrder is [Extract] with an explicit route order: the routes are tried
+// in order and the first that produces calls wins. It is unexported because
+// the only production caller is [Repairer.Step], which is handed its order by
+// [NewRepairer] rather than reaching for a package-level default — see that
+// constructor's doc comment for why the order lives there and not here.
+func extractOrder(msg Message, order []Route) (Extraction, error) {
+	for _, route := range order {
 		calls, err := extractRoute(route, msg)
 		if err != nil {
 			return Extraction{}, err

@@ -2,6 +2,7 @@ package parse_test
 
 import (
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -26,7 +27,7 @@ func reply(content string) parse.Message { return parse.Message{Content: content
 func TestRepairCorpus(t *testing.T) {
 	for _, tc := range repairCorpus {
 		t.Run(tc.name, func(t *testing.T) {
-			r := parse.NewRepairer(tools, parse.DefaultBudget)
+			r := parse.NewRepairer(tools, parse.DefaultBudget, nil)
 			out := r.Step(tc.msg)
 
 			if out.Event() != tc.wantEvent {
@@ -65,7 +66,7 @@ func TestEveryClassificationInTheCorpusSaysSomethingDifferent(t *testing.T) {
 		if tc.wantEvent != parse.EventToolCallRepaired {
 			continue
 		}
-		r := parse.NewRepairer(tools, parse.DefaultBudget)
+		r := parse.NewRepairer(tools, parse.DefaultBudget, nil)
 		out := r.Step(tc.msg)
 		if out.Event() != parse.EventToolCallRepaired {
 			continue
@@ -94,7 +95,7 @@ func TestRepairBoundStopsAtBudget(t *testing.T) {
 
 	for _, budget := range budgets {
 		t.Run(budgetName(budget), func(t *testing.T) {
-			r := parse.NewRepairer(tools, budget)
+			r := parse.NewRepairer(tools, budget, nil)
 
 			// A model that never gets it right: exactly budget repair requests,
 			// then one failure, and nothing after.
@@ -131,7 +132,7 @@ func TestRepairBoundStopsAtBudget(t *testing.T) {
 // TestNegativeBudgetIsNoBudget keeps a misconfigured arm from becoming an
 // unbounded one.
 func TestNegativeBudgetIsNoBudget(t *testing.T) {
-	r := parse.NewRepairer(tools, -3)
+	r := parse.NewRepairer(tools, -3, nil)
 	if r.Budget() != 0 {
 		t.Errorf("budget = %d, want 0", r.Budget())
 	}
@@ -144,7 +145,7 @@ func TestNegativeBudgetIsNoBudget(t *testing.T) {
 // asks for in place of aborting: the failure becomes an observation the turn
 // carries on with, so it has to be something the model can be shown.
 func TestTurnContinuesAfterTheBudgetIsSpent(t *testing.T) {
-	r := parse.NewRepairer(tools, parse.DefaultBudget)
+	r := parse.NewRepairer(tools, parse.DefaultBudget, nil)
 	r.Step(reply(malformed))
 	r.Step(reply(malformed))
 	out := r.Step(reply(malformed))
@@ -184,7 +185,7 @@ func TestRepairRecovers(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := parse.NewRepairer(tools, parse.DefaultBudget)
+			r := parse.NewRepairer(tools, parse.DefaultBudget, nil)
 			for _, content := range tt.before {
 				if out := r.Step(reply(content)); out.Event() != parse.EventToolCallRepaired {
 					t.Fatalf("setup step produced %s", out.Event())
@@ -215,7 +216,7 @@ func TestRepairRecovers(t *testing.T) {
 // answered rather than called has done nothing wrong, and spending a repair
 // attempt telling it otherwise would burn the budget on the ordinary case.
 func TestProseIsNotRepaired(t *testing.T) {
-	r := parse.NewRepairer(tools, parse.DefaultBudget)
+	r := parse.NewRepairer(tools, parse.DefaultBudget, nil)
 	out := r.Step(reply("The bug is in main.go: the loop never terminates."))
 
 	if out.Event() != parse.EventNone {
@@ -259,7 +260,7 @@ func TestEventMappingIsTotal(t *testing.T) {
 	seen := map[parse.Event]bool{}
 	for _, d := range drivers {
 		t.Run(d.name, func(t *testing.T) {
-			r := parse.NewRepairer(d.tools, parse.DefaultBudget)
+			r := parse.NewRepairer(d.tools, parse.DefaultBudget, nil)
 			var out parse.Outcome
 			for _, content := range d.steps {
 				out = r.Step(reply(content))
@@ -342,7 +343,7 @@ func assertOutcomeInvariants(t *testing.T, out parse.Outcome) {
 // request, because asking the model to fix our bookkeeping is how a harness
 // failure gets laundered into a model number.
 func TestSettledLoopIsNotReused(t *testing.T) {
-	r := parse.NewRepairer(tools, parse.DefaultBudget)
+	r := parse.NewRepairer(tools, parse.DefaultBudget, nil)
 	if out := r.Step(reply(wellFormed)); out.Event() != parse.EventToolCallParsed {
 		t.Fatalf("setup: event = %s", out.Event())
 	}
@@ -372,7 +373,7 @@ func TestFailureCarriesTheToolWhenItIsKnown(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := parse.NewRepairer(tools, 0)
+			r := parse.NewRepairer(tools, 0, nil)
 			out := r.Step(reply(tt.content))
 			if out.Event() != parse.EventToolCallFailed {
 				t.Fatalf("event = %s, want tool_call_failed", out.Event())
@@ -387,7 +388,7 @@ func TestFailureCarriesTheToolWhenItIsKnown(t *testing.T) {
 // TestFailuresAreWrappedNotFlattened keeps errors.Is/errors.As working through
 // the repair path, so the cause of a bad parse survives to whoever debugs it.
 func TestFailuresAreWrappedNotFlattened(t *testing.T) {
-	r := parse.NewRepairer(tools, parse.DefaultBudget)
+	r := parse.NewRepairer(tools, parse.DefaultBudget, nil)
 	out := r.Step(reply(malformed))
 
 	if out.Failure == nil {
@@ -409,7 +410,7 @@ func TestFailuresAreWrappedNotFlattened(t *testing.T) {
 // failure. The unknown-tool message is the only one allowed to name other
 // tools, and even then only their names.
 func TestUnknownEnvelopeRepairIsSpecificNotASchemaDump(t *testing.T) {
-	r := parse.NewRepairer(tools, parse.DefaultBudget)
+	r := parse.NewRepairer(tools, parse.DefaultBudget, nil)
 	out := r.Step(reply("```tool\n{\"name\":\"read_file\",\"arguments\":{}}\n```"))
 
 	if out.Event() != parse.EventToolCallRepaired {
@@ -430,4 +431,117 @@ func budgetName(n int) string {
 		return "no repairs"
 	}
 	return "budget of " + strconv.Itoa(n)
+}
+
+// TestRouteOrderIsLoadBearing is KAN-855's proof: NewRepairer's order argument
+// is not decorative. The same reply, fed to two Repairers built with different
+// orders, produces two genuinely different outcomes — not two different
+// error messages about the same outcome, but a different Event, a different
+// winning Route and (in the first case) a different dispatched call — because
+// "first success wins" only means something when there is more than one order
+// to be first in.
+func TestRouteOrderIsLoadBearing(t *testing.T) {
+	t.Run("reordering changes which route wins, and what it dispatches", func(t *testing.T) {
+		// This reply is deliberately ambiguous by construction: it carries a
+		// native tool_calls entry AND a fenced block, naming two different
+		// tools. A real provider would not send both at once, but the seam
+		// under test is extraction order, and the cleanest way to prove order
+		// decides the winner is a message where two different routes both
+		// have something to say and disagree about what it is.
+		msg := parse.Message{
+			Content: wellFormed, // ```tool ... "name": "read_file" ...
+			ToolCalls: []parse.NativeCall{
+				{ID: "call_1", Name: "write_file", Arguments: []byte(`{"path":"b.go","content":"x"}`)},
+			},
+		}
+
+		native := parse.NewRepairer(tools, parse.DefaultBudget, []parse.Route{parse.RouteNative, parse.RouteFencedJSON, parse.RouteXMLTag})
+		fencedFirst := parse.NewRepairer(tools, parse.DefaultBudget, []parse.Route{parse.RouteFencedJSON, parse.RouteNative, parse.RouteXMLTag})
+
+		nativeOut := native.Step(msg)
+		fencedOut := fencedFirst.Step(msg)
+
+		if nativeOut.Event() != parse.EventToolCallParsed || fencedOut.Event() != parse.EventToolCallParsed {
+			t.Fatalf("both orders should parse cleanly: native=%s fenced=%s", nativeOut.Event(), fencedOut.Event())
+		}
+		if got := nativeOut.Extraction.Route(); got != parse.RouteNative {
+			t.Errorf("native-first order won as %s, want native", got)
+		}
+		if got := fencedOut.Extraction.Route(); got != parse.RouteFencedJSON {
+			t.Errorf("fenced-first order won as %s, want fenced_json", got)
+		}
+
+		nativeCalls, fencedCalls := nativeOut.Extraction.Calls(), fencedOut.Extraction.Calls()
+		if len(nativeCalls) != 1 || nativeCalls[0].Name != "write_file" {
+			t.Errorf("native-first order dispatched %+v, want write_file", nativeCalls)
+		}
+		if len(fencedCalls) != 1 || fencedCalls[0].Name != "read_file" {
+			t.Errorf("fenced-first order dispatched %+v, want read_file", fencedCalls)
+		}
+	})
+
+	t.Run("an order that omits the matching route falls through to prose", func(t *testing.T) {
+		// This reply carries a native tool_calls entry and otherwise ordinary
+		// prose text with no fence and no bare JSON in it, so the only route
+		// that can ever find anything in it is RouteNative. An order that
+		// never tries that route therefore has nothing left to find at all —
+		// exactly the "native-first finding nothing, falling through" case —
+		// and reads the reply as prose, the same message the default order
+		// parses cleanly via its native channel.
+		withNative := parse.NewRepairer(tools, parse.DefaultBudget, nil)
+		withoutNative := parse.NewRepairer(tools, parse.DefaultBudget, []parse.Route{parse.RouteFencedJSON, parse.RouteXMLTag})
+
+		withNativeOut := withNative.Step(nativeOnlyMsg)
+		withoutNativeOut := withoutNative.Step(nativeOnlyMsg)
+
+		if withNativeOut.Event() != parse.EventToolCallParsed {
+			t.Fatalf("the default order should parse this reply via its native channel, got %s", withNativeOut.Event())
+		}
+		if got := withNativeOut.Extraction.Route(); got != parse.RouteNative {
+			t.Errorf("the default order won as %s, want native", got)
+		}
+		if withoutNativeOut.Event() != parse.EventNone {
+			t.Errorf("an order without native should read this reply as prose, got %s", withoutNativeOut.Event())
+		}
+	})
+}
+
+// nativeOnlyMsg carries a native tool_calls entry and prose text with no fence
+// and no bare JSON in it, so RouteNative is the only route any order could ever
+// satisfy for it. It exists so a test can flip whether RouteNative is tried at
+// all without a second, order-independent route also having something to say
+// about the same reply — see noCallError's own fenced-block handling, which
+// assumes a route it was not given a chance to try already reported on a fence
+// it finds, and would otherwise make a route-omission test about that
+// diagnostic-message subtlety rather than about order.
+var nativeOnlyMsg = parse.Message{
+	Content: "On it, one moment.",
+	ToolCalls: []parse.NativeCall{
+		{ID: "call_1", Name: "read_file", Arguments: []byte(`{"path":"main.go"}`)},
+	},
+}
+
+// TestNilOrderIsTheDefaultOrder holds NewRepairer's documented nil convention:
+// nil produces exactly [parse.DefaultRouteOrder], not an empty order.
+func TestNilOrderIsTheDefaultOrder(t *testing.T) {
+	r := parse.NewRepairer(tools, parse.DefaultBudget, nil)
+	if got, want := r.Order(), parse.DefaultRouteOrder(); !slices.Equal(got, want) {
+		t.Errorf("Order() = %v, want %v (DefaultRouteOrder)", got, want)
+	}
+}
+
+// TestEmptyOrderNeverExtracts holds the other end of that convention: an
+// explicit, non-nil empty order is a real, degenerate arm, not nil in
+// disguise. Every reply reads as prose because no route is ever tried — even
+// one, like nativeOnlyMsg, that the default order parses without any trouble.
+func TestEmptyOrderNeverExtracts(t *testing.T) {
+	if out := parse.NewRepairer(tools, parse.DefaultBudget, nil).Step(nativeOnlyMsg); out.Event() != parse.EventToolCallParsed {
+		t.Fatalf("setup: the default order should parse nativeOnlyMsg, got %s", out.Event())
+	}
+
+	r := parse.NewRepairer(tools, parse.DefaultBudget, []parse.Route{})
+	out := r.Step(nativeOnlyMsg)
+	if out.Event() != parse.EventNone {
+		t.Errorf("event = %s, want none — an empty order tries nothing", out.Event())
+	}
 }
