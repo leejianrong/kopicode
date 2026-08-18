@@ -2,6 +2,7 @@ package lineedit
 
 import (
 	"bufio"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -25,6 +26,49 @@ import (
 // block in key.go is parsed, and every constant found there must appear in
 // keySamples below. One map, three assertions over it, and a key added without
 // all three halves fails the suite instead of shipping.
+//
+// # Three go/ast walks, and why this one stays a copy
+//
+// This file, internal/parse/wirename_internal_test.go and
+// internal/arch/subprocess_test.go (plus imports_test.go and ldflags_test.go)
+// are all completeness guards written over go/ast, and the first two are close
+// enough to be the same bug twice: KAN-841 found that
+// internal/parse/wirename_internal_test.go's declaredConstants indexed
+// gen.Specs[0] with no length check, so `const ()` — a legal, empty const
+// block — panicked the test instead of failing it. declaredKeys below had the
+// identical defect (KAN-848), because it was written the same way against the
+// same problem: walk a source file, find every CONST GenDecl whose first spec
+// names a given type, collect the rest of that block's names.
+//
+// That is two copies of one shape, which is a real argument for a shared
+// helper — and it stays unshared anyway, because sharing one costs more than a
+// tidiness objection. cmd/kopicode/lineedit is a front end under ADR-0003's
+// import allowlist (docs/adr/0003-single-repo-internal-engine.md decision 3),
+// enforced by internal/arch/imports_test.go's
+// TestFrontEndsOnlyImportEngineInterface, which walks every .go file under
+// cmd/ — test files included — and fails on an import of anything internal/
+// other than internal/engine, internal/bench and internal/build.
+// wirename_internal_test.go's logic would have to live somewhere either side
+// import from, and both directions are already refused: putting it under
+// internal/ and importing it from this test file needs a fourth allowlist
+// entry, which CLAUDE.md is explicit needs an ADR rather than a helper
+// extraction; putting it under cmd/ and importing it from
+// internal/parse would trip TestEngineDoesNotImportSurfaces the same test file
+// enforces the other way. So this is not a boundary chosen for this card's
+// sake — it is already enforced code, and crossing it costs an ADR, not a
+// refactor. A one-point bug fix is not that occasion.
+//
+// internal/arch's walks are a different shape besides: they parse
+// import-only or whole-function bodies across the entire tree looking for
+// import edges and exec.Cmd construction, not one file's const block for one
+// named type, so a three-way unification was never really on the table —
+// the live question was only ever whether these two near-identical copies
+// merge, and the answer above is no, for a structural reason rather than a
+// preference. If a fourth walk of this same const-block shape turns up, that
+// is the point to revisit this, not before: three data points made KAN-848
+// worth deciding, and a decision made once should not be re-litigated by the
+// next person who has not read this comment — which is why it is written down
+// here instead of left to be re-discovered.
 
 // keySamples maps every key to a byte sequence a terminal would send for it.
 // A key constant missing from here fails TestEveryKeyConstantHasASample.
@@ -46,21 +90,50 @@ var keySamples = map[key]string{
 	keyIgnored:       "\x1b[15~", // F5: recognised, consumed whole, dropped
 }
 
+// fataler is the sliver of *testing.T that constantsOfType needs. It exists so
+// TestConstantsOfTypeFailsCleanlyOnEmptyConstBlock can pass a fake in place of
+// a real *testing.T: a genuine t.Run subtest that calls t.Fatal marks its
+// *parent* failed too, which is the wrong signal for a test whose entire point
+// is confirming that the failure is clean rather than a panic. *testing.T
+// satisfies this interface already, so every other caller is unaffected.
+type fataler interface {
+	Helper()
+	Fatalf(format string, args ...any)
+}
+
 // declaredKeys parses key.go and returns the names of every constant declared
 // with type key. Parsing the source is the point: a hand-maintained list of
 // key names would go stale in exactly the same way the binding does.
 func declaredKeys(t *testing.T) []string {
 	t.Helper()
+	return constantsOfType(t, "key.go", nil, "key")
+}
 
-	file, err := parser.ParseFile(token.NewFileSet(), "key.go", nil, 0)
+// constantsOfType parses filename — reading it from disk when src is nil, or
+// parsing src directly otherwise, exactly as [parser.ParseFile] does — and
+// returns the name of every constant declared with the given type.
+//
+// It takes src as a parameter, rather than being declaredKeys's body inlined,
+// so TestConstantsOfTypeFailsCleanlyOnEmptyConstBlock below can drive it
+// against a literal string instead of key.go: that is what proves the
+// `const ()` guard a few lines down without having to edit key.go to break it.
+func constantsOfType(t fataler, filename string, src any, typeName string) []string {
+	t.Helper()
+
+	file, err := parser.ParseFile(token.NewFileSet(), filename, src, 0)
 	if err != nil {
-		t.Fatalf("parsing key.go: %v", err)
+		t.Fatalf("parsing %s: %v", filename, err)
+		return nil // fataler.Fatalf need not halt the caller; see fatalRecorder.
 	}
 
 	var names []string
 	for _, decl := range file.Decls {
 		gen, ok := decl.(*ast.GenDecl)
-		if !ok || gen.Tok != token.CONST {
+		// `const ()` is legal, empty Go and parses to a GenDecl with zero
+		// Specs. Indexing Specs[0] below without this check panics the test
+		// instead of failing it (KAN-848, the same defect KAN-841 found in
+		// internal/parse/wirename_internal_test.go's declaredConstants).
+		if !ok || gen.Tok != token.CONST || len(gen.Specs) == 0 {
 			continue
 		}
 		// The type appears on the first spec of an iota block and is
@@ -71,7 +144,7 @@ func declaredKeys(t *testing.T) []string {
 			continue
 		}
 		ident, ok := first.Type.(*ast.Ident)
-		if !ok || ident.Name != "key" {
+		if !ok || ident.Name != typeName {
 			continue
 		}
 		for _, spec := range gen.Specs {
@@ -88,9 +161,55 @@ func declaredKeys(t *testing.T) []string {
 	}
 
 	if len(names) == 0 {
-		t.Fatal("found no key constants in key.go; the guard is broken, not the keys")
+		t.Fatalf("found no %s constants in %s: the AST walk is broken, not the "+
+			"type. Every check built on it would pass having asserted nothing.",
+			typeName, filename)
 	}
 	return names
+}
+
+// fatalRecorder is the fake fataler TestConstantsOfTypeFailsCleanlyOnEmptyConstBlock
+// drives constantsOfType with. It records a Fatalf call as data — failed and
+// message — instead of stopping the goroutine the way *testing.T does, which
+// is what lets the test that follows tell "failed cleanly" apart from
+// "panicked": if constantsOfType still indexed gen.Specs[0] with no length
+// check, this recorder would not turn that into a tidy false; the panic would
+// propagate out of constantsOfType and fail the test the ordinary, loud way.
+type fatalRecorder struct {
+	failed  bool
+	message string
+}
+
+func (f *fatalRecorder) Helper() {}
+
+func (f *fatalRecorder) Fatalf(format string, args ...any) {
+	f.failed = true
+	f.message = fmt.Sprintf(format, args...)
+}
+
+// TestConstantsOfTypeFailsCleanlyOnEmptyConstBlock is the regression case for
+// KAN-848: a source file containing only `const ()` — legal, empty Go — used
+// to panic constantsOfType at gen.Specs[0] instead of failing the test. The
+// fix a few lines up skips a GenDecl with no Specs, so the walk instead finds
+// zero key constants and reports that the ordinary way, through the same
+// "found no constants" Fatalf every other broken-walk case goes through.
+func TestConstantsOfTypeFailsCleanlyOnEmptyConstBlock(t *testing.T) {
+	const src = `package lineedit
+
+const ()
+`
+	rec := &fatalRecorder{}
+	names := constantsOfType(rec, "key.go", src, "key")
+
+	if !rec.failed {
+		t.Fatalf("constantsOfType(%q) returned %v with no Fatalf call; an empty "+
+			"const block should still fail the walk, just without panicking", src, names)
+	}
+	if !strings.Contains(rec.message, "found no key constants") {
+		t.Fatalf("constantsOfType failed with message %q; want it to say it found "+
+			"no key constants, so the failure explains itself rather than reading "+
+			"as an unrelated parse error", rec.message)
+	}
 }
 
 // byName inverts keyNames so a constant name parsed out of the source can be
