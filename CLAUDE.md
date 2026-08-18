@@ -808,13 +808,24 @@ These are the product's structural promises. Hold them.
   a named builder, and the name and its doc comment are the review surface. The builders
   live one per package that spawns something — `repo.baseEnv`, `syntax.baseEnv` (with
   `goEnv`/`nodeEnv` over it), `tools.childEnv`, `verify.baseEnv`, `bench`'s `gitEnv`,
-  `goQueryEnv` and `oracleEnv`, and the `passThrough` allowlist in `internal/corpus`.
+  `goQueryEnv` and `oracleEnv`, the `passThrough` allowlist in `internal/corpus`,
+  `internal/build`'s `toolchainPassThrough` (an unexported test-file variable, since that
+  package builds no binary of its own to test), and `cmd/kopicode`'s `toolchainEnv`, which
+  compiles a front end to drive it in an integration test.
   Build an environment from one of those, never from the one you were handed, and note
   that they are not all the same shape by accident: an **allowlist** is right for
   secrets, where the cost of missing one is unbounded, and wrong for a toolchain, where
   `PATH`, `TMPDIR`, `SSL_CERT_FILE` and a dozen distribution-specific variables all have
   to survive or the command does not run at all. `verify.baseEnv` and `syntax.baseEnv`
-  are therefore denylists, and say so where they are declared.
+  are therefore denylists, and say so where they are declared. A toolchain builder that
+  runs `go build`/`go test` — `internal/build`'s, `internal/corpus`'s and
+  `cmd/kopicode`'s three `go build` env-builders among them — is an **allowlist**
+  instead, and for the opposite reason a secret scrub is one: a denylist over
+  `os.Environ()` is a claim that every variable able to change what the toolchain
+  produces or resolves has been enumerated, and the toolchain keeps adding ones that
+  were not — `GOEXPERIMENT`, `GOPRIVATE`, `GOTOOLCHAIN`, `GOWORK`. KAN-854 found
+  `cmd/kopicode`'s `toolchainEnv` as exactly that kind of denylist (dropping only
+  `GOFLAGS`/`GOOS`/`GOARCH`, added by KAN-805) and converted it to match the other two.
 - **Pin the provider on every benchmark request.** `provider.order`,
   `allow_fallbacks: false`, fixed `quantizations`, all recorded per result. An unpinned
   A/B number is not evidence.

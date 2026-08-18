@@ -135,11 +135,18 @@ func runVersion(t *testing.T, name string, buildFlags ...string) string {
 // GOOS=windows exported would produce something the second half of runVersion
 // then tries to execute.
 //
-// internal/corpus keeps an almost identical list for its oracles. It is
-// duplicated rather than shared because internal/build must import nothing from
-// this module — internal/arch's TestBuildPackageIsALeaf walks these test files
-// too, and that leaf property is what lets both front ends import this package
-// for --version at all.
+// internal/corpus keeps an almost identical list for its oracles, and
+// cmd/kopicode's frontends_integration_test.go keeps a third for the `go
+// build` it runs to produce a binary to test (KAN-854). All three are
+// duplicated rather than shared because internal/build must import nothing
+// from this module — internal/arch's TestBuildPackageIsALeaf walks these test
+// files too, and that leaf property is what lets both front ends import this
+// package for --version at all — and because this variable is unexported in a
+// _test.go file, so even a package allowed to import internal/build could not
+// reach it. Adding a fourth builder for a `go build`/`go test` subprocess?
+// Read all three before choosing a shape: KAN-854 is the record of a fourth
+// one (cmd/kopicode's) having been a denylist by oversight rather than
+// intent, and the fix was to make it match these two.
 var toolchainPassThrough = []string{
 	"PATH", "HOME", "TMPDIR", "TEMP", "TMP",
 	"GOROOT", "GOPATH", "GOCACHE", "GOMODCACHE", "GOPROXY",
