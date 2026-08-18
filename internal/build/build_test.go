@@ -49,14 +49,52 @@ func TestResolveNeverFabricates(t *testing.T) {
 			want: Info{Version: "v0.4.1", Commit: Unknown, TreeState: TreeUnknown, Source: SourceBuildInfo},
 		},
 		{
-			name: "go build from a clean checkout, no ldflags",
+			// "(devel)" is what a local `go build ./cmd/kopicode` reports
+			// when HEAD is detached — confirmed against this repo's pinned
+			// Go 1.26.5 in a throwaway fixture repo, and exactly the state a
+			// tag-triggered release checkout leaves HEAD in. It is also what
+			// every Go toolchain before the main-module pseudo-version
+			// feature (below) reported regardless of attached/detached
+			// state, so this input stays worth guarding on its own.
+			name: "go build from a clean checkout, HEAD detached, no ldflags",
 			read: withSettings("(devel)", "vcs.revision", "abc123", "vcs.modified", "false"),
 			want: Info{Version: Unknown, Commit: "abc123", TreeState: TreeClean, Source: SourceBuildInfo},
 		},
 		{
-			name: "go build from a dirty checkout, no ldflags",
+			name: "go build from a dirty checkout, HEAD detached, no ldflags",
 			read: withSettings("(devel)", "vcs.revision", "abc123", "vcs.modified", "true"),
 			want: Info{Version: Unknown, Commit: "abc123", TreeState: TreeDirty, Source: SourceBuildInfo},
+		},
+		{
+			// The other half of that finding: with HEAD attached to a
+			// branch and no tag reachable, Go 1.26.5 does not report
+			// "(devel)" at all. It stamps a pseudo-version derived from the
+			// commit's own timestamp and hash — real information, not a
+			// tag, and moduleVersion must not mistake it for either
+			// "(devel)" or a fabrication and must not strip it.
+			name: "go build, HEAD attached to a branch, no tag reachable (Go 1.24+)",
+			read: withSettings("v0.0.0-20260818234519-34ddf2461365",
+				"vcs.revision", "34ddf2461365abcdef0123456789abcdef012345", "vcs.modified", "false"),
+			want: Info{
+				Version:   "v0.0.0-20260818234519-34ddf2461365",
+				Commit:    "34ddf2461365abcdef0123456789abcdef012345",
+				TreeState: TreeClean,
+				Source:    SourceBuildInfo,
+			},
+		},
+		{
+			// And past a reachable tag, on an attached branch: the
+			// pseudo-version names the tag as its ancestor rather than
+			// falling back to v0.0.0. Still passed through as-is.
+			name: "go build, HEAD attached to a branch, one commit past a tag (Go 1.24+)",
+			read: withSettings("v1.0.1-0.20260818234610-abcdef123456",
+				"vcs.revision", "abcdef123456789abcdef0123456789abcdef01", "vcs.modified", "false"),
+			want: Info{
+				Version:   "v1.0.1-0.20260818234610-abcdef123456",
+				Commit:    "abcdef123456789abcdef0123456789abcdef01",
+				TreeState: TreeClean,
+				Source:    SourceBuildInfo,
+			},
 		},
 		{
 			name:    "ldflags win over build info, and are not mixed with it",
