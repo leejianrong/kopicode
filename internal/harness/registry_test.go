@@ -216,6 +216,13 @@ func TestRegistryPinMatchesShippedFixtures(t *testing.T) {
 // identity unchanged, which is the preimage lying about what the harness is. A
 // hand-written expectation here would have to be updated by whoever forgot, at
 // the moment they forgot, so the set is read out of the source instead.
+//
+// It checks every registered configuration (harness.ConfigNames()), not only
+// the default: [MinimaxM2ConfigName] happens to carry the same ToolSet today
+// (KAN-942 varies only the sampling seed policy), but nothing enforces that
+// staying true, and a configuration with its own tool set deserves this
+// guard from the day it is registered rather than from whenever someone
+// notices the gap.
 func TestToolSetMatchesInternalTools(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
@@ -261,17 +268,21 @@ func TestToolSetMatchesInternalTools(t *testing.T) {
 			"test would accept any tool set at all", path)
 	}
 
-	cfg := defaultConfig(t)
-	got := append([]string(nil), cfg.ToolSet...)
-	sort.Strings(got)
 	sort.Strings(declared)
 
-	if !slices.Equal(got, declared) {
-		t.Errorf("harness configuration %q presents %v; internal/tools declares %v\n"+
-			"the tool set is in the harness config hash preimage "+
-			"(docs/adr/0007-model-selection-and-harness-config-shape.md decision 6), so a tool "+
-			"added on one side and not the other changes what the model is offered without "+
-			"changing the arm's identity", cfg.Name, got, declared)
+	for _, cfg := range everyConfig(t) {
+		t.Run(cfg.Name, func(t *testing.T) {
+			got := append([]string(nil), cfg.ToolSet...)
+			sort.Strings(got)
+
+			if !slices.Equal(got, declared) {
+				t.Errorf("harness configuration %q presents %v; internal/tools declares %v\n"+
+					"the tool set is in the harness config hash preimage "+
+					"(docs/adr/0007-model-selection-and-harness-config-shape.md decision 6), so a tool "+
+					"added on one side and not the other changes what the model is offered without "+
+					"changing the arm's identity", cfg.Name, got, declared)
+			}
+		})
 	}
 }
 

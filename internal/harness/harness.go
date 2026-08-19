@@ -262,12 +262,254 @@ func (c Config) RequestSampling() provider.Sampling {
 // String names the configuration and its version, for a diagnostic line.
 func (c Config) String() string { return fmt.Sprintf("%s/v%d", c.Name, c.Version) }
 
-// DefaultConfigName is the one configuration slice 1 registers.
+// DefaultConfigName is the configuration slice 1 registered, and the one
+// every model got by default until KAN-942 gave minimax/minimax-m2 its own
+// (see [MinimaxM2ConfigName]).
 //
-// A flag with a single legal value looks like scaffolding and is not: it is what
-// makes slice 2's first paired A/B two invocations of one binary instead of two
-// builds (ADR-0007 §Consequences).
+// The `--harness` flag having a single legal value looked like scaffolding
+// while this was the only row; it was not, because the flag — not a second
+// build — is what makes a paired A/B two invocations of one binary instead of
+// two artifacts (ADR-0007 §Consequences). [MinimaxM2ConfigName] is the first
+// configuration that actually exercises the flag with more than one legal
+// answer.
 const DefaultConfigName = "default"
+
+// MinimaxM2ConfigName is minimax/minimax-m2's own harness configuration
+// (KAN-942).
+//
+// ADR-0007 decision 5 lets a registry row claim a harness configuration only
+// for a reason; registry.go's minimax/minimax-m2 row said, until this landed,
+// that "nothing observed while choosing [its] pin gave a concrete reason the
+// existing configuration is wrong for [it]". docs/provider-pin.md's
+// §minimax/minimax-m2 supplies exactly that reason now: of the endpoints
+// observed for this model on 2026-08-18, the one this project pinned
+// (Minimax's own first-party endpoint, `fp8`) does not list `seed` in its
+// `supported_parameters` — recorded there as "the honest limitation", not
+// worked around by quietly picking a seed-supporting alternative instead.
+//
+// [defaultHarnessConfig]'s own [Sampling] doc comment ties [SeedFixed] to a
+// concrete claim about the endpoint it is sent to — sampling temperature 0 and
+// a fixed seed "remove every source of run-to-run variance the pinned
+// endpoint lets the harness control", cashed out there as "Parasail honours
+// seed". That claim holds for qwen/qwen3-coder-next and does not hold for
+// minimax/minimax-m2: sending a seed to an endpoint whose declared parameters
+// do not include one does not make the session more deterministic, it makes
+// the harness assert a control over the request that the pinned endpoint
+// cannot exercise. Every prior row mapped to [DefaultConfigName] because no
+// row had a reason not to; this row is the first with one.
+//
+// So this configuration is [defaultHarnessConfig]'s value in every field
+// except one: [Sampling.SeedPolicy] is [SeedUnseeded] rather than
+// [SeedFixed], and [Sampling.Seed] carries no value because it is meaningless
+// under that policy ([Config.RequestSampling] never sends it when unseeded).
+// [minimaxM2Config] builds it by copying the default and changing exactly
+// that field, which is deliberate: the system prompt, tool set, tool
+// catalogue, parse route order, turn and token budgets, verification policy,
+// and every other sampling field are untouched, because inventing a second
+// difference with no observed reason behind it would make the eventual paired
+// A/B (KAN-943/944) noisier rather than more informative — two arms differing
+// on more than one axis attribute to the combination and to neither axis
+// alone (ADR-0007 §Consequences).
+const MinimaxM2ConfigName = "minimax-m2-v1"
+
+// defaultHarnessConfig is the value registered under [DefaultConfigName].
+//
+// It is a named value and not just an entry inline in [configs] so that
+// [minimaxM2Config] has a real [Config] to start its copy from — the two
+// configurations are meant to differ in exactly one field, and building the
+// second from the first is what makes that structurally true rather than a
+// claim two independent literals could quietly drift out of.
+var defaultHarnessConfig = Config{
+	Name:    DefaultConfigName,
+	Version: 1,
+
+	// prompt_default.md, compiled in. Landing it moved this
+	// configuration's hash away from the empty-prompt one every earlier
+	// build wrote, and TestDefaultConfigHashIsStable's literal moved with
+	// it — see the note there. PreimageVersion did not: the encoding is
+	// unchanged, only the value.
+	SystemPrompt: DefaultSystemPrompt,
+
+	// The tool set of docs/SLICE-1.md build steps 5 and 6, in the order
+	// the model is shown them: read before write, edit before its fuzzy
+	// fallback. The names are internal/tools' constants, repeated here
+	// rather than imported so that a configuration is a value and not a
+	// view onto another package's registry — see hash.go on why this is
+	// held to internal/tools by a test instead.
+	ToolSet: []string{
+		"read_file",
+		"list_dir",
+		"grep",
+		"write_file",
+		"edit_file",
+		"edit_file_fuzzy",
+		"run_shell",
+	},
+
+	// The wire's tool-definition catalogue (KAN-844), in ToolSet's
+	// order. Every name, description and argument here is a literal
+	// copy of what internal/engine/catalogue.go's argument structs
+	// declare in their `json`, `kopicode` and `kopicode_desc` tags —
+	// duplicated for the reason ToolSet's own note gives, and held
+	// equal to the source by internal/engine/toolcatalogue_test.go
+	// rather than by trust.
+	ToolCatalogue: []provider.ToolDefinition{
+		{Type: "function", Function: provider.ToolFunction{
+			Name:        "read_file",
+			Description: "Read a text file from the repository, returning each line with an anchor you can later edit by.",
+			Parameters: provider.ToolParameters{
+				Properties: []provider.ToolProperty{
+					{Name: "path", Type: "string", Description: "the file's path, relative to the repository root"},
+					{Name: "offset", Type: "integer", Description: "1-based line number to start returning from; 0 or omitted means the beginning of the file"},
+					{Name: "limit", Type: "integer", Description: "maximum number of lines to return; 0 or omitted uses the tool's per-call maximum"},
+				},
+				Required: []string{"path"},
+			},
+		}},
+		{Type: "function", Function: provider.ToolFunction{
+			Name:        "list_dir",
+			Description: "List a directory's entries, optionally recursively and filtered by a glob pattern.",
+			Parameters: provider.ToolParameters{
+				Properties: []provider.ToolProperty{
+					{Name: "path", Type: "string", Description: "the directory's path, relative to the repository root; empty means the repository root"},
+					{Name: "recursive", Type: "boolean", Description: "when true, also list nested directories, skipping .git and .kopicode"},
+					{Name: "pattern", Type: "string", Description: "a glob matched against an entry's file name, or its whole relative path when the pattern contains a slash"},
+				},
+			},
+		}},
+		{Type: "function", Function: provider.ToolFunction{
+			Name:        "grep",
+			Description: "Search text files for a regular expression, returning matching lines with their file and line number.",
+			Parameters: provider.ToolParameters{
+				Properties: []provider.ToolProperty{
+					{Name: "pattern", Type: "string", Description: "the RE2 regular expression to search for; no backreferences or lookahead"},
+					{Name: "path", Type: "string", Description: "the file or directory to search, relative to the repository root; empty means the whole repository"},
+					{Name: "include", Type: "string", Description: "a glob restricting which file names are searched"},
+					{Name: "ignore_case", Type: "boolean", Description: "when true, match case-insensitively"},
+				},
+				Required: []string{"pattern"},
+			},
+		}},
+		{Type: "function", Function: provider.ToolFunction{
+			Name:        "write_file",
+			Description: "Create a file or replace its entire contents, creating parent directories as needed.",
+			Parameters: provider.ToolParameters{
+				Properties: []provider.ToolProperty{
+					{Name: "path", Type: "string", Description: "the file's path, relative to the repository root"},
+					{Name: "content", Type: "string", Description: "the file's complete new contents, replacing anything already there"},
+				},
+				Required: []string{"path", "content"},
+			},
+		}},
+		{Type: "function", Function: provider.ToolFunction{
+			Name:        "edit_file",
+			Description: "Replace one anchored region of a file with new text, using anchors printed by a prior read_file call.",
+			Parameters: provider.ToolParameters{
+				Properties: []provider.ToolProperty{
+					{Name: "path", Type: "string", Description: "the file's path, relative to the repository root"},
+					{Name: "anchor_start", Type: "string", Description: "the anchor of the region's first line, printed by a prior read_file call"},
+					{Name: "anchor_end", Type: "string", Description: "the anchor of the region's last line, printed by a prior read_file call; the same anchor twice replaces one line"},
+					{Name: "new_text", Type: "string", Description: "the replacement text for the anchored region; empty deletes it"},
+				},
+				Required: []string{"path", "anchor_start", "anchor_end", "new_text"},
+			},
+		}},
+		{Type: "function", Function: provider.ToolFunction{
+			Name:        "edit_file_fuzzy",
+			Description: "Replace text matched by similarity when no anchor is available; refuses an ambiguous or too-weak match. Prefer edit_file.",
+			Parameters: provider.ToolParameters{
+				Properties: []provider.ToolProperty{
+					{Name: "path", Type: "string", Description: "the file's path, relative to the repository root"},
+					{Name: "before", Type: "string", Description: "text believed to be in the file, matched by similarity with whitespace normalised"},
+					{Name: "after", Type: "string", Description: "the replacement text for whatever before matched"},
+				},
+				Required: []string{"path", "before", "after"},
+			},
+		}},
+		{Type: "function", Function: provider.ToolFunction{
+			Name:        "run_shell",
+			Description: "Run a command line through the platform shell and return its combined output and exit status.",
+			Parameters: provider.ToolParameters{
+				Properties: []provider.ToolProperty{
+					{Name: "command", Type: "string", Description: "the command line to run, interpreted by the platform shell"},
+					{Name: "dir", Type: "string", Description: "the working directory, relative to the repository root; empty means the repository root"},
+					{Name: "timeout_seconds", Type: "integer", Description: "how many seconds to allow the command to run; 0 or omitted uses the tool's default of 120"},
+				},
+				Required: []string{"command"},
+			},
+		}},
+	},
+
+	// One arm exists; it advertises the native route. See
+	// AdvertiseNativeTools's own doc comment for why this is a
+	// configuration value and not a constant.
+	AdvertiseNativeTools: true,
+
+	// parse's own order, first success wins (docs/SLICE-1.md §3).
+	ParseRoutes:  []string{"native", "fenced_json", "xml_tag"},
+	RepairBudget: 2,
+
+	// ADR-0005 §6 caps a corpus task at 20 turns, and internal/corpus
+	// carries the same number per task.
+	MaxTurns: 20,
+
+	// An estimate, and labelled one. docs/provider-pin.md's "$2 per corpus
+	// run" implies roughly 1.6M prompt tokens per task at the pinned
+	// endpoint's prices; 2M is just above that, so the budget stops a
+	// runaway loop without cutting short a session the cost model already
+	// expects. The first real bench run's reported usage replaces it, and
+	// replacing it moves the hash — which is correct, because a different
+	// budget is a different arm.
+	TokenBudget: 2_000_000,
+
+	Verification: Verification{
+		Forced: true,
+		// The registered default is discovery. [Resolve] amends it to
+		// [VerificationConfigured] for a repository whose
+		// .kopicode/config.toml names a `verify` command, which moves the
+		// hash — see the note there, and docs/SLICE-1.md §5.
+		Source: VerificationDiscovered,
+	},
+
+	Sampling: Sampling{
+		// Zero temperature and a fixed seed remove every source of
+		// run-to-run variance the pinned endpoint lets the harness control
+		// (docs/provider-pin.md: Parasail honours `seed`). ADR-0005's
+		// paired design wants exactly that. The seed's value is arbitrary;
+		// what matters is that it is fixed, recorded, and hashed.
+		//
+		// [MinimaxM2ConfigName] is the configuration that does not carry
+		// this forward unchanged — see [minimaxM2Config] and that name's
+		// own doc comment for why sending this same fixed seed to
+		// minimax/minimax-m2's pinned endpoint would assert a control the
+		// endpoint cannot exercise.
+		Temperature: 0,
+		TopP:        1,
+		MaxTokens:   8192,
+		SeedPolicy:  SeedFixed,
+		Seed:        1,
+	},
+}
+
+// minimaxM2Config returns [MinimaxM2ConfigName]'s configuration: a copy of
+// base with only the sampling seed policy changed, per that name's own doc
+// comment.
+//
+// base is a parameter rather than a closed-over reference to
+// [defaultHarnessConfig] so a test can drive this function against an
+// arbitrary starting configuration and check that the diff really is the one
+// field the doc comment claims — see TestMinimaxM2ConfigOnlyChangesSeedPolicy.
+func minimaxM2Config(base Config) Config {
+	cfg := base
+	cfg.Name = MinimaxM2ConfigName
+	cfg.Version = 1
+	cfg.Sampling.SeedPolicy = SeedUnseeded
+	// The zero value. Config.RequestSampling never reads Seed except under
+	// SeedFixed, but a stray nonzero value sitting unused here would read as
+	// a seed nobody meant to send.
+	cfg.Sampling.Seed = 0
+	return cfg
+}
 
 // configs is every harness configuration compiled into this binary, by name.
 //
@@ -275,169 +517,6 @@ const DefaultConfigName = "default"
 // nothing iterates it to produce a hash. [ConfigNames] sorts what it lists, so
 // no output path depends on its order either.
 var configs = map[string]Config{
-	DefaultConfigName: {
-		Name:    DefaultConfigName,
-		Version: 1,
-
-		// prompt_default.md, compiled in. Landing it moved this
-		// configuration's hash away from the empty-prompt one every earlier
-		// build wrote, and TestDefaultConfigHashIsStable's literal moved with
-		// it — see the note there. PreimageVersion did not: the encoding is
-		// unchanged, only the value.
-		SystemPrompt: DefaultSystemPrompt,
-
-		// The tool set of docs/SLICE-1.md build steps 5 and 6, in the order
-		// the model is shown them: read before write, edit before its fuzzy
-		// fallback. The names are internal/tools' constants, repeated here
-		// rather than imported so that a configuration is a value and not a
-		// view onto another package's registry — see hash.go on why this is
-		// held to internal/tools by a test instead.
-		ToolSet: []string{
-			"read_file",
-			"list_dir",
-			"grep",
-			"write_file",
-			"edit_file",
-			"edit_file_fuzzy",
-			"run_shell",
-		},
-
-		// The wire's tool-definition catalogue (KAN-844), in ToolSet's
-		// order. Every name, description and argument here is a literal
-		// copy of what internal/engine/catalogue.go's argument structs
-		// declare in their `json`, `kopicode` and `kopicode_desc` tags —
-		// duplicated for the reason ToolSet's own note gives, and held
-		// equal to the source by internal/engine/toolcatalogue_test.go
-		// rather than by trust.
-		ToolCatalogue: []provider.ToolDefinition{
-			{Type: "function", Function: provider.ToolFunction{
-				Name:        "read_file",
-				Description: "Read a text file from the repository, returning each line with an anchor you can later edit by.",
-				Parameters: provider.ToolParameters{
-					Properties: []provider.ToolProperty{
-						{Name: "path", Type: "string", Description: "the file's path, relative to the repository root"},
-						{Name: "offset", Type: "integer", Description: "1-based line number to start returning from; 0 or omitted means the beginning of the file"},
-						{Name: "limit", Type: "integer", Description: "maximum number of lines to return; 0 or omitted uses the tool's per-call maximum"},
-					},
-					Required: []string{"path"},
-				},
-			}},
-			{Type: "function", Function: provider.ToolFunction{
-				Name:        "list_dir",
-				Description: "List a directory's entries, optionally recursively and filtered by a glob pattern.",
-				Parameters: provider.ToolParameters{
-					Properties: []provider.ToolProperty{
-						{Name: "path", Type: "string", Description: "the directory's path, relative to the repository root; empty means the repository root"},
-						{Name: "recursive", Type: "boolean", Description: "when true, also list nested directories, skipping .git and .kopicode"},
-						{Name: "pattern", Type: "string", Description: "a glob matched against an entry's file name, or its whole relative path when the pattern contains a slash"},
-					},
-				},
-			}},
-			{Type: "function", Function: provider.ToolFunction{
-				Name:        "grep",
-				Description: "Search text files for a regular expression, returning matching lines with their file and line number.",
-				Parameters: provider.ToolParameters{
-					Properties: []provider.ToolProperty{
-						{Name: "pattern", Type: "string", Description: "the RE2 regular expression to search for; no backreferences or lookahead"},
-						{Name: "path", Type: "string", Description: "the file or directory to search, relative to the repository root; empty means the whole repository"},
-						{Name: "include", Type: "string", Description: "a glob restricting which file names are searched"},
-						{Name: "ignore_case", Type: "boolean", Description: "when true, match case-insensitively"},
-					},
-					Required: []string{"pattern"},
-				},
-			}},
-			{Type: "function", Function: provider.ToolFunction{
-				Name:        "write_file",
-				Description: "Create a file or replace its entire contents, creating parent directories as needed.",
-				Parameters: provider.ToolParameters{
-					Properties: []provider.ToolProperty{
-						{Name: "path", Type: "string", Description: "the file's path, relative to the repository root"},
-						{Name: "content", Type: "string", Description: "the file's complete new contents, replacing anything already there"},
-					},
-					Required: []string{"path", "content"},
-				},
-			}},
-			{Type: "function", Function: provider.ToolFunction{
-				Name:        "edit_file",
-				Description: "Replace one anchored region of a file with new text, using anchors printed by a prior read_file call.",
-				Parameters: provider.ToolParameters{
-					Properties: []provider.ToolProperty{
-						{Name: "path", Type: "string", Description: "the file's path, relative to the repository root"},
-						{Name: "anchor_start", Type: "string", Description: "the anchor of the region's first line, printed by a prior read_file call"},
-						{Name: "anchor_end", Type: "string", Description: "the anchor of the region's last line, printed by a prior read_file call; the same anchor twice replaces one line"},
-						{Name: "new_text", Type: "string", Description: "the replacement text for the anchored region; empty deletes it"},
-					},
-					Required: []string{"path", "anchor_start", "anchor_end", "new_text"},
-				},
-			}},
-			{Type: "function", Function: provider.ToolFunction{
-				Name:        "edit_file_fuzzy",
-				Description: "Replace text matched by similarity when no anchor is available; refuses an ambiguous or too-weak match. Prefer edit_file.",
-				Parameters: provider.ToolParameters{
-					Properties: []provider.ToolProperty{
-						{Name: "path", Type: "string", Description: "the file's path, relative to the repository root"},
-						{Name: "before", Type: "string", Description: "text believed to be in the file, matched by similarity with whitespace normalised"},
-						{Name: "after", Type: "string", Description: "the replacement text for whatever before matched"},
-					},
-					Required: []string{"path", "before", "after"},
-				},
-			}},
-			{Type: "function", Function: provider.ToolFunction{
-				Name:        "run_shell",
-				Description: "Run a command line through the platform shell and return its combined output and exit status.",
-				Parameters: provider.ToolParameters{
-					Properties: []provider.ToolProperty{
-						{Name: "command", Type: "string", Description: "the command line to run, interpreted by the platform shell"},
-						{Name: "dir", Type: "string", Description: "the working directory, relative to the repository root; empty means the repository root"},
-						{Name: "timeout_seconds", Type: "integer", Description: "how many seconds to allow the command to run; 0 or omitted uses the tool's default of 120"},
-					},
-					Required: []string{"command"},
-				},
-			}},
-		},
-
-		// One arm exists; it advertises the native route. See
-		// AdvertiseNativeTools's own doc comment for why this is a
-		// configuration value and not a constant.
-		AdvertiseNativeTools: true,
-
-		// parse's own order, first success wins (docs/SLICE-1.md §3).
-		ParseRoutes:  []string{"native", "fenced_json", "xml_tag"},
-		RepairBudget: 2,
-
-		// ADR-0005 §6 caps a corpus task at 20 turns, and internal/corpus
-		// carries the same number per task.
-		MaxTurns: 20,
-
-		// An estimate, and labelled one. docs/provider-pin.md's "$2 per corpus
-		// run" implies roughly 1.6M prompt tokens per task at the pinned
-		// endpoint's prices; 2M is just above that, so the budget stops a
-		// runaway loop without cutting short a session the cost model already
-		// expects. The first real bench run's reported usage replaces it, and
-		// replacing it moves the hash — which is correct, because a different
-		// budget is a different arm.
-		TokenBudget: 2_000_000,
-
-		Verification: Verification{
-			Forced: true,
-			// The registered default is discovery. [Resolve] amends it to
-			// [VerificationConfigured] for a repository whose
-			// .kopicode/config.toml names a `verify` command, which moves the
-			// hash — see the note there, and docs/SLICE-1.md §5.
-			Source: VerificationDiscovered,
-		},
-
-		Sampling: Sampling{
-			// Zero temperature and a fixed seed remove every source of
-			// run-to-run variance the pinned endpoint lets the harness control
-			// (docs/provider-pin.md: Parasail honours `seed`). ADR-0005's
-			// paired design wants exactly that. The seed's value is arbitrary;
-			// what matters is that it is fixed, recorded, and hashed.
-			Temperature: 0,
-			TopP:        1,
-			MaxTokens:   8192,
-			SeedPolicy:  SeedFixed,
-			Seed:        1,
-		},
-	},
+	DefaultConfigName:   defaultHarnessConfig,
+	MinimaxM2ConfigName: minimaxM2Config(defaultHarnessConfig),
 }

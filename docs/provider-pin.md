@@ -262,11 +262,15 @@ per-corpus-run estimate below; that still waits on KAN-800.
 ## minimax/minimax-m2
 
 - **Observed:** 2026-08-18 (unauthenticated OpenRouter API)
-- **Card:** KAN-850
+- **Card:** KAN-850 (pin), KAN-942 (harness configuration)
 - **Registered as:** A/B candidate (README's `## Models` table). Maps to
-  `DefaultConfigName` — a second harness configuration is slice 2
-  (docs/SLICE-1.md, "Explicitly deferred"), and nothing found while choosing this
-  pin gives a concrete reason the existing configuration is wrong for this model.
+  `harness.MinimaxM2ConfigName` (`"minimax-m2-v1"`), not `DefaultConfigName` — see
+  "The honest limitation" below. KAN-850 registered this pin with no concrete reason
+  yet to diverge from the default harness configuration; KAN-942 found one in the
+  pin's own missing `seed` support and gave this model its own configuration, which
+  changes only `Sampling.SeedPolicy` (`SeedUnseeded` instead of `SeedFixed`) relative
+  to the default. Full argument: `MinimaxM2ConfigName`'s doc comment in
+  `internal/harness/harness.go`.
 
 ### What was observed
 
