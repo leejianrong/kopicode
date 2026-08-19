@@ -175,6 +175,25 @@ var toolEntries = []toolEntry{
 			code := res.ExitCode
 			return toolOutcome{output: modelText(res.Output, err), err: err, exitCode: &code}, nil
 		}),
+
+	// ask is docs/adr/0009-ask-tool-contract.md's tool. permission.OperationRead
+	// and a nil action closure, per decision 2: it changes nothing on the tree,
+	// so it earns no TurnSnapshot, needs no path resolution and raises no
+	// permission.Action field — Gate.classify's "reads never ask" rule lets it
+	// through with zero PermissionRequested/PermissionDecided events, which is
+	// correct rather than a bypass, because there was never a permission
+	// question here for the gate to skip. The actual pause-and-collect-an-answer
+	// step happens entirely inside runAsk, which calls e.cfg.Ask directly and
+	// never through internal/permission.
+	entryOf(tools.ToolAsk,
+		"Ask the human a clarifying question when the repository cannot answer it, and receive their "+
+			"reply as this call's result. Use sparingly — read and grep first; most ambiguity is "+
+			"resolved by looking, not by asking.",
+		permission.OperationRead, false,
+		nil,
+		func(ctx context.Context, e *Engine, turn int, callID string, a *askArgs) (toolOutcome, error) {
+			return e.runAsk(ctx, turn, callID, a)
+		}),
 }
 
 // toolByName indexes the table. A map is fine for lookup; nothing iterates it.
@@ -436,6 +455,12 @@ func (e *Engine) syntaxGate(ctx context.Context, turn int, path string) error {
 // A denial booked as `harness` is noise against an acceptance criterion of
 // zero, so it is classified here as a task-level refusal, which is the closest
 // honest reading: the model was told what was wrong and may try something else.
+//
+// errAskRefused draws the identical line for ask (docs/adr/0009-ask-tool-contract.md
+// decision 2): an Answerer that could not get an answer — no human present, the
+// turn was cancelled — is not internal/permission's ErrDenied (ask is never
+// routed through that package at all), but it is the same shape of "the harness
+// worked exactly as designed" that ErrDenied already gets FaultTask for.
 func faultOf(err error) tools.Fault {
 	if err == nil {
 		return tools.FaultNone
@@ -443,7 +468,7 @@ func faultOf(err error) tools.Fault {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return tools.FaultCancelled
 	}
-	if errors.Is(err, permission.ErrDenied) {
+	if errors.Is(err, permission.ErrDenied) || errors.Is(err, errAskRefused) {
 		return tools.FaultTask
 	}
 	return tools.FaultOf(err)

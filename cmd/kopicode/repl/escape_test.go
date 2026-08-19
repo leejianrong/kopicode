@@ -86,6 +86,9 @@ func everyKind() []engine.Event {
 		{Kind: engine.EventUnknown, Seq: 26, Reason: "SomethingNewer", Text: `{"a":1}`},
 		{Kind: engine.EventSessionEnded, Seq: 27, Reason: "completed", ExitCode: 0, HasExitCode: true},
 		{Kind: engine.EventSessionForked, Seq: 28, Detail: "s-source", ExitCode: 1, HasExitCode: true, Size: 5},
+		{Kind: engine.EventAskRequested, Seq: 29, Detail: "kc-2", Text: "which config file?", Reason: "checked config.go"},
+		{Kind: engine.EventAskAnswered, Seq: 30, Detail: "kc-2", Text: "config/retry.toml", Source: "user"},
+		{Kind: engine.EventAskAnswered, Seq: 31, Detail: "kc-2", Text: "no human is present", Source: "policy", Reason: "refused"},
 		// The zero value, which must be reported rather than dropped.
 		{},
 	}

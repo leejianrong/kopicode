@@ -233,6 +233,12 @@ func headless(ctx context.Context, prompt string, stdout, stderr io.Writer, opts
 	// this session journals must be attributed to the policy and not to a
 	// user who was never asked.
 	opts.ConsentMode = engine.ConsentUnattended
+	opts.Ask = denyHeadlessAsk
+	// Same reasoning as ConsentMode above, one layer over: nobody is present
+	// to answer an ask call either, so every resulting journal.AskAnswered
+	// must be attributed to the policy and not to a user who was never asked
+	// (docs/adr/0009-ask-tool-contract.md decision 4).
+	opts.AskMode = engine.AskUnattended
 
 	sess, err := engine.Open(ctx, opts)
 	if err != nil {
@@ -295,6 +301,21 @@ func headless(ctx context.Context, prompt string, stdout, stderr io.Writer, opts
 // refusing.
 func denyHeadless(context.Context, engine.ConsentRequest) (engine.ConsentAnswer, error) {
 	return engine.ConsentDeny, nil
+}
+
+// denyHeadlessAsk answers every ask request by saying nobody is present.
+//
+// Same posture as denyHeadless, one layer over: there is nobody to ask, so
+// the honest answer names that rather than inventing one, and it is not an
+// error that ends the session (docs/adr/0009-ask-tool-contract.md decision
+// 2 and 4) — the engine's own ask dispatch closure catches this error,
+// journals a journal.AskAnswered with Refused true, and returns the message
+// below as this call's ordinary tool result, worded so the model knows to
+// proceed on its own judgement rather than retry the same call, matching the
+// existing run_shell/consent refusal's "a refusal is an answer" line already
+// in prompt_default.md.
+func denyHeadlessAsk(context.Context, engine.AskRequest) (engine.AskAnswer, error) {
+	return engine.AskAnswer{}, errors.New("no human is present to answer this question")
 }
 
 // header is the stream's first line. See the schema notes above.

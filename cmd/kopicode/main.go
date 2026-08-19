@@ -361,6 +361,11 @@ func openAndDriveSession(std streams, opts engine.Options, open func(context.Con
 	// opts.ConsentMode is left at its zero value, engine.ConsentInteractive: a
 	// human is answering through loop.Ask, so every PermissionDecided this
 	// session journals is stamped permission.SourceUser (KAN-885).
+	opts.Ask = loop.AnswerAsk
+	// opts.AskMode is left at its zero value, engine.AskInteractive, for the
+	// identical reason: a human is answering through loop.AnswerAsk, so every
+	// journal.AskAnswered this session journals is stamped "user"
+	// (docs/adr/0009-ask-tool-contract.md decision 4).
 
 	ctx := context.Background()
 	sess, err = open(ctx, opts)

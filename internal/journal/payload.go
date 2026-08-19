@@ -654,3 +654,48 @@ type SessionForked struct {
 }
 
 func (SessionForked) Type() Type { return TypeSessionForked }
+
+// AskRequested records that the model paused the turn to ask the human a
+// question (docs/adr/0009-ask-tool-contract.md decision 3).
+//
+// It is written before the engine calls the configured Answerer, and
+// unconditionally: a turn cancelled while the question is outstanding leaves
+// this event with no matching AskAnswered, which is the honest shape of what
+// happened — representable, not a gap, the same reason a PermissionRequested
+// can stand alone with no PermissionDecided.
+type AskRequested struct {
+	CallID   string `json:"call_id"`
+	Question Text   `json:"question"`
+	// Context is the model's optional supporting text — what it tried, why it
+	// is stuck. The zero Text is a meaningful value here, not a forgotten
+	// field: it means the model gave none, which is why fixtures() has to set
+	// it to something rather than leaving it at its Go zero value (see
+	// event_test.go's fixture for this type).
+	Context Text `json:"context"`
+}
+
+func (AskRequested) Type() Type { return TypeAskRequested }
+
+// AskAnswered records what came back and who is answerable for it
+// (docs/adr/0009-ask-tool-contract.md decision 3).
+type AskAnswered struct {
+	CallID string `json:"call_id"`
+	// Answer is the text returned to the model as this call's ToolResult.
+	// Recorded again here — the same duplication EditApplied.Diff already has
+	// with ToolResult.Output for an edit — because Source is not otherwise
+	// attributable: without a self-sufficient event, "a human answered this"
+	// and "nobody was present and the harness said so" read as the identical
+	// ToolResult until someone cross-references CallID against the
+	// PermissionDecided-style record this type exists to be.
+	Answer Text `json:"answer"`
+	// Source is "user" or "policy" — PermissionDecided's own vocabulary, for
+	// the same reason: a headless run's canned refusal must never be
+	// indistinguishable from a person answering.
+	Source string `json:"source"`
+	// Refused is true when nobody actually answered: no human present, or the
+	// turn was cancelled while the question was open. Answer then carries the
+	// reason shown to the model, not a person's words.
+	Refused bool `json:"refused"`
+}
+
+func (AskAnswered) Type() Type { return TypeAskAnswered }

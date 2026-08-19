@@ -74,6 +74,8 @@ const (
 	TypeTurnCancelled       Type = "TurnCancelled"
 	TypeSessionEnded        Type = "SessionEnded"
 	TypeSessionForked       Type = "SessionForked"
+	TypeAskRequested        Type = "AskRequested"
+	TypeAskAnswered         Type = "AskAnswered"
 )
 
 // Payload is one event's typed body.
@@ -244,6 +246,8 @@ var registry = map[Type]func([]byte) (Payload, error){
 	TypeTurnCancelled:       decodeInto[TurnCancelled],
 	TypeSessionEnded:        decodeInto[SessionEnded],
 	TypeSessionForked:       decodeInto[SessionForked],
+	TypeAskRequested:        decodeInto[AskRequested],
+	TypeAskAnswered:         decodeInto[AskAnswered],
 }
 
 // KnownTypes lists every discriminator this build can decode into a typed
