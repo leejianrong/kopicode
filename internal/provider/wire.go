@@ -86,6 +86,38 @@ type wireFunction struct {
 	Arguments json.RawMessage `json:"arguments"`
 }
 
+// MarshalJSON renders arguments in the wire's required shape — a JSON string
+// holding the serialized arguments — regardless of what form Arguments is in.
+// It has to handle both: a provider's own reply can carry a bare object
+// (this type's doc comment above), and provider.ToolCall's doc comment
+// deliberately keeps whichever form arrived rather than normalising it, so a
+// message built from history — a resumed session's tool call, or any
+// assistant message being echoed back on a later turn — reaches this
+// boundary carrying either shape. This is the one place a Message becomes a
+// wireMessage (provider.go's Request doc comment), so it is the one place
+// that has to make the wire's requirement hold regardless of source.
+//
+// Escaping is done by hand rather than through json.Marshal, because a
+// nested Marshal call inside a MarshalJSON method gets its own default
+// HTML-escaping behaviour independent of the caller's Encoder — the same
+// trap jsonString exists to avoid.
+func (f wireFunction) MarshalJSON() ([]byte, error) {
+	args := bytes.TrimSpace(f.Arguments)
+	if len(args) == 0 {
+		args = []byte("{}")
+	}
+	if args[0] != '"' {
+		args = jsonString(string(args))
+	}
+	var buf bytes.Buffer
+	buf.WriteString(`{"name":`)
+	buf.Write(jsonString(f.Name))
+	buf.WriteString(`,"arguments":`)
+	buf.Write(args)
+	buf.WriteByte('}')
+	return buf.Bytes(), nil
+}
+
 // callDelta is one streamed increment of a tool call. Index is what identifies
 // which call a fragment belongs to; array position is not, and treating it as
 // such is the bug OpenRouter's own snippet contains.
