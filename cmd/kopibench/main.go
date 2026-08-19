@@ -11,7 +11,16 @@
 // allows a front end exactly three internal imports and this file's job is to
 // parse flags, print, and choose an exit code.
 //
-//	kopibench run --provider mock --corpus bench/tasks
+//	kopibench run --provider mock --corpus bench/tasks --save result-a.json
+//	kopibench run --provider mock --corpus bench/tasks --model minimax/minimax-m2 --save result-b.json
+//	kopibench compare result-a.json result-b.json
+//
+// `run --save` is the half that makes the second line possible at all: two
+// invocations of one binary only add up to a paired A/B (KAN-943) if the first
+// invocation's [bench.RunResult] survives to be loaded back for the second.
+// `compare` is the other half — it holds no knowledge of how a result was
+// produced, only [bench.Compare] over two loaded ones, which is what lets it
+// score a run that has not been re-executed to compare it.
 //
 // # Exit codes
 //
@@ -70,15 +79,32 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return exitOK
 	}
 
-	// `run` is the only subcommand there is, and it is required rather than
+	// `run` and `compare` are the only subcommands there are. Neither is
 	// implied: `kopibench` with no arguments spending two dollars because the
-	// default was to run is not a default anybody wants.
-	if len(args) == 0 || args[0] != "run" {
+	// default was to run is not a default anybody wants, and a `compare` that
+	// ran without being asked would be spending nothing but would still be a
+	// surprise.
+	if len(args) == 0 {
 		printf(stderr, "usage: kopibench run [flags]\n"+
+			"       kopibench compare <result-a.json> <result-b.json>\n"+
 			"       kopibench --version\n")
 		return exitUsage
 	}
+	switch args[0] {
+	case "run":
+		return runRun(args[1:], stdout, stderr)
+	case "compare":
+		return runCompare(args[1:], stdout, stderr)
+	default:
+		printf(stderr, "usage: kopibench run [flags]\n"+
+			"       kopibench compare <result-a.json> <result-b.json>\n"+
+			"       kopibench --version\n")
+		return exitUsage
+	}
+}
 
+// runRun is `kopibench run`'s body.
+func runRun(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("kopibench run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	overrides := engine.BindSelectionFlags(fs)
@@ -90,7 +116,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	keep := fs.Bool("keep-worktrees", false,
 		"leave every task worktree behind for a post-mortem; the NEXT run reclaims them")
 	debug := fs.Bool("debug", false, "engine diagnostics on stderr")
-	if err := fs.Parse(args[1:]); err != nil {
+	save := fs.String("save", "",
+		"write this run's result as JSON here, so `kopibench compare` can pair it with another run later")
+	if err := fs.Parse(args); err != nil {
 		return exitUsage
 	}
 	setupLogging(*debug, stderr)
@@ -155,6 +183,15 @@ func run(args []string, stdout, stderr io.Writer) int {
 		if werr := bench.WriteReport(stdout, result); werr != nil {
 			printf(stderr, "kopibench: writing the report: %v\n", werr)
 		}
+		// Saved even when the run errored or left tasks unclassified: a
+		// partial result is still the result, and a post-mortem `compare`
+		// needs the same file a clean run would have produced.
+		if *save != "" {
+			if serr := saveResultFile(*save, result); serr != nil {
+				printf(stderr, "kopibench: %v\n", serr)
+				return exitHarness
+			}
+		}
 	}
 	if err != nil {
 		printf(stderr, "kopibench: %v\n", err)
@@ -168,6 +205,81 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return exitTaskFail
 	}
 	return exitOK
+}
+
+// saveResultFile writes result to path as JSON via [bench.SaveResult].
+//
+// It is a named function rather than an inline closure so `compare`'s own
+// file-opening code below reads as the same shape doing the opposite thing.
+func saveResultFile(path string, result *bench.RunResult) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("saving result to %s: %w", path, err)
+	}
+	defer func() { _ = f.Close() }()
+	if err := bench.SaveResult(f, result); err != nil {
+		return fmt.Errorf("saving result to %s: %w", path, err)
+	}
+	return f.Close()
+}
+
+// runCompare is `kopibench compare`'s body: load two [bench.RunResult]s that
+// `run --save` wrote, score them with [bench.Compare], and print the report.
+//
+// It holds no knowledge of how a result was produced — not the corpus, not
+// the provider, not the engine — because everything it needs is already in
+// the two files. That is the whole point of splitting `run --save` and
+// `compare` into two invocations of one binary rather than one invocation
+// that runs both arms back to back: the two runs do not have to happen on the
+// same machine, in the same process, or even on the same day.
+func runCompare(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("kopibench compare", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	if err := fs.Parse(args); err != nil {
+		return exitUsage
+	}
+	if fs.NArg() != 2 {
+		printf(stderr, "usage: kopibench compare <result-a.json> <result-b.json>\n")
+		return exitUsage
+	}
+
+	pathA, pathB := fs.Arg(0), fs.Arg(1)
+	runA, err := loadResultFile(pathA)
+	if err != nil {
+		printf(stderr, "kopibench: %v\n", err)
+		return exitUsage
+	}
+	runB, err := loadResultFile(pathB)
+	if err != nil {
+		printf(stderr, "kopibench: %v\n", err)
+		return exitUsage
+	}
+
+	res, err := bench.Compare(runA.Scored(), runB.Scored())
+	if err != nil {
+		printf(stderr, "kopibench: %v\n", err)
+		return exitHarness
+	}
+
+	if werr := bench.WriteCompareReport(stdout, res, runA, runB); werr != nil {
+		printf(stderr, "kopibench: writing the comparison report: %v\n", werr)
+		return exitHarness
+	}
+	return exitOK
+}
+
+// loadResultFile reads back a [bench.RunResult] `run --save` wrote.
+func loadResultFile(path string) (*bench.RunResult, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("loading result from %s: %w", path, err)
+	}
+	defer func() { _ = f.Close() }()
+	r, err := bench.LoadResult(f)
+	if err != nil {
+		return nil, fmt.Errorf("loading result from %s: %w", path, err)
+	}
+	return r, nil
 }
 
 // printf writes to an injected stream.

@@ -80,6 +80,14 @@ var (
 	// still reclaimed; the fact travels on the result, where SLICE-1 §9 charges
 	// it to the harness.
 	ErrTaskPanic = errors.New("task panicked")
+
+	// ErrEmptyResult reports a persisted run with no run id and no tasks — the
+	// zero [RunResult] round-tripped through JSON. [LoadResult] refuses it
+	// rather than handing [Compare] something that looks like a comparison
+	// over zero tasks, which [McNemar] would refuse anyway but only after
+	// `kopibench compare` had already printed a header for a run that was
+	// never actually recorded.
+	ErrEmptyResult = errors.New("persisted result has no run id and no tasks")
 )
 
 // Error is a scoring failure, with enough detail to fix the input.
