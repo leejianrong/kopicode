@@ -204,9 +204,8 @@ What is real now (2026-08-17):
   vocabulary OpenRouter documents, so an invented pin fails a test rather than a
   benchmark. The pin being real does not make the bodies real: they are still
   hand-authored, and the fixtures say so.
-- **`internal/repo`** — turn snapshots via git shadow refs (ADR-0002 §3), write
-  only; restore and fork are slice 2. `git add -A` into a throwaway
-  `GIT_INDEX_FILE`, `write-tree`, `commit-tree`, `update-ref
+- **`internal/repo`** — turn snapshots via git shadow refs (ADR-0002 §3). `git add -A`
+  into a throwaway `GIT_INDEX_FILE`, `write-tree`, `commit-tree`, `update-ref
   refs/kopicode/<session>/<turn>`. Two guards hold "never touch the user's git
   state": the environment is **verified** to redirect the index rather than assumed
   to, and the read-only path **refuses** any index-writing subcommand outright
@@ -215,7 +214,24 @@ What is real now (2026-08-17):
   worktree does not read the latter, so writing there works everywhere except under
   the bench runner. Commits carry a fixed `kopicode` identity and an injected clock,
   so a snapshot never depends on the user having configured git and the same tree
-  yields the same sha.
+  yields the same sha. **`Repo.Restore` reads one back out** (KAN-938, G1's read
+  half): `git archive --format=tar <tree>` through the same guarded `Repo.git` path —
+  `archive` is not in `indexWriting`, because it has no index to write, no HEAD to
+  move and no ref to touch — decoded in-process rather than piped into a second `tar`
+  or `git` subprocess. Every entry is written through an `os.Root` opened on the
+  destination, the same mechanism `internal/tools` already rests `Root.Resolve` on, so
+  a write is refused at the syscall level if any path component — including one that
+  is a symlink already sitting in the destination before the call ran — would leave
+  it; two checks Root does not make on its own catch what it has no reason to refuse,
+  a ".git" path component and a symlink whose own target escapes the destination
+  (`os.Root.Symlink` documents that it "does not validate oldname"). The destination
+  is the caller's choice with one refusal — inside the repository's own git
+  directory — and Restore never deletes: a path the tree contains is overwritten, a
+  path the tree does not mention is left alone, on the theory that turning this into
+  an exact checkout is a materially bigger promise than "read a tree back out safely"
+  and belongs to the caller. This is the primitive only; resuming a session's chain
+  and forking one from a snapshot both still decide *when* and are still slice 2
+  (KAN-939/KAN-940).
 - **`internal/lock`** — one session per **working tree** (docs/SLICE-1.md §8), `flock`
   on unix and a documented no-op on Windows. The word "repo" in that section is the
   trap: a linked worktree shares `.git/config`, the object store and the ref store with
@@ -511,8 +527,11 @@ therefore no second arm for the scorer; `slog` inside the engine (KAN-771) — t
 itself logs nothing yet. Absent with **no** card: the `.kopicode/lock` advisory lock
 SLICE-1 §8 describes.
 Nothing stops two sessions in one repository today; `internal/journal/file.go` carries
-the forward reference to it, so the gap is known rather than overlooked. Snapshot
-**restore** and session **fork** are slice 2 by design and are not gaps.
+the forward reference to it, so the gap is known rather than overlooked. `Repo.Restore`
+(KAN-938) landed the primitive — read a tree back out to a directory — but resuming a
+session's chain from it and forking a new session from a snapshot both still decide
+*when* to restore and what happens to the chain afterward, and both are slice 2 by
+design and are not gaps.
 
 **How this section goes wrong, which is worth more than the list above.** It described
 "foundations landed, no loop yet" on 2026-08-11. By 2026-08-14 KAN-776 found it wrong on
@@ -710,7 +729,7 @@ internal/
   verify/            forced verification: discovery and the run
   procgroup/         start a subprocess in its own group, end the whole group
   journal/           Journal interface, FileJournal, blob spill, redaction, event types
-  repo/              git shadow refs — write-only in slice 1
+  repo/              git shadow refs — write and restore; resume/fork are slice 2
   lock/              the advisory lock at .kopicode/lock — one session per working tree
   permission/        policy decisions
   corpus/            the loader, validator and digest for bench/tasks
@@ -722,8 +741,9 @@ docs/SLICE-1.md      the current slice
 ```
 
 Two entries used to promise more than they hold, so they say less now. `repo/` writes
-shadow refs and nothing else — the bench runner owns worktrees, and the one diff that is
-journaled is built in process by `internal/tools/edit.go` (see the diff rule below).
+shadow refs and reads a tree back out via `Restore` (KAN-938) — nothing more: the bench
+runner owns worktrees, and the one diff that is journaled is built in process by
+`internal/tools/edit.go` (see the diff rule below).
 
 `bench/` in ADR-0003's sketch is split here into `cmd/kopibench/` plus
 `internal/bench/`, following Go's convention that main packages live under `cmd/`. The

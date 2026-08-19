@@ -35,10 +35,15 @@
 // rests on. Every path here therefore threads a [context.Context] explicitly
 // and none of them stores one.
 //
-// # Write only
+// # Write, and read back
 //
-// Snapshots are recorded. Restoring one, and forking a session from one, are
-// slice 2 (docs/SLICE-1.md, affordance G1).
+// Snapshots are recorded by [Snapshotter.Snapshot] and materialized back to a
+// directory by [Repo.Restore] (KAN-938, docs/SLICE-1.md affordance G1).
+// Restore is the primitive only — read a tree back out safely, nothing more.
+// Resuming a session's chain from a prior snapshot and forking a new session
+// from one both decide *when* to restore and what happens to the chain
+// afterward, which is a different question from *how*, and both are still
+// slice 2.
 package repo
 
 import (

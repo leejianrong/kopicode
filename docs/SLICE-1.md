@@ -41,7 +41,7 @@ answer, so it is task 1, not task 9.
 | V1 | Forced verification: the project's test/lint command after a modifying turn | Full, command discovered or configured |
 | V2 | Post-edit syntax gate: language-native check immediately after each edit | Full for Go, Python, JS/TS; honest no-op elsewhere |
 | J1 | Append-only tagged-union event log (JSONL) with blob spill | Full for the slice-1 event set |
-| G1 | `TurnSnapshot` — git shadow ref per turn via `commit-tree` | **Write only** — snapshots are recorded; restore/fork is slice 2 |
+| G1 | `TurnSnapshot` — git shadow ref per turn via `commit-tree` | Write, plus a `Restore` primitive (KAN-938) that reads a tree back out; resuming or forking a session from one is still slice 2 |
 | M1 | Permission gate: engine decides *that* asking is required | Full for `run_shell` and writes outside the repo root |
 | U1 | Line-oriented REPL, TTY-aware, `Ctrl-C` cancels the turn | Full |
 | U2 | `kopicode run --print` — JSON events on stdout, meaningful exit codes | Full |
@@ -343,7 +343,9 @@ Ordered so each step produces something the next depends on.
     surface renders. Bench mode supplies a non-interactive policy that auto-approves
     within the worktree.
 
-11. **Turn snapshots (G1).** `commit-tree` over a throwaway index, per §2. Write-only.
+11. **Turn snapshots (G1).** `commit-tree` over a throwaway index, per §2, plus a
+    `Restore` primitive (KAN-938) that reads a tree back out via `git archive`.
+    Resuming a session's chain or forking one from a snapshot is still slice 2.
 
 12. **Forced verification (V1).** Discovery, configuration, journaling, and the rule
     that a non-zero exit blocks a success report.
