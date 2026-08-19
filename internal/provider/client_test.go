@@ -1,6 +1,7 @@
 package provider_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -375,6 +376,103 @@ func TestNoToolsOmitsTheKeyEntirely(t *testing.T) {
 	}
 	if _, ok := sent["tools"]; ok {
 		t.Errorf(`the wire body carries a "tools" key with no tools to advertise: %s`, gotBody)
+	}
+}
+
+// TestToolCallArgumentsAreAlwaysAWireString is KAN-953's regression check.
+// provider.ToolCall.Arguments deliberately keeps whichever shape arrived — a
+// JSON string or a bare object (provider.go's own doc comment says
+// normalising it there would erase a finding) — and a resumed session's
+// history reconstructs it as a bare object unconditionally. Either shape has
+// to leave this client as the wire's required JSON string, or OpenRouter
+// rejects the request with a 400 the way KAN-953 reproduced live. Neither
+// TestRequestCarriesThePinAndTheCredential nor any resume test exercises a
+// message with ToolCalls through this client's real encode() path, which is
+// exactly the seam this bug fell through.
+func TestToolCallArgumentsAreAlwaysAWireString(t *testing.T) {
+	f := loadFixture(t)
+
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotBody, _ = io.ReadAll(r.Body)
+		writeSSE(t, w, f.Exchanges[0].Response.Stream)
+	}))
+	defer srv.Close()
+
+	req := request(f)
+	req.Messages = append(req.Messages,
+		provider.Message{
+			Role: provider.RoleAssistant,
+			ToolCalls: []provider.ToolCall{
+				// A bare object — the shape a resumed session's journal-normalised
+				// history reconstructs it as (KAN-953's reproduction).
+				{ID: "call_1", Name: "read_file", Arguments: json.RawMessage(`{"path":"a.go"}`)},
+			},
+		},
+		provider.Message{Role: provider.RoleTool, ToolCallID: "call_1", Content: "ok"},
+		provider.Message{
+			Role: provider.RoleAssistant,
+			ToolCalls: []provider.ToolCall{
+				// Already the wire's own string shape — the ordinary case, where a
+				// provider's reply is echoed back unchanged on a later turn.
+				{ID: "call_2", Name: "read_file", Arguments: json.RawMessage(`"{\"path\":\"b.go\"}"`)},
+			},
+		},
+		provider.Message{Role: provider.RoleTool, ToolCallID: "call_2", Content: "ok"},
+	)
+
+	stream, err := newClient(t, srv).Complete(t.Context(), req)
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	drain(t, stream)
+	_ = stream.Close()
+
+	var sent struct {
+		Messages []struct {
+			ToolCalls []struct {
+				Function struct {
+					Arguments json.RawMessage `json:"arguments"`
+				} `json:"function"`
+			} `json:"tool_calls"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(gotBody, &sent); err != nil {
+		t.Fatalf("decoding the request this client sent: %v\n%s", err, gotBody)
+	}
+
+	var argSets []json.RawMessage
+	for _, m := range sent.Messages {
+		for _, tc := range m.ToolCalls {
+			argSets = append(argSets, tc.Function.Arguments)
+		}
+	}
+	if len(argSets) != 2 {
+		t.Fatalf("wire body carries %d tool-call argument sets, want 2\n%s", len(argSets), gotBody)
+	}
+
+	wantPath := []string{"a.go", "b.go"}
+	for i, raw := range argSets {
+		trimmed := bytes.TrimSpace(raw)
+		if len(trimmed) == 0 || trimmed[0] != '"' {
+			t.Errorf("tool call %d: arguments = %s, want a JSON string per the wire schema", i, raw)
+			continue
+		}
+		var asString string
+		if err := json.Unmarshal(raw, &asString); err != nil {
+			t.Errorf("tool call %d: arguments %s did not decode as a JSON string: %v", i, raw, err)
+			continue
+		}
+		var decoded struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal([]byte(asString), &decoded); err != nil {
+			t.Errorf("tool call %d: arguments string %q is not itself valid JSON: %v", i, asString, err)
+			continue
+		}
+		if decoded.Path != wantPath[i] {
+			t.Errorf("tool call %d: path = %q, want %q", i, decoded.Path, wantPath[i])
+		}
 	}
 }
 
