@@ -1,0 +1,368 @@
+{
+  "run_id": "run-20260819t010300z",
+  "arm": {
+    "model_id": "minimax/minimax-m2",
+    "harness_config_hash": "11b7fe204d49aee63c9e28fa36e9a65d28f6b8c0ba2542653d9a73e84cf14880",
+    "harness_config_name": "minimax-m2-v1",
+    "provider_pin": "order=[minimax/fp8] allow_fallbacks=false quantizations=[fp8]",
+    "build": {
+      "version": "3f43ec5",
+      "commit": "3f43ec5644e7669774f6734a2b41f1173203e37b",
+      "tree_state": "clean",
+      "source": "ldflags"
+    }
+  },
+  "corpus_version": "1.0.0",
+  "corpus_digest": "sha256:065198d0ed6f94a5e6296a88377ed39deac54505d77caad1c83dea83ab866535",
+  "commit": "3f43ec5644e7669774f6734a2b41f1173203e37b",
+  "tasks": [
+    {
+      "task_id": "go-unicode-reverse",
+      "passed": true,
+      "session_id": "run-20260819t010300z-go-unicode-reverse",
+      "journal_dir": "/home/jianlee/projects/abang-ai/kopicode/.kopicode/bench/runs/run-20260819t010300z/go-unicode-reverse/.kopicode/sessions/run-20260819t010300z-go-unicode-reverse",
+      "stop": "completed",
+      "turns": 7,
+      "tokens": {
+        "prompt": 28334,
+        "completion": 703,
+        "total": 29037
+      },
+      "session_err": "",
+      "panicked": false,
+      "oracle": {
+        "argv": [
+          "go",
+          "test",
+          "./..."
+        ],
+        "passed": true,
+        "exit_code": 0,
+        "signal": "",
+        "timed_out": false,
+        "duration_ms": 264,
+        "output": "ok  \texample.com/strutil\t(cached)\n",
+        "err": ""
+      },
+      "bucket": "",
+      "worktree": "/home/jianlee/projects/abang-ai/kopicode/.kopicode/bench/worktrees/go-unicode-reverse",
+      "worktree_kept": false,
+      "duration_ms": 28980
+    },
+    {
+      "task_id": "go-json-response-shape",
+      "passed": true,
+      "session_id": "run-20260819t010300z-go-json-response-shape",
+      "journal_dir": "/home/jianlee/projects/abang-ai/kopicode/.kopicode/bench/runs/run-20260819t010300z/go-json-response-shape/.kopicode/sessions/run-20260819t010300z-go-json-response-shape",
+      "stop": "completed",
+      "turns": 5,
+      "tokens": {
+        "prompt": 19186,
+        "completion": 571,
+        "total": 19757
+      },
+      "session_err": "",
+      "panicked": false,
+      "oracle": {
+        "argv": [
+          "go",
+          "test",
+          "./..."
+        ],
+        "passed": true,
+        "exit_code": 0,
+        "signal": "",
+        "timed_out": false,
+        "duration_ms": 116,
+        "output": "ok  \texample.com/apiresp\t(cached)\n",
+        "err": ""
+      },
+      "bucket": "",
+      "worktree": "/home/jianlee/projects/abang-ai/kopicode/.kopicode/bench/worktrees/go-json-response-shape",
+      "worktree_kept": false,
+      "duration_ms": 16842
+    },
+    {
+      "task_id": "go-error-wrapping",
+      "passed": true,
+      "session_id": "run-20260819t010300z-go-error-wrapping",
+      "journal_dir": "/home/jianlee/projects/abang-ai/kopicode/.kopicode/bench/runs/run-20260819t010300z/go-error-wrapping/.kopicode/sessions/run-20260819t010300z-go-error-wrapping",
+      "stop": "completed",
+      "turns": 13,
+      "tokens": {
+        "prompt": 81761,
+        "completion": 1609,
+        "total": 83370
+      },
+      "session_err": "",
+      "panicked": false,
+      "oracle": {
+        "argv": [
+          "go",
+          "test",
+          "./..."
+        ],
+        "passed": true,
+        "exit_code": 0,
+        "signal": "",
+        "timed_out": false,
+        "duration_ms": 341,
+        "output": "ok  \texample.com/store\t(cached)\n",
+        "err": ""
+      },
+      "bucket": "",
+      "worktree": "/home/jianlee/projects/abang-ai/kopicode/.kopicode/bench/worktrees/go-error-wrapping",
+      "worktree_kept": false,
+      "duration_ms": 48707
+    },
+    {
+      "task_id": "go-interval-merge",
+      "passed": true,
+      "session_id": "run-20260819t010300z-go-interval-merge",
+      "journal_dir": "/home/jianlee/projects/abang-ai/kopicode/.kopicode/bench/runs/run-20260819t010300z/go-interval-merge/.kopicode/sessions/run-20260819t010300z-go-interval-merge",
+      "stop": "completed",
+      "turns": 14,
+      "tokens": {
+        "prompt": 91206,
+        "completion": 1668,
+        "total": 92874
+      },
+      "session_err": "",
+      "panicked": false,
+      "oracle": {
+        "argv": [
+          "go",
+          "test",
+          "./..."
+        ],
+        "passed": true,
+        "exit_code": 0,
+        "signal": "",
+        "timed_out": false,
+        "duration_ms": 290,
+        "output": "ok  \texample.com/intervals\t(cached)\n",
+        "err": ""
+      },
+      "bucket": "",
+      "worktree": "/home/jianlee/projects/abang-ai/kopicode/.kopicode/bench/worktrees/go-interval-merge",
+      "worktree_kept": false,
+      "duration_ms": 44956
+    },
+    {
+      "task_id": "go-lru-cache",
+      "passed": true,
+      "session_id": "run-20260819t010300z-go-lru-cache",
+      "journal_dir": "/home/jianlee/projects/abang-ai/kopicode/.kopicode/bench/runs/run-20260819t010300z/go-lru-cache/.kopicode/sessions/run-20260819t010300z-go-lru-cache",
+      "stop": "completed",
+      "turns": 9,
+      "tokens": {
+        "prompt": 57188,
+        "completion": 1637,
+        "total": 58825
+      },
+      "session_err": "",
+      "panicked": false,
+      "oracle": {
+        "argv": [
+          "go",
+          "test",
+          "./..."
+        ],
+        "passed": true,
+        "exit_code": 0,
+        "signal": "",
+        "timed_out": false,
+        "duration_ms": 248,
+        "output": "ok  \texample.com/lru\t(cached)\n",
+        "err": ""
+      },
+      "bucket": "",
+      "worktree": "/home/jianlee/projects/abang-ai/kopicode/.kopicode/bench/worktrees/go-lru-cache",
+      "worktree_kept": false,
+      "duration_ms": 41082
+    },
+    {
+      "task_id": "go-wordwrap-width",
+      "passed": true,
+      "session_id": "run-20260819t010300z-go-wordwrap-width",
+      "journal_dir": "/home/jianlee/projects/abang-ai/kopicode/.kopicode/bench/runs/run-20260819t010300z/go-wordwrap-width/.kopicode/sessions/run-20260819t010300z-go-wordwrap-width",
+      "stop": "completed",
+      "turns": 9,
+      "tokens": {
+        "prompt": 49150,
+        "completion": 1432,
+        "total": 50582
+      },
+      "session_err": "",
+      "panicked": false,
+      "oracle": {
+        "argv": [
+          "go",
+          "test",
+          "./..."
+        ],
+        "passed": true,
+        "exit_code": 0,
+        "signal": "",
+        "timed_out": false,
+        "duration_ms": 117,
+        "output": "ok  \texample.com/wrap\t(cached)\n",
+        "err": ""
+      },
+      "bucket": "",
+      "worktree": "/home/jianlee/projects/abang-ai/kopicode/.kopicode/bench/worktrees/go-wordwrap-width",
+      "worktree_kept": false,
+      "duration_ms": 41320
+    },
+    {
+      "task_id": "py-csv-blank-rows",
+      "passed": true,
+      "session_id": "run-20260819t010300z-py-csv-blank-rows",
+      "journal_dir": "/home/jianlee/projects/abang-ai/kopicode/.kopicode/bench/runs/run-20260819t010300z/py-csv-blank-rows/.kopicode/sessions/run-20260819t010300z-py-csv-blank-rows",
+      "stop": "completed",
+      "turns": 10,
+      "tokens": {
+        "prompt": 47403,
+        "completion": 1331,
+        "total": 48734
+      },
+      "session_err": "",
+      "panicked": false,
+      "oracle": {
+        "argv": [
+          "python3",
+          "-m",
+          "unittest",
+          "discover",
+          "-q"
+        ],
+        "passed": true,
+        "exit_code": 0,
+        "signal": "",
+        "timed_out": false,
+        "duration_ms": 50,
+        "output": "----------------------------------------------------------------------\nRan 5 tests in 0.000s\n\nOK\n",
+        "err": ""
+      },
+      "bucket": "",
+      "worktree": "/home/jianlee/projects/abang-ai/kopicode/.kopicode/bench/worktrees/py-csv-blank-rows",
+      "worktree_kept": false,
+      "duration_ms": 32762
+    },
+    {
+      "task_id": "go-flag-equals-form",
+      "passed": true,
+      "session_id": "run-20260819t010300z-go-flag-equals-form",
+      "journal_dir": "/home/jianlee/projects/abang-ai/kopicode/.kopicode/bench/runs/run-20260819t010300z/go-flag-equals-form/.kopicode/sessions/run-20260819t010300z-go-flag-equals-form",
+      "stop": "completed",
+      "turns": 11,
+      "tokens": {
+        "prompt": 68211,
+        "completion": 1664,
+        "total": 69875
+      },
+      "session_err": "",
+      "panicked": false,
+      "oracle": {
+        "argv": [
+          "go",
+          "test",
+          "./..."
+        ],
+        "passed": true,
+        "exit_code": 0,
+        "signal": "",
+        "timed_out": false,
+        "duration_ms": 110,
+        "output": "ok  \texample.com/flagset\t(cached)\n",
+        "err": ""
+      },
+      "bucket": "",
+      "worktree": "/home/jianlee/projects/abang-ai/kopicode/.kopicode/bench/worktrees/go-flag-equals-form",
+      "worktree_kept": false,
+      "duration_ms": 42003
+    },
+    {
+      "task_id": "go-config-retries",
+      "passed": true,
+      "session_id": "run-20260819t010300z-go-config-retries",
+      "journal_dir": "/home/jianlee/projects/abang-ai/kopicode/.kopicode/bench/runs/run-20260819t010300z/go-config-retries/.kopicode/sessions/run-20260819t010300z-go-config-retries",
+      "stop": "completed",
+      "turns": 19,
+      "tokens": {
+        "prompt": 122548,
+        "completion": 1676,
+        "total": 124224
+      },
+      "session_err": "",
+      "panicked": false,
+      "oracle": {
+        "argv": [
+          "go",
+          "test",
+          "./..."
+        ],
+        "passed": true,
+        "exit_code": 0,
+        "signal": "",
+        "timed_out": false,
+        "duration_ms": 133,
+        "output": "ok  \texample.com/config\t(cached)\n",
+        "err": ""
+      },
+      "bucket": "",
+      "worktree": "/home/jianlee/projects/abang-ai/kopicode/.kopicode/bench/worktrees/go-config-retries",
+      "worktree_kept": false,
+      "duration_ms": 47698
+    },
+    {
+      "task_id": "py-calc-modulo",
+      "passed": true,
+      "session_id": "run-20260819t010300z-py-calc-modulo",
+      "journal_dir": "/home/jianlee/projects/abang-ai/kopicode/.kopicode/bench/runs/run-20260819t010300z/py-calc-modulo/.kopicode/sessions/run-20260819t010300z-py-calc-modulo",
+      "stop": "max_turns",
+      "turns": 20,
+      "tokens": {
+        "prompt": 150198,
+        "completion": 1976,
+        "total": 152174
+      },
+      "session_err": "",
+      "panicked": false,
+      "oracle": {
+        "argv": [
+          "python3",
+          "-m",
+          "unittest",
+          "discover",
+          "-q"
+        ],
+        "passed": true,
+        "exit_code": 0,
+        "signal": "",
+        "timed_out": false,
+        "duration_ms": 46,
+        "output": "----------------------------------------------------------------------\nRan 7 tests in 0.000s\n\nOK\n",
+        "err": ""
+      },
+      "bucket": "",
+      "worktree": "/home/jianlee/projects/abang-ai/kopicode/.kopicode/bench/worktrees/py-calc-modulo",
+      "worktree_kept": false,
+      "duration_ms": 51025
+    }
+  ],
+  "reclamation": {
+    "PrunedAdmin": 0,
+    "PrunedStale": 0,
+    "Created": 10,
+    "Removed": 10,
+    "Kept": 0,
+    "Failed": null,
+    "CreateFailed": null
+  },
+  "jobs": 4,
+  "started": "2026-08-19T09:03:00.319920933+08:00",
+  "duration_ms": 118736,
+  "out_dir": "/home/jianlee/projects/abang-ai/kopicode/.kopicode/bench/runs/run-20260819t010300z",
+  "provider": "live"
+}
