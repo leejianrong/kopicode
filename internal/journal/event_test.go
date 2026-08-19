@@ -176,6 +176,11 @@ func fixtures() map[journal.Type]journal.Payload {
 			ExitCode: 0,
 			Detail:   text("task complete"),
 		},
+		journal.TypeSessionForked: journal.SessionForked{
+			SourceSessionID: "20260817T101500Z-ab12cd34",
+			SourceTurn:      3,
+			Copied:          17,
+		},
 	}
 }
 

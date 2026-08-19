@@ -400,6 +400,29 @@ func ReadSession(ctx context.Context, dir string) iter.Seq2[Event, error] {
 	return readEvents(ctx, path, nil)
 }
 
+// ReadSessionBlobs reads an existing session's events with blob-spilled
+// fields rehydrated, given root — the directory the session ran in, which is
+// what BlobDir needs to find .kopicode/blobs.
+//
+// It is [ReadSession]'s blob-aware sibling and exists for exactly the reason
+// [ReadSession]'s own doc comment gives for not rehydrating: that function is
+// handed a session directory alone and has no way to derive BlobDir(root)
+// from it, because a linked worktree's .kopicode/blobs sits under the work
+// tree root, not under .kopicode/sessions/<id>. This one is handed root
+// instead, so it can build the same *blobStore [FileJournal.Read] uses and
+// fetch a spilled field's real content back rather than leaving the caller
+// holding a reference and a size.
+//
+// Like ReadSession it creates nothing on disk — no MkdirAll, no O_CREATE —
+// and it never opens the file for writing, which matters for its one caller
+// today: engine.Fork reads a *different* session's record than the one it is
+// about to open for append, and a fork must never touch — let alone hold an
+// append handle open on — the session it is branching from.
+func ReadSessionBlobs(ctx context.Context, root, id string) iter.Seq2[Event, error] {
+	path := filepath.Join(SessionDir(root, id), EventsFile)
+	return readEvents(ctx, path, &blobStore{dir: BlobDir(root)})
+}
+
 // readEvents is the one reader. Open uses it too, so the truncated-line guard
 // cannot hold on the read path while quietly not holding on the append path.
 //

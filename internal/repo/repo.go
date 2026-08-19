@@ -40,10 +40,13 @@
 // Snapshots are recorded by [Snapshotter.Snapshot] and materialized back to a
 // directory by [Repo.Restore] (KAN-938, docs/SLICE-1.md affordance G1).
 // Restore is the primitive only — read a tree back out safely, nothing more.
-// Resuming a session's chain from a prior snapshot and forking a new session
-// from one both decide *when* to restore and what happens to the chain
-// afterward, which is a different question from *how*, and both are still
-// slice 2.
+// Resuming a session's own chain ([NewResumingSnapshotter], KAN-939) and
+// forking a new one from a different session's snapshot
+// ([NewForkingSnapshotter], KAN-940) both decide *when* to restore and what
+// happens to the chain afterward, which is a different question from *how*
+// this package answers — engine.Options.Resume and engine.Fork are where
+// those decisions actually live, restoring or not for reasons this package
+// has no opinion on.
 package repo
 
 import (
@@ -98,8 +101,13 @@ var (
 	// path component and a git ref component.
 	ErrInvalidSessionID = errors.New("invalid session id")
 	// ErrSessionExists reports shadow refs already present for this session
-	// id. Continuing would fork the snapshot chain in place; resuming a
-	// session's chain is slice 2.
+	// id, from [NewSnapshotter], [NewResumingSnapshotter]'s own refusal path
+	// (a session that was not asked to be resumed) or [NewForkingSnapshotter]
+	// (a fork's new id must never already have a chain of its own).
+	// Continuing would fork the snapshot chain in place under a name that is
+	// not this package's decision to make; [NewResumingSnapshotter] is the
+	// one intentional exception, reached only when a caller says explicitly
+	// it is resuming.
 	ErrSessionExists = errors.New("session already has snapshots")
 	// ErrTurnNotIncreasing reports a snapshot for a turn at or before the one
 	// already snapshotted. The chain is ordered, and a repeated turn would

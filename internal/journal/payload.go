@@ -594,3 +594,63 @@ type SessionEnded struct {
 }
 
 func (SessionEnded) Type() Type { return TypeSessionEnded }
+
+// SessionForked marks a session as one that branched from another, rather
+// than starting from nothing (KAN-940).
+//
+// It is written once, immediately after this session's own SessionStarted and
+// immediately before the block of duplicated events it describes, so a
+// reader meets the fact "what follows is a copy" before meeting the copy
+// itself rather than discovering it after the fact.
+//
+// # Why the copy is duplicated into this journal at all
+//
+// The alternative — record SourceSessionID and SourceTurn here and nothing
+// else, leaving a reader to open the source session's own directory to see
+// what actually happened up to the fork point — was considered and rejected.
+// CLAUDE.md's boundary is "one session record, and it is the journal; do not
+// build a parallel transcript", and a forked session whose own file cannot
+// answer "what did this session's model see before it said X" without
+// chasing a second, separate directory (one that may since have been
+// archived, moved, or belong to a session the reader has no access to) is
+// exactly that failure wearing a foreign-key's clothes instead of a
+// hand-rolled list's. A journal is meant to be the complete account of one
+// session; a reference-only fork would make that true only conditionally, on
+// the source still being where this event says it was. Duplication costs disk
+// — bounded by how much history existed at the fork point, the same cost
+// engine.Options.Resume already pays by replaying a whole prior session into
+// a new process's memory — and buys a record that is honestly self-contained.
+//
+// # What "duplicated" does and does not mean
+//
+// The copied events keep every field exactly as the source wrote it,
+// including CallID values, ref names under the *source's* ref namespace
+// (TurnSnapshot.Ref) and Turn numbers in the envelope — they are historical
+// facts about what happened, and rewriting any of them to look like they
+// happened in this session would be the forgery, not the honest account.
+// What is authentically new to this session is everything appended *after*
+// this marker: its own SessionForked is the only event that knows it is a
+// fork, and everything before it in seq order (this session's own
+// SessionStarted) and everything after (the duplicated block, then this
+// session's own new turns) reads exactly like an ordinary session's record to
+// a reader that does not care how it started.
+type SessionForked struct {
+	// SourceSessionID is the session this one branched from.
+	SourceSessionID string `json:"source_session_id"`
+	// SourceTurn is the last turn (inclusive) of SourceSessionID's own record
+	// that was copied. 0 means the fork happened before SourceSessionID ran
+	// any turn at all, in which case Copied is 0 too.
+	SourceTurn int `json:"source_turn"`
+	// Copied is how many events immediately follow this one, verbatim from
+	// SourceSessionID's own record. It exists because Turn alone cannot
+	// answer "where does the copied block end": an event that happens to
+	// share SourceTurn's own turn number could belong to either side of the
+	// cut once this session's own turns reach that same number again (its own
+	// numbering does not continue SourceSessionID's — internal/repo's
+	// NewForkingSnapshotter argues why in its own doc comment) — so a reader
+	// counts Copied events forward from here rather than comparing Turn
+	// fields.
+	Copied int `json:"copied"`
+}
+
+func (SessionForked) Type() Type { return TypeSessionForked }

@@ -46,6 +46,7 @@ const (
 	EventVerification
 	EventTurnCancelled
 	EventSessionEnded
+	EventSessionForked
 
 	// EventUnknown is an event this build has no typed payload for, preserved
 	// by the journal's compatibility promise and passed through here rather
@@ -89,6 +90,7 @@ var eventKindText = map[EventKind]string{
 	EventVerification:        "verification",
 	EventTurnCancelled:       "turn_cancelled",
 	EventSessionEnded:        "session_ended",
+	EventSessionForked:       "session_forked",
 	EventUnknown:             "unknown",
 	EventDelta:               "delta",
 }
@@ -368,6 +370,12 @@ func eventOf(ev journal.Event) Event {
 		base.Reason = p.Reason
 		base.ExitCode, base.HasExitCode = p.ExitCode, true
 		base.Text, base.Size = text(p.Detail)
+
+	case journal.SessionForked:
+		base.Kind = EventSessionForked
+		base.Detail = p.SourceSessionID
+		base.ExitCode, base.HasExitCode = p.SourceTurn, true
+		base.Size = int64(p.Copied)
 
 	case journal.UnknownPayload:
 		// The journal's compatibility promise, carried one layer further out. A
