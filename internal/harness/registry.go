@@ -58,12 +58,23 @@ type Entry struct {
 // provider pin, and inventing one is exactly the fabrication
 // docs/provider-pin.md warns against. Both now have a pin chosen from observed
 // OpenRouter endpoint data on 2026-08-18, argued in docs/provider-pin.md
-// alongside the first. Both map to DefaultConfigName: a second harness
-// configuration is explicitly slice 2 (docs/SLICE-1.md, "Explicitly
-// deferred"), and nothing observed while choosing either pin gave a concrete
-// reason the existing configuration is wrong for these models — so a new row
-// is a row, not a second configuration. Adding a model is a row and a pull
-// request.
+// alongside the first.
+//
+// z-ai/glm-5.2 still maps to DefaultConfigName: nothing observed while
+// choosing its pin gave a concrete reason the existing configuration is
+// wrong for it, so its row stays a row rather than growing a second
+// configuration nobody argued for.
+//
+// minimax/minimax-m2 no longer does (KAN-942). Its pinned endpoint's own
+// `supported_parameters` omit `seed` — recorded honestly in
+// docs/provider-pin.md's §minimax/minimax-m2 rather than worked around — and
+// the default configuration's Sampling sends a fixed seed on the concrete
+// claim that the pinned endpoint honours one. That claim is false for this
+// model, so harness.MinimaxM2ConfigName exists to carry the one field that
+// needed to change (its own doc comment in harness.go has the full
+// argument), and this row is what makes minimax/minimax-m2 the model that
+// gets it. Adding a model is a row and a pull request; giving one its own
+// configuration is a row and a concrete reason.
 var registry = []Entry{
 	{
 		// Spelled out rather than written as DefaultModelID, so that "this
@@ -92,8 +103,15 @@ var registry = []Entry{
 		// that honestly rather than picking the seed-supporting alternative
 		// silently. Full argument and the endpoint table: docs/provider-pin.md
 		// §minimax/minimax-m2.
+		//
+		// HarnessConfig is MinimaxM2ConfigName rather than DefaultConfigName
+		// (KAN-942): the missing seed support noted above is exactly the
+		// concrete reason ADR-0007 decision 5 asks a row to have before it
+		// claims a configuration other than the one every other row
+		// defaults to. MinimaxM2ConfigName's own doc comment in harness.go
+		// has the full argument.
 		ModelID:       "minimax/minimax-m2",
-		HarnessConfig: DefaultConfigName,
+		HarnessConfig: MinimaxM2ConfigName,
 		Pin: provider.Pin{
 			Order:          []string{"minimax/fp8"},
 			AllowFallbacks: false,

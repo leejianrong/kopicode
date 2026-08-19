@@ -12,12 +12,36 @@ import (
 // rebuilt so these tests hash the value the binary actually ships.
 func defaultConfig(t *testing.T) harness.Config {
 	t.Helper()
-	cfg, ok := harness.ConfigByName(harness.DefaultConfigName)
+	return configByName(t, harness.DefaultConfigName)
+}
+
+// configByName fetches a compiled-in configuration by name, fetched rather
+// than rebuilt for the same reason [defaultConfig] is: these tests hash the
+// value the binary actually ships, not a copy that could quietly diverge
+// from it.
+func configByName(t *testing.T, name string) harness.Config {
+	t.Helper()
+	cfg, ok := harness.ConfigByName(name)
 	if !ok {
-		t.Fatalf("harness.ConfigByName(%q) found nothing; the binary ships no default configuration",
-			harness.DefaultConfigName)
+		t.Fatalf("harness.ConfigByName(%q) found nothing; the binary does not ship this configuration", name)
 	}
 	return cfg
+}
+
+// everyConfig fetches every compiled-in configuration by name, so a test that
+// holds one to a discipline can hold all of them to it without a config
+// added later going unchecked.
+func everyConfig(t *testing.T) []harness.Config {
+	t.Helper()
+	names := harness.ConfigNames()
+	if len(names) == 0 {
+		t.Fatal("positive control failed: harness.ConfigNames() lists no configuration at all")
+	}
+	out := make([]harness.Config, 0, len(names))
+	for _, name := range names {
+		out = append(out, configByName(t, name))
+	}
+	return out
 }
 
 // TestDefaultConfigHashIsStable pins the shipped hash to a literal.
@@ -60,6 +84,54 @@ func TestDefaultConfigHashIsStable(t *testing.T) {
 	}
 }
 
+// TestMinimaxM2ConfigHashIsStable is [TestDefaultConfigHashIsStable]'s
+// counterpart for [harness.MinimaxM2ConfigName] (KAN-942), pinned the same
+// way and for the same reason: a hash that moved between two runs of this
+// suite would mean the preimage is not actually deterministic, and nothing
+// in the process that computed the literal below differs from the process
+// that will compute it in CI or in a bench run.
+//
+// The literal is a fresh computation, not derived from
+// TestDefaultConfigHashIsStable's — this configuration carries a different
+// Sampling.SeedPolicy (see MinimaxM2ConfigName's own doc comment in
+// harness.go), so the two hashes are expected to disagree, and
+// TestNoTwoConfigsShareAHash below is what checks that expectation rather
+// than this test silently passing if they happened to collide.
+func TestMinimaxM2ConfigHashIsStable(t *testing.T) {
+	const want = "11b7fe204d49aee63c9e28fa36e9a65d28f6b8c0ba2542653d9a73e84cf14880"
+
+	got := configByName(t, harness.MinimaxM2ConfigName).Hash()
+	if got != want {
+		t.Errorf("minimax-m2-v1 harness config hash = %s, want %s\n"+
+			"if a configuration value changed this is expected and the literal moves with it;\n"+
+			"if nothing changed, the preimage encoding did, and harness.PreimageVersion must be bumped",
+			got, want)
+	}
+}
+
+// TestNoTwoConfigsShareAHash is the sibling check TestMinimaxM2ConfigHashIsStable
+// names: two distinct registered configurations must hash differently, or
+// ADR-0005's paired method would pool two arms that a report distinguishes
+// by name.
+//
+// It is written against harness.ConfigNames() rather than the two configs
+// this card happens to add, so a third configuration landing with the same
+// values as an existing one (Config.Name itself is in the preimage — see
+// hash.go — so this should be structurally impossible, but the whole point
+// of a hash is not trusting a structural argument over a computed one) fails
+// here rather than silently under-counting an experiment's arms.
+func TestNoTwoConfigsShareAHash(t *testing.T) {
+	seen := make(map[string]string)
+	for _, cfg := range everyConfig(t) {
+		h := cfg.Hash()
+		if other, ok := seen[h]; ok {
+			t.Errorf("configurations %q and %q both hash to %s", other, cfg.Name, h)
+			continue
+		}
+		seen[h] = cfg.Name
+	}
+}
+
 // TestHashCoversEveryConfigField is the guard that makes the hash falsifiable.
 //
 // A hash is worth exactly what its preimage covers. A field added to
@@ -70,69 +142,82 @@ func TestDefaultConfigHashIsStable(t *testing.T) {
 // So the field list is derived from the struct by reflection rather than written
 // out here: a hand-written table would have to be updated by the same person who
 // forgot the preimage, at the same moment, which is not a check.
+//
+// It runs over every registered configuration (harness.ConfigNames()) rather
+// than the default alone, so a second configuration — [MinimaxM2ConfigName]
+// as of KAN-942 — is held to the same "every field reaches the hash"
+// discipline from the moment it exists, rather than by someone remembering
+// to add a second test the day it is registered.
 func TestHashCoversEveryConfigField(t *testing.T) {
-	base := defaultConfig(t)
+	for _, name := range harness.ConfigNames() {
+		t.Run(name, func(t *testing.T) {
+			base := configByName(t, name)
 
-	// Positive control 1: the same configuration must hash the same, or every
-	// "the hash changed" assertion below passes for the wrong reason.
-	if base.Hash() != defaultConfig(t).Hash() {
-		t.Fatalf("two copies of the same configuration hash differently (%s vs %s) — "+
-			"the preimage is not deterministic and nothing below means anything",
-			base.Hash(), defaultConfig(t).Hash())
-	}
-
-	paths := leafPaths(t, reflect.TypeOf(base), "")
-	if len(paths) == 0 {
-		t.Fatal("positive control failed: the field walk found no fields in harness.Config")
-	}
-
-	// Positive control 2: the walk must have recursed. Config holds Sampling
-	// and Verification as nested structs, and a walk that stopped at the top
-	// level would silently assert nothing about their fields.
-	nested := false
-	for _, p := range paths {
-		if strings.Contains(p, ".") {
-			nested = true
-			break
-		}
-	}
-	if !nested {
-		t.Fatal("positive control failed: no nested field was reached, so the walk did not recurse " +
-			"into Sampling or Verification and their fields are untested")
-	}
-
-	// Every top-level field of Config must be represented, so a field the walk
-	// cannot reach at all is a failure rather than an absence.
-	typ := reflect.TypeOf(base)
-	for i := range typ.NumField() {
-		name := typ.Field(i).Name
-		found := false
-		for _, p := range paths {
-			if p == name || strings.HasPrefix(p, name+".") {
-				found = true
-				break
+			// Positive control 1: the same configuration must hash the same,
+			// or every "the hash changed" assertion below passes for the
+			// wrong reason.
+			if base.Hash() != configByName(t, name).Hash() {
+				t.Fatalf("two copies of the same configuration hash differently (%s vs %s) — "+
+					"the preimage is not deterministic and nothing below means anything",
+					base.Hash(), configByName(t, name).Hash())
 			}
-		}
-		if !found {
-			t.Errorf("the field walk never reached harness.Config.%s", name)
-		}
-	}
 
-	for _, path := range paths {
-		t.Run(path, func(t *testing.T) {
-			mutated := base
-			target := fieldByPath(t, reflect.ValueOf(&mutated).Elem(), path)
-			mutate(t, path, target)
-
-			if reflect.DeepEqual(base, mutated) {
-				t.Fatalf("mutating %s did not change the configuration; this test is asserting nothing", path)
+			paths := leafPaths(t, reflect.TypeOf(base), "")
+			if len(paths) == 0 {
+				t.Fatal("positive control failed: the field walk found no fields in harness.Config")
 			}
-			if base.Hash() == mutated.Hash() {
-				t.Errorf("changing %s left the harness config hash at %s\n"+
-					"every field of harness.Config is in the hash preimage "+
-					"(docs/adr/0007-model-selection-and-harness-config-shape.md decision 6):\n"+
-					"a field outside it can change an arm's behaviour while two runs still pool as one",
-					path, base.Hash())
+
+			// Positive control 2: the walk must have recursed. Config holds
+			// Sampling and Verification as nested structs, and a walk that
+			// stopped at the top level would silently assert nothing about
+			// their fields.
+			nested := false
+			for _, p := range paths {
+				if strings.Contains(p, ".") {
+					nested = true
+					break
+				}
+			}
+			if !nested {
+				t.Fatal("positive control failed: no nested field was reached, so the walk did not recurse " +
+					"into Sampling or Verification and their fields are untested")
+			}
+
+			// Every top-level field of Config must be represented, so a field
+			// the walk cannot reach at all is a failure rather than an
+			// absence.
+			typ := reflect.TypeOf(base)
+			for i := range typ.NumField() {
+				fieldName := typ.Field(i).Name
+				found := false
+				for _, p := range paths {
+					if p == fieldName || strings.HasPrefix(p, fieldName+".") {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("the field walk never reached harness.Config.%s", fieldName)
+				}
+			}
+
+			for _, path := range paths {
+				t.Run(path, func(t *testing.T) {
+					mutated := base
+					target := fieldByPath(t, reflect.ValueOf(&mutated).Elem(), path)
+					mutate(t, path, target)
+
+					if reflect.DeepEqual(base, mutated) {
+						t.Fatalf("mutating %s did not change the configuration; this test is asserting nothing", path)
+					}
+					if base.Hash() == mutated.Hash() {
+						t.Errorf("changing %s left the harness config hash at %s\n"+
+							"every field of harness.Config is in the hash preimage "+
+							"(docs/adr/0007-model-selection-and-harness-config-shape.md decision 6):\n"+
+							"a field outside it can change an arm's behaviour while two runs still pool as one",
+							path, base.Hash())
+					}
+				})
 			}
 		})
 	}
