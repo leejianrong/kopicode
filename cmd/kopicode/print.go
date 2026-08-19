@@ -117,11 +117,46 @@ func runPrint(args []string, stdout, stderr io.Writer) int {
 	overrides := engine.BindSelectionFlags(fs)
 	asJSON := fs.Bool("print", false, "emit the session record as JSON on stdout")
 	debug := fs.Bool("debug", false, "engine diagnostics on stderr")
+	// --resume makes sense here for the reason it does on the REPL: a script
+	// picking up a `run --print` invocation that was interrupted — killed,
+	// timed out, the process's own machine rebooted — wants to continue
+	// that session's record rather than start a disconnected new one, and
+	// KAN-941's `kopicode sessions --json` is what finds the id to pass.
+	// It costs this surface nothing new to support: Options.Resume replays
+	// history into the turn loop before the first new request is built, the
+	// same plumbing session() already exercises for the REPL, and it does
+	// not touch the working tree (see Options.Resume's own doc comment) —
+	// exactly the property a headless surface with nobody watching needs.
+	resume := fs.String("resume", "", "resume an existing session by id, instead of starting a new one")
+	// --fork is refused outright rather than wired up. Forking wipes every
+	// file directly under the working tree except .git and .kopicode
+	// before restoring the source session's tree — see
+	// internal/engine/fork.go's "Why the tree is restored automatically" —
+	// and the REPL surface's own --fork handling (main.go's confirmFork)
+	// exists because that needs an explicit, typed, human confirmation
+	// before it happens. A headless invocation has no human to ask: KAN-885
+	// already settled the general version of this question for a
+	// model-authored tool call (denyHeadless, below) by refusing rather
+	// than approving with nobody watching, and a human-authored --fork flag
+	// is the same shape of question with a much bigger blast radius, so it
+	// gets the same answer. This is a flag this binary parses and refuses,
+	// not a flag it silently ignores: a caller who typed --fork here is
+	// told why, in time to use the REPL instead, rather than reading in
+	// silence that nothing happened.
+	fork := fs.String("fork", "", "not supported here; forking wipes the working tree and needs a "+
+		"human's typed confirmation, which this headless surface has nobody to ask for — use `kopicode "+
+		"repl --fork` instead")
 	if err := fs.Parse(args); err != nil {
 		// flag has already printed the error and the usage.
 		return exitUsage
 	}
 	setupLogging(*debug, stderr)
+
+	if *fork != "" {
+		say(stderr, "kopicode: --fork is not supported on `run --print`: it would wipe the working "+
+			"tree with no human present to confirm that. Use `kopicode repl --fork %s` instead.\n", *fork)
+		return exitUsage
+	}
 
 	// --print is required rather than assumed. It is the only output this
 	// command has today, and defaulting to it would spend the flag's name on
@@ -158,12 +193,18 @@ func runPrint(args []string, stdout, stderr io.Writer) int {
 		return exitHarness
 	}
 
+	opts := engine.Options{Dir: dir, Selection: selection}
+	if *resume != "" {
+		opts.SessionID = *resume
+		opts.Resume = true
+	}
+
 	// context.Background() is built here rather than inside headless, so that
 	// the boundary a test can substitute a cancellable context at is this
 	// call and not a line buried inside the function it calls (KAN-904):
 	// headless takes a context instead of manufacturing its own, the same
 	// discipline main.go's session already holds for the REPL path.
-	return headless(context.Background(), prompt, stdout, stderr, engine.Options{Dir: dir, Selection: selection})
+	return headless(context.Background(), prompt, stdout, stderr, opts)
 }
 
 // headless runs one exchange and writes the record to stdout as JSON.
