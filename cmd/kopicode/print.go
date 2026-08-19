@@ -136,8 +136,10 @@ func runPrint(args []string, stdout, stderr io.Writer) int {
 	// exists because that needs an explicit, typed, human confirmation
 	// before it happens. A headless invocation has no human to ask: KAN-885
 	// already settled the general version of this question for a
-	// model-authored tool call (denyHeadless, below) by refusing rather
-	// than approving with nobody watching, and a human-authored --fork flag
+	// model-authored tool call — leaving ConsentUnattended's answerer nil,
+	// below, so engine.Open's own permission.NewUnattendedDeny refuses — by
+	// refusing rather than approving with nobody watching, and a
+	// human-authored --fork flag
 	// is the same shape of question with a much bigger blast radius, so it
 	// gets the same answer. This is a flag this binary parses and refuses,
 	// not a flag it silently ignores: a caller who typed --fork here is
@@ -227,11 +229,14 @@ func runPrint(args []string, stdout, stderr io.Writer) int {
 func headless(ctx context.Context, prompt string, stdout, stderr io.Writer, opts engine.Options) int {
 	out := newEmitter(stdout)
 	opts.Events = out.observe
-	opts.Consent = denyHeadless
-	// Nobody is at a terminal here (KAN-885): denyHeadless is the harness
-	// answering its own question, not a person's, so every PermissionDecided
-	// this session journals must be attributed to the policy and not to a
-	// user who was never asked.
+	// Consent is left nil: nobody is at a terminal here (KAN-885), and
+	// engine.Open's mustAskPolicy recognises "no Consenter, ConsentUnattended"
+	// as exactly this surface's case, answering with
+	// permission.NewUnattendedDeny — a Reason specific enough that the model
+	// is told not to retry (KAN-953) — rather than the generic "no Consenter
+	// was supplied" refusal that path exists for elsewhere. Every resulting
+	// PermissionDecided is still attributed to the policy and not to a user
+	// who was never asked.
 	opts.ConsentMode = engine.ConsentUnattended
 	opts.Ask = denyHeadlessAsk
 	// Same reasoning as ConsentMode above, one layer over: nobody is present
@@ -285,22 +290,6 @@ func headless(ctx context.Context, prompt string, stdout, stderr io.Writer, opts
 		return exitHarness
 	}
 	return stop.ExitCode()
-}
-
-// denyHeadless answers every consent request with a refusal.
-//
-// There is nobody to ask. A headless run has no terminal and no human, and the
-// alternative — approving model-authored shell because no one was there to say
-// no — is the one behaviour the permission package exists to make unreachable.
-// Sandboxing is slice 3 (docs/SLICE-1.md §9); until then the honest headless
-// answer is no, and it is on the record as a PermissionDecided rather than
-// swallowed as an error, so a reader can see what the model asked for. Pairing
-// this with Options.ConsentMode set to engine.ConsentUnattended (see headless,
-// above) is what stamps that PermissionDecided permission.SourcePolicy instead
-// of permission.SourceUser — KAN-885: this function refusing is not a person
-// refusing.
-func denyHeadless(context.Context, engine.ConsentRequest) (engine.ConsentAnswer, error) {
-	return engine.ConsentDeny, nil
 }
 
 // denyHeadlessAsk answers every ask request by saying nobody is present.
