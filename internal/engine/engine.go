@@ -143,6 +143,20 @@ type Config struct {
 	// replayed journal rests on there being no such thing in any output path.
 	// A slow callback slows the turn, which is the honest trade.
 	Stream func(turn int, d provider.Delta)
+
+	// ResumeHistory replays a resumed session's prior events into the
+	// assembler before the first new turn, so that turn's request carries the
+	// whole prior conversation rather than starting from nothing (KAN-939).
+	//
+	// nil — the zero value, and what every session gets that is not a resume —
+	// leaves the assembler with no history, which is correct for a session
+	// whose journal is itself new. It is not this package's job to decide
+	// whether a session is a resume or to fetch its prior events: [Open]
+	// reads them (via the journal it just opened, so blob-spilled fields
+	// rehydrate) before this Config is built, and hands them here already in
+	// seq order. See resume.go's package doc comment for exactly what
+	// replays and the one case it cannot recover.
+	ResumeHistory []journal.Event
 }
 
 // Errors a caller can branch on.
@@ -299,9 +313,16 @@ func New(cfg Config) (*Engine, error) {
 		}
 	}
 
+	asm := NewAssembler(cfg.Selection.Config.SystemPrompt)
+	if len(cfg.ResumeHistory) > 0 {
+		if err := replayHistory(asm, cfg.ResumeHistory); err != nil {
+			return nil, fmt.Errorf("%w: replaying resumed history: %w", ErrConfig, err)
+		}
+	}
+
 	return &Engine{
 		cfg:        cfg,
-		asm:        NewAssembler(cfg.Selection.Config.SystemPrompt),
+		asm:        asm,
 		offered:    offered,
 		parseOrder: parseOrder,
 	}, nil

@@ -229,9 +229,18 @@ What is real now (2026-08-17):
   directory — and Restore never deletes: a path the tree contains is overwritten, a
   path the tree does not mention is left alone, on the theory that turning this into
   an exact checkout is a materially bigger promise than "read a tree back out safely"
-  and belongs to the caller. This is the primitive only; resuming a session's chain
-  and forking one from a snapshot both still decide *when* and are still slice 2
-  (KAN-939/KAN-940).
+  and belongs to the caller. `NewResumingSnapshotter` (KAN-939) is the other
+  half a resumed session needs from this package: it attaches to a session id's
+  existing shadow-ref chain instead of `NewSnapshotter`'s refusal, seeding its
+  parent and last-turn state from the highest turn number the id already has a
+  ref for — read off the refs themselves, not the journal's account of them —
+  so the next snapshot chains on rather than starting a second, colliding
+  chain. `NewSnapshotter`'s refusal is otherwise unchanged: nothing routes to
+  the attach path except a caller that says explicitly it is resuming, so a
+  fresh session's id colliding with an old one by accident still refuses.
+  Forking a new session from a snapshot is the one primitive still missing and
+  still slice 2 (KAN-940); `Repo.Restore` is what it will read the tree back
+  out with.
 - **`internal/lock`** — one session per **working tree** (docs/SLICE-1.md §8), `flock`
   on unix and a documented no-op on Windows. The word "repo" in that section is the
   trap: a linked worktree shares `.git/config`, the object store and the ref store with
@@ -409,6 +418,43 @@ What is real now (2026-08-17):
   fragment that is *happening* cannot be mistaken for a thing that *happened*.
   `ConsentRequest` and `ConsentAnswer` cross the same boundary, so a surface can be
   asked without importing `internal/permission`.
+- **`Options.Resume` and `--resume <id>`: reopen a session and continue its turn
+  loop** (KAN-939). One caller-supplied bit does three things rather than three
+  independent flags a caller could set out of agreement with each other: the
+  journal opens in append mode (already unconditional, since any existing
+  session id resumes there — `Resume` only makes the intent explicit); the
+  session's prior events are read back through the *opened* journal, not
+  `journal.ReadSession` — the distinction matters because only the former
+  rehydrates blob-spilled fields, and a resumed session missing a large tool
+  result's actual content would be the never-truncate rule broken across a
+  process boundary — and replayed into a fresh `Assembler` (`resume.go`'s
+  `replayHistory`) before `New` returns, so the first new turn's request
+  carries the whole prior conversation; and, inside a repository, the turn
+  snapshotter attaches via `repo.NewResumingSnapshotter` rather than refusing.
+  The replay maps each journal event kind onto the exact `Assembler` call
+  `Engine.Run` itself would have made — a dispatched call's result echoes its
+  own id when the call was native and lands as a user turn when it was a
+  text-route call with no id to echo, matching `Assembler.AppendToolResult`'s
+  own rule; a repair, a failure or a blocking verification's feedback follows
+  `Engine.observe`'s choice between the two exactly. **One case is a
+  documented, un-closed gap**: a reply that failed repair while carrying
+  well-formed *native* tool calls (an unknown tool name, a schema mismatch)
+  never gets a `ToolCallParsed` written for it, so its real call ids are not
+  recoverable from the journal as it is shaped today — nothing in this
+  codebase's corpus has been observed to hit this, and closing it needs a
+  schema change, not a cleverer replay. **Resume does not restore the working
+  tree**, and this is argued rather than deferred: the ordinary reason to
+  resume is an interrupted process whose tree is already where it was left,
+  and the case that is not ordinary — the user touched the tree by hand in
+  between — is exactly the case a silent force-restore would destroy work in
+  with no consent asked, which is the direction ADR-0006 spends real effort
+  refusing to be wrong in. `Repo.Restore` (KAN-938) is available to a caller
+  that wants the tree rewound first, as its own explicit step before `Open`.
+  A collision on an id that was never asked to be resumed still refuses
+  exactly as before `Resume` existed — the attach path is reachable only
+  through the flag, never through an id merely matching one on disk. The CLI
+  surface is deliberately thin: `--resume <session-id>` and nothing to list or
+  find one, which is KAN-941's job to build on top of this.
 - **`cmd/kopicode/lineedit`** — the line editor behind the prompt (ADR-0004): raw
   mode via `golang.org/x/term`, history, arrows, `Ctrl-A/E/K/U`. It lives under
   `cmd/` and not `internal/` because it is presentation, and the ADR-0003 allowlist
@@ -528,10 +574,11 @@ itself logs nothing yet. Absent with **no** card: the `.kopicode/lock` advisory 
 SLICE-1 §8 describes.
 Nothing stops two sessions in one repository today; `internal/journal/file.go` carries
 the forward reference to it, so the gap is known rather than overlooked. `Repo.Restore`
-(KAN-938) landed the primitive — read a tree back out to a directory — but resuming a
-session's chain from it and forking a new session from a snapshot both still decide
-*when* to restore and what happens to the chain afterward, and both are slice 2 by
-design and are not gaps.
+(KAN-938) landed the read primitive, and `Options.Resume`/`--resume` (KAN-939) landed
+reopening a session's journal, replaying it into the turn loop, and attaching the
+snapshotter to its existing chain — deliberately without restoring the working tree,
+which stays the caller's own explicit step. Forking a new session from a snapshot is
+still slice 2 by design and is not a gap (KAN-940).
 
 **How this section goes wrong, which is worth more than the list above.** It described
 "foundations landed, no loop yet" on 2026-08-11. By 2026-08-14 KAN-776 found it wrong on
@@ -729,7 +776,7 @@ internal/
   verify/            forced verification: discovery and the run
   procgroup/         start a subprocess in its own group, end the whole group
   journal/           Journal interface, FileJournal, blob spill, redaction, event types
-  repo/              git shadow refs — write and restore; resume/fork are slice 2
+  repo/              git shadow refs — write, restore and resume; fork is slice 2
   lock/              the advisory lock at .kopicode/lock — one session per working tree
   permission/        policy decisions
   corpus/            the loader, validator and digest for bench/tasks

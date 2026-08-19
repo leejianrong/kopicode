@@ -326,6 +326,122 @@ func TestNewSnapshotterRejectsASessionThatAlreadyHasRefs(t *testing.T) {
 	}
 }
 
+// TestNewResumingSnapshotterAttachesToTheExistingChain is KAN-939: a second
+// Snapshotter over the same session id, built with NewResumingSnapshotter
+// rather than NewSnapshotter, picks up exactly where the first left off
+// instead of refusing or starting a second chain.
+func TestNewResumingSnapshotterAttachesToTheExistingChain(t *testing.T) {
+	dir := newRepo(t)
+	ctx := context.Background()
+
+	_, s1 := newSnapshotter(t, dir, "session-resume")
+	writeFile(t, dir, "one.txt", "1\n")
+	first, err := s1.Snapshot(ctx, 1)
+	if err != nil {
+		t.Fatalf("Snapshot(1): %v", err)
+	}
+	writeFile(t, dir, "two.txt", "2\n")
+	second, err := s1.Snapshot(ctx, 2)
+	if err != nil {
+		t.Fatalf("Snapshot(2): %v", err)
+	}
+	if second.Parent != first.Commit {
+		t.Fatalf("setup: second.Parent = %s, want %s", second.Parent, first.Commit)
+	}
+
+	// A brand new Snapshotter value, as a resumed process would build: nothing
+	// carried over in memory, only the session id and the refs already on disk.
+	r, err := repo.Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2, err := repo.NewResumingSnapshotter(ctx, r, "session-resume", repo.WithClock(fixedClock()))
+	if err != nil {
+		t.Fatalf("NewResumingSnapshotter: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := s2.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
+
+	writeFile(t, dir, "three.txt", "3\n")
+	third, err := s2.Snapshot(ctx, 3)
+	if err != nil {
+		t.Fatalf("Snapshot(3) after resuming: %v", err)
+	}
+	if third.Parent != second.Commit {
+		t.Errorf("resumed snapshot's Parent = %s, want the pre-resume chain's last commit %s",
+			third.Parent, second.Commit)
+	}
+	// And git agrees, which the returned struct alone would not prove.
+	if got := git(t, dir, "rev-parse", third.Commit+"^"); got != second.Commit {
+		t.Errorf("git says %s's parent is %s, want %s", third.Commit, got, second.Commit)
+	}
+	// A turn at or before the attached chain's last turn is still refused: the
+	// attach seeded lastTurn from the real refs, not just Parent.
+	if _, err := s2.Snapshot(ctx, 2); !errors.Is(err, repo.ErrTurnNotIncreasing) {
+		t.Errorf("Snapshot(2) on a chain attached at turn 2 = %v, want ErrTurnNotIncreasing", err)
+	}
+}
+
+// TestNewResumingSnapshotterWithNoExistingRefsStartsFresh — a session that
+// never reached a mutating turn before it stopped has nothing to attach to,
+// and resuming it must behave exactly like a fresh chain rather than erroring
+// on an attach with nothing to find.
+func TestNewResumingSnapshotterWithNoExistingRefsStartsFresh(t *testing.T) {
+	dir := newRepo(t)
+	ctx := context.Background()
+
+	r, err := repo.Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := repo.NewResumingSnapshotter(ctx, r, "session-never-snapshotted", repo.WithClock(fixedClock()))
+	if err != nil {
+		t.Fatalf("NewResumingSnapshotter on a session with no refs: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
+
+	writeFile(t, dir, "one.txt", "1\n")
+	first, err := s.Snapshot(ctx, 1)
+	if err != nil {
+		t.Fatalf("Snapshot(1): %v", err)
+	}
+	if first.Parent != "" {
+		t.Errorf("first snapshot on an attach with nothing to find has Parent = %q, want empty", first.Parent)
+	}
+}
+
+// TestNewSnapshotterStillRefusesACollisionEvenAfterTheAttachPathExists is a
+// regression check on the point KAN-939 cares about most: adding
+// NewResumingSnapshotter must not have loosened NewSnapshotter's own
+// refusal. A genuinely new session that happens to collide with an old id is
+// not the same fact as a caller asking to resume that id, and only the
+// second is what NewResumingSnapshotter is for.
+func TestNewSnapshotterStillRefusesACollisionEvenAfterTheAttachPathExists(t *testing.T) {
+	dir := newRepo(t)
+	ctx := context.Background()
+	_, s := newSnapshotter(t, dir, "session-collides")
+	writeFile(t, dir, "a.txt", "a\n")
+	if _, err := s.Snapshot(ctx, 1); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+
+	r, err := repo.Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = repo.NewSnapshotter(ctx, r, "session-collides", repo.WithClock(fixedClock()))
+	if !errors.Is(err, repo.ErrSessionExists) {
+		t.Errorf("NewSnapshotter on a colliding id = %v, want ErrSessionExists", err)
+	}
+}
+
 // TestSnapshotRejectsANonIncreasingTurn — the ref name is the turn, so a
 // repeated turn would replace a published snapshot and orphan the commit it
 // replaced.
