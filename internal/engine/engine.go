@@ -148,14 +148,23 @@ type Config struct {
 	// assembler before the first new turn, so that turn's request carries the
 	// whole prior conversation rather than starting from nothing (KAN-939).
 	//
-	// nil — the zero value, and what every session gets that is not a resume —
-	// leaves the assembler with no history, which is correct for a session
-	// whose journal is itself new. It is not this package's job to decide
-	// whether a session is a resume or to fetch its prior events: [Open]
-	// reads them (via the journal it just opened, so blob-spilled fields
-	// rehydrate) before this Config is built, and hands them here already in
-	// seq order. See resume.go's package doc comment for exactly what
-	// replays and the one case it cannot recover.
+	// nil — the zero value, and what every session gets that is not a resume
+	// or a fork — leaves the assembler with no history, which is correct for
+	// a session whose journal is itself new. It is not this package's job to
+	// decide whether a session is a resume or to fetch its prior events:
+	// [Open] reads them (via the journal it just opened, so blob-spilled
+	// fields rehydrate) before this Config is built, and hands them here
+	// already in seq order. See resume.go's package doc comment for exactly
+	// what replays and the one case it cannot recover.
+	//
+	// [Fork] populates the same field with a *different* session's events —
+	// read via [journal.ReadSessionBlobs] rather than the newly-opened
+	// journal itself, since a fork's history lives in someone else's file —
+	// filtered to the turns being branched from; see fork.go's
+	// readForkSource. Either way [New] also seeds [Engine.turn] from the
+	// highest Turn value here, so this field decides not just what the
+	// assembler starts knowing but which turn number the session's own next
+	// turn gets.
 	ResumeHistory []journal.Event
 }
 
@@ -197,6 +206,11 @@ type Engine struct {
 	// turn is the session-wide 1-based turn counter, which is the journal
 	// envelope's turn. It does not reset between exchanges: a REPL session's
 	// second prompt continues the same record.
+	//
+	// It starts at 0 for an ordinary session and at the highest Turn value in
+	// Config.ResumeHistory otherwise — see New's own comment on startTurn —
+	// so a resumed or forked session's first genuinely new turn continues the
+	// numbering already on the record rather than colliding with it.
 	turn int
 
 	// spent is the token usage the provider has reported so far, summed. It is
@@ -314,9 +328,27 @@ func New(cfg Config) (*Engine, error) {
 	}
 
 	asm := NewAssembler(cfg.Selection.Config.SystemPrompt)
+	// startTurn is where this session's own turn counter picks up, rather than
+	// always 0. For an ordinary session ResumeHistory is empty and this stays
+	// 0, unchanged from before this existed. For a resumed or forked session it
+	// is the highest Turn value among the replayed events — which for a resume
+	// is simply "the last turn this process's predecessor reached" and for a
+	// fork is the source's own ForkSource.Turn, since every copied event's Turn
+	// is <= that by construction (see fork.go's readForkSource). Either way,
+	// this is what stops the next real turn from being numbered 1 while a
+	// copied or replayed turn 1 already exists earlier in the very same
+	// journal: two facts under one turn number would make TurnSnapshot's
+	// "turn must increase" check meaningless and would leave a reader unable
+	// to tell which turn 1 an event actually belongs to.
+	startTurn := 0
 	if len(cfg.ResumeHistory) > 0 {
 		if err := replayHistory(asm, cfg.ResumeHistory); err != nil {
 			return nil, fmt.Errorf("%w: replaying resumed history: %w", ErrConfig, err)
+		}
+		for _, ev := range cfg.ResumeHistory {
+			if ev.Turn > startTurn {
+				startTurn = ev.Turn
+			}
 		}
 	}
 
@@ -325,6 +357,7 @@ func New(cfg Config) (*Engine, error) {
 		asm:        asm,
 		offered:    offered,
 		parseOrder: parseOrder,
+		turn:       startTurn,
 	}, nil
 }
 

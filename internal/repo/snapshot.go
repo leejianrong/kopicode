@@ -3,6 +3,7 @@ package repo
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -148,6 +149,89 @@ func NewResumingSnapshotter(ctx context.Context, r *Repo, sessionID string, opts
 	return newSnapshotter(ctx, r, sessionID, true, opts...)
 }
 
+// NewForkingSnapshotter prepares a **new**, independent session (newSessionID)
+// whose first snapshot's parent is sourceSessionID's own snapshot at, or at
+// the highest turn not exceeding, sourceTurn (KAN-940).
+//
+// It is a third case, not a third mode of the two above, because it answers a
+// different question. [NewSnapshotter] starts a chain with no parent.
+// [NewResumingSnapshotter] attaches to a chain that continues under **its own**
+// session id: the same numbering, the same ref namespace, picking up where it
+// left off. Forking shares neither property: newSessionID has never had a
+// ref before (the refusal [NewSnapshotter] enforces applies here exactly as
+// it does everywhere else — this is not the resume case, and nothing here
+// widens that refusal), and its own turn numbers start at 1 the same way any
+// fresh session's do, in its own namespace under RefPrefix+newSessionID — the
+// forked session's turn 1 is not sourceTurn+1, it is simply 1, because the
+// two sessions' own turn counters are unrelated (a fresh [Engine] always
+// starts counting at 0 in-process, and only [engine.Config.ResumeHistory]'s
+// replay ever moves that; this package does not know about turn counters at
+// all, only about refs).
+//
+// So the seeded state is deliberately asymmetric with [NewResumingSnapshotter]'s:
+// s.parent is set to the source's commit, so the *first* snapshot the new
+// session ever writes has correct git ancestry — but s.snapped stays false
+// and s.lastTurn stays 0, exactly [NewSnapshotter]'s own starting state,
+// because the "turn must increase" check is a promise about *this session's
+// own* chain and must not be pre-loaded with a number from a namespace that
+// has nothing to do with it. Setting s.lastTurn = sourceTurn here would be
+// the bug this comment exists to prevent: it would refuse the new session's
+// own turn 1 with ErrTurnNotIncreasing, because 1 <= sourceTurn for almost
+// every fork anybody would ever do.
+//
+// The returned [Snapshot] is sourceSessionID's own snapshot the parent was
+// read from — Ref, Commit and Tree populated, Parent left "" because nothing
+// here consumes it — so a caller ([engine.Fork]) can pass its Tree straight
+// to [Repo.Restore] without a second, duplicate ref lookup. found is false
+// exactly when sourceSessionID has no ref at or before sourceTurn: turn 0
+// (fork before any turn ran) and a source session that never reached a
+// mutating turn both land here honestly, and the caller gets a fresh,
+// parentless chain with nothing to restore — the same starting state
+// [NewSnapshotter] gives any brand-new session.
+//
+// sourceSessionID is validated the same way any session id is
+// ([validateSessionID]); it may equal newSessionID only in the sense that
+// nothing here refuses that (a caller forking a session from its own earlier
+// turn under a literally identical id would be resuming, not forking, and
+// [engine.Fork] is what refuses that case before this function is ever
+// called).
+func NewForkingSnapshotter(
+	ctx context.Context, r *Repo, newSessionID, sourceSessionID string, sourceTurn int, opts ...Option,
+) (*Snapshotter, Snapshot, bool, error) {
+	if err := validateSessionID(sourceSessionID); err != nil {
+		return nil, Snapshot{}, false, fmt.Errorf("repo: fork source session: %w", err)
+	}
+	if sourceTurn < 0 {
+		return nil, Snapshot{}, false, fmt.Errorf(
+			"repo: fork source turn %d: %w: turns are numbered from 0", sourceTurn, ErrTurnNotIncreasing)
+	}
+
+	// false: a brand-new session id must never silently attach to an existing
+	// chain of its own — see NewSnapshotter's own refusal, which this does not
+	// relax.
+	s, err := newSnapshotter(ctx, r, newSessionID, false, opts...)
+	if err != nil {
+		return nil, Snapshot{}, false, err
+	}
+
+	foundTurn, commit, tree, found, err := refAtOrBefore(ctx, r, sourceSessionID, sourceTurn)
+	if err != nil {
+		return nil, Snapshot{}, false, fmt.Errorf(
+			"repo: locating session %s's snapshot at or before turn %d: %w", sourceSessionID, sourceTurn, err)
+	}
+	if !found {
+		return s, Snapshot{}, false, nil
+	}
+
+	s.parent = commit
+	snap := Snapshot{
+		Ref:    RefPrefix + sourceSessionID + "/" + strconv.Itoa(foundTurn),
+		Commit: commit,
+		Tree:   tree,
+	}
+	return s, snap, true, nil
+}
+
 // newSnapshotter is NewSnapshotter and NewResumingSnapshotter's shared body.
 // attach selects which of the two the caller asked for; see their doc
 // comments for what that means and why the distinction exists.
@@ -215,10 +299,38 @@ func newSnapshotter(ctx context.Context, r *Repo, sessionID string, attach bool,
 // found is false when the session has no refs at all — a resume of a session
 // that never reached a mutating turn — which is not an error: there is simply
 // nothing to attach to yet.
+//
+// It is refAtOrBefore with no upper bound: NewResumingSnapshotter always
+// wants the highest turn there is, never a specific ceiling, which is exactly
+// what math.MaxInt as the bound expresses without a second code path.
 func (s *Snapshotter) latest(ctx context.Context) (turn int, commit string, found bool, err error) {
-	out, err := s.repo.git(ctx, "for-each-ref", "--format=%(refname) %(objectname)", s.refPrefix())
-	if err != nil {
-		return 0, "", false, fmt.Errorf("repo: listing existing snapshots of session %s: %w", s.sessionID, err)
+	turn, commit, _, found, err = refAtOrBefore(ctx, s.repo, s.sessionID, math.MaxInt)
+	return turn, commit, found, err
+}
+
+// refAtOrBefore reports sessionID's shadow ref whose turn number is the
+// highest not exceeding turn, together with that ref's commit and tree —
+// [NewResumingSnapshotter]'s "the highest turn there is" ([Snapshotter.latest],
+// which passes math.MaxInt) and [NewForkingSnapshotter]'s "the tree as it
+// stood once a specific turn had finished, even when that turn itself left no
+// ref of its own because it did not touch the tree" are the same query with a
+// different bound, so this is the one for-each-ref parse both read from
+// rather than two copies that could drift.
+//
+// found is false when no ref for sessionID exists at or below turn at all —
+// the session has never snapshotted anything yet, or turn is 0 — which is not
+// an error: there is simply nothing there to report.
+func refAtOrBefore(ctx context.Context, r *Repo, sessionID string, turn int) (
+	foundTurn int, commit, tree string, found bool, err error,
+) {
+	prefix := RefPrefix + sessionID + "/"
+	// %(tree) is valid on a commit object (and a tag) per git-for-each-ref(1);
+	// every ref under this namespace points at a commit-tree commit, so this
+	// one call is enough to answer both "which commit" and "which tree" without
+	// a second git invocation per candidate.
+	out, gerr := r.git(ctx, "for-each-ref", "--format=%(refname) %(objectname) %(tree)", prefix)
+	if gerr != nil {
+		return 0, "", "", false, fmt.Errorf("repo: listing existing snapshots of session %s: %w", sessionID, gerr)
 	}
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
@@ -226,24 +338,27 @@ func (s *Snapshotter) latest(ctx context.Context) (turn int, commit string, foun
 			continue
 		}
 		fields := strings.Fields(line)
-		if len(fields) != 2 {
-			return 0, "", false, fmt.Errorf(
+		if len(fields) != 3 {
+			return 0, "", "", false, fmt.Errorf(
 				"repo: unexpected for-each-ref output %q while listing session %s's snapshots",
-				line, s.sessionID)
+				line, sessionID)
 		}
-		refname, obj := fields[0], fields[1]
-		turnPart := strings.TrimPrefix(refname, s.refPrefix())
+		refname, obj, tr := fields[0], fields[1], fields[2]
+		turnPart := strings.TrimPrefix(refname, prefix)
 		t, perr := strconv.Atoi(turnPart)
 		if perr != nil {
-			return 0, "", false, fmt.Errorf(
+			return 0, "", "", false, fmt.Errorf(
 				"repo: ref %q under session %s's namespace does not name a turn number: %w",
-				refname, s.sessionID, perr)
+				refname, sessionID, perr)
 		}
-		if !found || t > turn {
-			turn, commit, found = t, obj, true
+		if t > turn {
+			continue
+		}
+		if !found || t > foundTurn {
+			foundTurn, commit, tree, found = t, obj, tr, true
 		}
 	}
-	return turn, commit, found, nil
+	return foundTurn, commit, tree, found, nil
 }
 
 // refPrefix is the namespace this session's refs live under, with the trailing

@@ -142,6 +142,26 @@ type Options struct {
 	// Tree recorded on the last journal.TurnSnapshot event this session wrote.
 	Resume bool
 
+	// Fork, when non-nil, tells [Fork] which session and turn to branch a
+	// brand-new session from, sharing that session's history up to Fork.Turn
+	// and diverging after (KAN-940). It is meaningless to [Open], which
+	// refuses outright when it is set — see [Fork]'s own doc comment for why
+	// this is a second entry point rather than a third [Options.Resume]-style
+	// bool.
+	//
+	// SessionID here (if non-empty) names the *new* session, exactly as it
+	// does for every other call; Fork.SessionID names the *source*. The two
+	// must differ — Fork is not another spelling of Resume — and Fork
+	// refuses a caller who set them equal before touching the filesystem.
+	//
+	// Fork requires a git repository at Dir, and Snapshots must not be
+	// SnapshotsOff: both the source session's tree at Fork.Turn and the new
+	// session's own snapshot chain live there, and CLAUDE.md's argument for
+	// why a fork restores the tree automatically — see [Fork]'s doc
+	// comment — has no lesser version for a caller that opted out of
+	// snapshots.
+	Fork *ForkSource
+
 	// Events receives the session's events as they are recorded, in record
 	// order, on the goroutine running the turn. Nil means nothing is announced.
 	//
@@ -341,7 +361,69 @@ func (s *Session) Close(ctx context.Context) error {
 // It journals nothing. [Session.Run] and [Session.Close] do; the caller starts
 // the record with [Engine.Start] by way of the returned session having already
 // done so — see below.
+//
+// It refuses outright when [Options.Fork] is set. Open and [Fork] mint
+// different things — one session continuing (or starting fresh) in place,
+// one branching a brand-new session from a copy of another's history — and a
+// single call guessing which was meant from which optional fields happen to
+// be set is exactly the kind of ambiguity ADR-0007 decision 4's ordering
+// exists to refuse before anything is touched, rather than resolve by
+// convention.
 func Open(ctx context.Context, opts Options) (*Session, error) {
+	if opts.Fork != nil {
+		return nil, fmt.Errorf("%w: Options.Fork is set; call Fork instead of Open", ErrConfig)
+	}
+	return openSession(ctx, opts, nil)
+}
+
+// Fork branches a brand-new session from a copy of an existing one's history,
+// up to and including Options.Fork.Turn, diverging after (KAN-940).
+//
+// It shares Open's plumbing — the credential check, the working-tree lock,
+// the tool set and consent gate, the provider, the final [New] and
+// [Engine.Start] — through [openSession], and diverges in exactly the ways
+// [Options.Fork]'s own doc comment and fork.go's package comment argue:
+// which journal supplies the new session's history (the source's, copied
+// rather than referenced), whether the working tree moves (restored to the
+// source's tree at the chosen turn, automatically, because forking's whole
+// point requires the tree to actually be there), and how the new session's
+// snapshot chain is seeded ([repo.NewForkingSnapshotter], attached to the
+// source's chain without adopting its turn numbers).
+//
+// Every refusal below runs before anything is opened, locked or written —
+// the same ordering ADR-0007 decision 4 holds Open to — so a caller who got
+// Fork's arguments wrong leaves nothing behind to clean up.
+func Fork(ctx context.Context, opts Options) (*Session, error) {
+	switch {
+	case opts.Fork == nil:
+		return nil, fmt.Errorf("%w: Fork needs Options.Fork naming the session and turn to branch from",
+			ErrConfig)
+	case opts.Resume:
+		return nil, fmt.Errorf("%w: Options.Resume and Options.Fork are mutually exclusive: Resume "+
+			"continues an existing session's own record in place, Fork starts a brand-new one seeded "+
+			"from a copy of another session's history", ErrConfig)
+	case opts.Fork.SessionID == "":
+		return nil, fmt.Errorf("%w: Options.Fork.SessionID is empty; Fork needs to know which session's "+
+			"history to branch from", ErrConfig)
+	case opts.Fork.Turn < 0:
+		return nil, fmt.Errorf("%w: Options.Fork.Turn is %d; turns are numbered from 0 (0 forks before "+
+			"any turn ran)", ErrConfig, opts.Fork.Turn)
+	case opts.SessionID != "" && opts.SessionID == opts.Fork.SessionID:
+		return nil, fmt.Errorf("%w: Options.SessionID equals Options.Fork.SessionID (%q); a fork mints "+
+			"a different session id than its source — leave SessionID empty to mint one, or supply a "+
+			"different one", ErrConfig, opts.Fork.SessionID)
+	case opts.Snapshots == SnapshotsOff:
+		return nil, fmt.Errorf("%w: Options.Snapshots is SnapshotsOff; Fork needs turn snapshots to find "+
+			"the source session's tree at the chosen turn and to give the new session its own chain",
+			ErrConfig)
+	}
+	return openSession(ctx, opts, opts.Fork)
+}
+
+// openSession is Open and Fork's shared body. fork is nil for Open (and for
+// Fork's own caller-facing refusals above, which never reach here) and the
+// validated source for Fork.
+func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session, error) {
 	if opts.Selection.ModelID == "" {
 		return nil, fmt.Errorf("%w: Options.Selection carries no model id; resolve the arm with "+
 			"ResolveSelection before opening a session (ADR-0007 decision 4)", ErrConfig)
@@ -385,6 +467,35 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 					"there is no prior session to resume", ErrConfig, id, eventsPath)
 			}
 			return nil, fmt.Errorf("engine: checking for a resumable session at %s: %w", eventsPath, err)
+		}
+	}
+
+	if fork != nil {
+		// Two read-only checks, before anything opens for write, mirroring
+		// Resume's own: the source Fork names must actually exist, and — the
+		// direction Resume never has to check, because it *wants* an existing
+		// session — the new id must not already have one. A caller-supplied id
+		// that happens to collide with an unrelated existing session is
+		// refused rather than silently extended with a copied prefix it never
+		// held: [journal.SessionForked]'s whole argument is a session record
+		// that honestly says how it began, and appending a fork marker partway
+		// through someone else's history would not.
+		srcEventsPath := filepath.Join(journal.SessionDir(abs, fork.SessionID), journal.EventsFile)
+		if _, err := os.Stat(srcEventsPath); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil, fmt.Errorf("%w: Options.Fork names session %q as the source, but %s does not "+
+					"exist", ErrConfig, fork.SessionID, srcEventsPath)
+			}
+			return nil, fmt.Errorf("engine: checking for a forkable session at %s: %w", srcEventsPath, err)
+		}
+		newEventsPath := filepath.Join(journal.SessionDir(abs, id), journal.EventsFile)
+		switch _, err := os.Stat(newEventsPath); {
+		case err == nil:
+			return nil, fmt.Errorf("%w: a session already exists at %q (%s); Fork mints a brand-new "+
+				"session and refuses to extend one that already has a record — pick a different "+
+				"SessionID or leave it empty to mint one", ErrConfig, id, newEventsPath)
+		case !errors.Is(err, os.ErrNotExist):
+			return nil, fmt.Errorf("engine: checking for a pre-existing session at %s: %w", newEventsPath, err)
 		}
 	}
 
@@ -477,10 +588,12 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 	}
 
 	// A session outside a repository is legitimate — no snapshots, no head on
-	// the record — so this failure is not fatal. What is not legitimate is a
-	// repository whose state directory could not be excluded, because that is
-	// the promise never to touch the user's git state (ADR-0002 §3).
-	head, snaps, err := openRepo(ctx, abs, id, now, opts.Snapshots, opts.Resume)
+	// the record — so this failure is not fatal for Open. What is not
+	// legitimate is a repository whose state directory could not be excluded,
+	// because that is the promise never to touch the user's git state
+	// (ADR-0002 §3). For Fork, outside a repository *is* fatal — see
+	// openRepo's own comment on why.
+	head, snaps, err := openRepo(ctx, abs, id, now, opts.Snapshots, opts.Resume, fork)
 	if err != nil {
 		return fail(err)
 	}
@@ -499,7 +612,25 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 	// blob store), which matters here: the assembler needs a tool result's
 	// actual content, not just that it was large.
 	var history []journal.Event
-	if opts.Resume {
+	// forkedEvents is history again, kept apart because it is also what
+	// recordFork duplicates into jrn *after* Start below — the assembler's
+	// copy and the journal's copy of a fork's history come from one read,
+	// not two, so they cannot disagree about what was found.
+	var forkedEvents []journal.Event
+	switch {
+	case fork != nil:
+		var srcMaxTurn int
+		var rerr error
+		forkedEvents, srcMaxTurn, rerr = readForkSource(ctx, abs, *fork)
+		if rerr != nil {
+			return fail(rerr)
+		}
+		if fork.Turn > srcMaxTurn {
+			return fail(fmt.Errorf("%w: Options.Fork.Turn is %d, but session %s's own record only "+
+				"reached turn %d", ErrConfig, fork.Turn, fork.SessionID, srcMaxTurn))
+		}
+		history = forkedEvents
+	case opts.Resume:
 		for ev, rerr := range jrn.Read(ctx) {
 			if rerr != nil {
 				return fail(fmt.Errorf("engine: replaying session %s's prior history: %w", id, rerr))
@@ -547,6 +678,17 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 
 	if err := eng.Start(ctx); err != nil {
 		return fail(err)
+	}
+
+	if fork != nil {
+		// After Start, deliberately: this session's own SessionStarted (seq 1)
+		// must land before the SessionForked marker and the copied block that
+		// follows it, so a reader of this journal alone meets "this session
+		// started" before "and here is what it started from" — see
+		// journal.SessionForked's own doc comment.
+		if err := eng.recordFork(ctx, *fork, forkedEvents); err != nil {
+			return fail(err)
+		}
 	}
 	return s, nil
 }
@@ -679,16 +821,33 @@ func journalRetryObserver(jrn journal.Journal) provider.RetryObserver {
 // openRepo reports the commit HEAD points at and the snapshotter for the
 // session, or zero values outside a repository.
 //
-// A directory that is not a repository is not an error: SLICE-1 records
-// RepoHead as "" there and writes no TurnSnapshot events. A directory that *is*
-// one and whose exclude could not be written **is** an error, because the
-// alternative is .kopicode/ showing up in the user's `git status` — the one
-// thing ADR-0002 §3 promises will not happen.
+// A directory that is not a repository is not an error **for Open**:
+// SLICE-1 records RepoHead as "" there and writes no TurnSnapshot events. A
+// directory that *is* one and whose exclude could not be written **is** an
+// error, because the alternative is .kopicode/ showing up in the user's `git
+// status` — the one thing ADR-0002 §3 promises will not happen.
+//
+// It **is** an error for Fork (fork != nil), and deliberately: a fork's
+// source session's tree and shadow-ref chain live nowhere else, so a fork
+// attempted outside a repository has nothing to restore and nothing to
+// attach its own chain to — a silent no-op here would hand back a session
+// whose conversation claims a tree state the working directory has no way of
+// matching, which is exactly the failure [Fork]'s own doc comment argues
+// automatic restore exists to prevent. [Fork] itself already refuses
+// Options.Snapshots == SnapshotsOff before this is ever called, so the only
+// way fork != nil reaches this function's "not a repository" branch is a
+// caller pointing Dir somewhere git genuinely does not reach.
 func openRepo(
 	ctx context.Context, dir, sessionID string, now func() time.Time, mode SnapshotMode, resume bool,
+	fork *ForkSource,
 ) (string, Snapshotter, error) {
 	r, err := repo.Open(ctx, dir)
 	if err != nil {
+		if fork != nil {
+			return "", nil, fmt.Errorf("engine: Options.Fork needs a git repository at %s, to read "+
+				"session %s's tree and attach the new session's snapshot chain to it: %w",
+				dir, fork.SessionID, err)
+		}
 		return "", nil, nil //nolint:nilerr // not a repository is a supported case, not a failure
 	}
 
@@ -704,9 +863,52 @@ func openRepo(
 	}
 
 	if mode == SnapshotsOff {
+		// Unreachable with fork != nil: Fork refuses SnapshotsOff before this
+		// function is ever called. The check stays absent here rather than
+		// duplicated, because a duplicate that could never fire is a claim
+		// this function does not actually enforce anything — Fork does, and
+		// this comment is where a reader looks to confirm that.
+		//
 		// The head still goes on the record. It says which tree the session ran
 		// against, which is true whether or not anybody is snapshotting.
 		return head, nil, nil
+	}
+
+	if fork != nil {
+		snaps, srcSnap, found, ferr := repo.NewForkingSnapshotter(
+			ctx, r, sessionID, fork.SessionID, fork.Turn, repo.WithClock(now))
+		if ferr != nil {
+			return "", nil, fmt.Errorf("engine: preparing the forked session's snapshot chain: %w", ferr)
+		}
+		if found {
+			// The restore target is r.Root(), not dir: a snapshot's tree
+			// describes the *whole* work tree (Snapshotter.Snapshot always
+			// runs `git add -A` at r.root, regardless of what directory a
+			// session's own Dir named — see openRepo's callers), so archiving
+			// that tree and extracting it anywhere other than r.Root() would
+			// write the whole repository's layout into whatever subdirectory
+			// dir happened to be.
+			//
+			// Cleared first, and unconditionally — see [Fork]'s own doc
+			// comment for why forking has no "ordinary case" where skipping
+			// this is safe the way resuming does, and
+			// clearWorkingTreeForFork's own comment for why Restore alone is
+			// not enough: it never removes a file the target tree does not
+			// mention, and a fork is exactly the case that needs it to.
+			if err := clearWorkingTreeForFork(r.Root()); err != nil {
+				return "", nil, err
+			}
+			if err := r.Restore(ctx, srcSnap.Tree, r.Root()); err != nil {
+				return "", nil, fmt.Errorf(
+					"engine: restoring the working tree to session %s's turn %d before forking: %w",
+					fork.SessionID, fork.Turn, err)
+			}
+		}
+		// !found means sourceTurn is 0, or the source session never reached a
+		// mutating turn: there is nothing recorded to restore, and snaps is
+		// still a valid, parentless chain — the same starting state
+		// NewSnapshotter gives any brand-new session.
+		return head, snaps, nil
 	}
 
 	// resume decides which of repo's two constructors runs, and that choice is

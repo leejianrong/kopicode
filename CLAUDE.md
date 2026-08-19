@@ -238,9 +238,60 @@ What is real now (2026-08-17):
   chain. `NewSnapshotter`'s refusal is otherwise unchanged: nothing routes to
   the attach path except a caller that says explicitly it is resuming, so a
   fresh session's id colliding with an old one by accident still refuses.
-  Forking a new session from a snapshot is the one primitive still missing and
-  still slice 2 (KAN-940); `Repo.Restore` is what it will read the tree back
-  out with.
+  `NewForkingSnapshotter` (KAN-940) is the third and last: a **new**, never-
+  before-seen session id's first snapshot parents onto a *different* session's
+  commit at (or at the highest turn not exceeding) a chosen turn — the ref
+  lookup `latest` used is generalised into `refAtOrBefore` so both share one
+  for-each-ref parse rather than two that could disagree. It is deliberately
+  the asymmetric case: the parent is seeded so the new chain has correct git
+  ancestry, but `snapped`/`lastTurn` are **not** seeded from the source's turn
+  number, because the forked session's own turn numbering is independent (a
+  fresh `Engine` always starts counting from wherever `engine.New` seeds it,
+  never from the source's), and pre-loading `lastTurn` with a high source turn
+  would refuse the new session's own low-numbered first snapshot with
+  `ErrTurnNotIncreasing` for no reason connected to anything that chain has
+  actually recorded. `NewSnapshotter`'s own refusal is unrelaxed for the new
+  id: a fork mints a session id that must never already have refs of its own,
+  exactly the same guarantee `NewResumingSnapshotter` leaves untouched for its
+  case.
+- **`internal/engine`'s `Fork`, and one design decision this file used to
+  leave open** (KAN-940). A new entry point, not a third bit on `Open`'s
+  `Options.Resume`: forking mints a brand-new session id, a brand-new journal
+  file and a chain seeded from someone else's ref, which is materially more
+  divergent from an ordinary session than resuming ever is, and threading all
+  three through one function's internals would mean every step re-deciding
+  which of two unrelated operations it was mid-way through. `Options.Fork`
+  names the source session and the turn; `Fork` shares `Open`'s plumbing
+  (the credential check, the lock, the tool set and gate, the provider, the
+  final `New`/`Start`) and diverges exactly where the two operations
+  genuinely differ. Two questions this card had to settle, both argued in
+  `fork.go`'s package comment and `journal.SessionForked`'s own doc comment
+  rather than merely decided:
+  **the tree is restored automatically**, unlike resume, because forking's
+  entire premise — try a different continuation from turn N — requires the
+  tree to actually *be* at turn N's state, not wherever it has since moved to;
+  Resume's own "the ordinary case needs no restore" argument has no analogue
+  here, so `Fork` calls `Repo.Restore` unconditionally when the source has a
+  snapshot at or before the chosen turn, after first clearing the working
+  tree of anything a later turn left behind (`clearWorkingTreeForFork`) —
+  `Restore` alone never removes a file the target tree does not mention, by
+  its own explicit design, so a caller wanting an exact checkout does that
+  itself, and forking is exactly the caller that needs to. **The source's
+  history is duplicated into the fork's own journal, not referenced**: a new
+  `journal.SessionForked` marker event names the source and the turn, and the
+  source's own events for turns 1..N are copied — verbatim, Turn numbers and
+  all — immediately after it, so the forked session's own record is a
+  complete, self-contained account rather than one that only resolves by
+  chasing back into another session's directory, which CLAUDE.md's "one
+  session record" boundary reads as a promise about *this* file. Turn
+  numbering carries the seam: the forked session's own first new turn is
+  numbered N+1, not 1, because `engine.New` now seeds `Engine.turn` from the
+  highest `Turn` value in `Config.ResumeHistory` (a fix that also closes a
+  latent gap in KAN-939's own resume path, where the counter previously
+  always restarted at 0). The source session's own record and refs are never
+  written to — `journal.ReadSessionBlobs` reads a *different* session's
+  events with blob rehydration, read-only, and nothing in this path ever
+  opens the source's journal for append.
 - **`internal/lock`** — one session per **working tree** (docs/SLICE-1.md §8), `flock`
   on unix and a documented no-op on Windows. The word "repo" in that section is the
   trap: a linked worktree shares `.git/config`, the object store and the ref store with
@@ -574,11 +625,14 @@ itself logs nothing yet. Absent with **no** card: the `.kopicode/lock` advisory 
 SLICE-1 §8 describes.
 Nothing stops two sessions in one repository today; `internal/journal/file.go` carries
 the forward reference to it, so the gap is known rather than overlooked. `Repo.Restore`
-(KAN-938) landed the read primitive, and `Options.Resume`/`--resume` (KAN-939) landed
+(KAN-938) landed the read primitive, `Options.Resume`/`--resume` (KAN-939) landed
 reopening a session's journal, replaying it into the turn loop, and attaching the
 snapshotter to its existing chain — deliberately without restoring the working tree,
-which stays the caller's own explicit step. Forking a new session from a snapshot is
-still slice 2 by design and is not a gap (KAN-940).
+which stays the caller's own explicit step — and `engine.Fork` (KAN-940) landed
+branching a brand-new session from a copy of an existing one's history, which *does*
+restore the working tree automatically, for the reason argued under `internal/engine`
+above. The CLI surface for either — `--resume`/`--fork` on the REPL, listing sessions
+worth resuming or forking from — is KAN-941's job, not a gap in either card.
 
 **How this section goes wrong, which is worth more than the list above.** It described
 "foundations landed, no loop yet" on 2026-08-11. By 2026-08-14 KAN-776 found it wrong on
@@ -776,7 +830,7 @@ internal/
   verify/            forced verification: discovery and the run
   procgroup/         start a subprocess in its own group, end the whole group
   journal/           Journal interface, FileJournal, blob spill, redaction, event types
-  repo/              git shadow refs — write, restore and resume; fork is slice 2
+  repo/              git shadow refs — write, restore, resume and fork
   lock/              the advisory lock at .kopicode/lock — one session per working tree
   permission/        policy decisions
   corpus/            the loader, validator and digest for bench/tasks

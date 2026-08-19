@@ -85,6 +85,7 @@ func everyKind() []engine.Event {
 			Text: "context deadline exceeded"},
 		{Kind: engine.EventUnknown, Seq: 26, Reason: "SomethingNewer", Text: `{"a":1}`},
 		{Kind: engine.EventSessionEnded, Seq: 27, Reason: "completed", ExitCode: 0, HasExitCode: true},
+		{Kind: engine.EventSessionForked, Seq: 28, Detail: "s-source", ExitCode: 1, HasExitCode: true, Size: 5},
 		// The zero value, which must be reported rather than dropped.
 		{},
 	}

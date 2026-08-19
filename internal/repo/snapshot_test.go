@@ -442,6 +442,299 @@ func TestNewSnapshotterStillRefusesACollisionEvenAfterTheAttachPathExists(t *tes
 	}
 }
 
+// TestNewForkingSnapshotterSeedsParentFromTheExactTurn is KAN-940's core
+// claim: a brand-new session id's first snapshot chains onto the source
+// session's own commit at the chosen turn, and git agrees — not just the
+// struct field, which a bug in Snapshot() alone could get right while the
+// object graph disagreed.
+func TestNewForkingSnapshotterSeedsParentFromTheExactTurn(t *testing.T) {
+	dir := newRepo(t)
+	ctx := context.Background()
+
+	_, src := newSnapshotter(t, dir, "session-source")
+	writeFile(t, dir, "one.txt", "1\n")
+	first, err := src.Snapshot(ctx, 1)
+	if err != nil {
+		t.Fatalf("Snapshot(1): %v", err)
+	}
+	writeFile(t, dir, "two.txt", "2\n")
+	second, err := src.Snapshot(ctx, 2)
+	if err != nil {
+		t.Fatalf("Snapshot(2): %v", err)
+	}
+
+	r, err := repo.Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fork, srcSnap, found, err := repo.NewForkingSnapshotter(
+		ctx, r, "session-fork", "session-source", 1, repo.WithClock(fixedClock()))
+	if err != nil {
+		t.Fatalf("NewForkingSnapshotter: %v", err)
+	}
+	if !found {
+		t.Fatal("found = false, want true: session-source has a snapshot at turn 1")
+	}
+	if srcSnap.Commit != first.Commit || srcSnap.Tree != first.Tree {
+		t.Errorf("srcSnap = %+v, want the turn-1 snapshot %+v", srcSnap, first)
+	}
+	t.Cleanup(func() {
+		if err := fork.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
+
+	// The forked session's own turn numbering starts at 1, same as any fresh
+	// session — not sourceTurn+1 — because the two sessions' turn counters are
+	// unrelated. See NewForkingSnapshotter's own doc comment.
+	writeFile(t, dir, "branch.txt", "b\n")
+	forkedFirst, err := fork.Snapshot(ctx, 1)
+	if err != nil {
+		t.Fatalf("Snapshot(1) on the forked chain: %v", err)
+	}
+	if forkedFirst.Parent != first.Commit {
+		t.Errorf("forked snapshot's Parent = %s, want session-source's turn-1 commit %s",
+			forkedFirst.Parent, first.Commit)
+	}
+	if got := git(t, dir, "rev-parse", forkedFirst.Commit+"^"); got != first.Commit {
+		t.Errorf("git says %s's parent is %s, want %s", forkedFirst.Commit, got, first.Commit)
+	}
+
+	// And the source's own chain is completely unaffected: its second snapshot
+	// still parents onto its first, not onto anything the fork wrote.
+	if second.Parent != first.Commit {
+		t.Errorf("setup broke: session-source's own chain no longer parents turn 2 onto turn 1")
+	}
+}
+
+// TestNewForkingSnapshotterDoesNotConstrainTheNewSessionsOwnTurnNumbers holds
+// the asymmetry with NewResumingSnapshotter that this package's own doc
+// comment argues at length: seeding the fork's parent from a high source
+// turn must never make the *new* session's own low turn numbers look like a
+// repeat.
+func TestNewForkingSnapshotterDoesNotConstrainTheNewSessionsOwnTurnNumbers(t *testing.T) {
+	dir := newRepo(t)
+	ctx := context.Background()
+
+	_, src := newSnapshotter(t, dir, "session-far-ahead")
+	writeFile(t, dir, "a.txt", "a\n")
+	if _, err := src.Snapshot(ctx, 20); err != nil {
+		t.Fatalf("Snapshot(20): %v", err)
+	}
+
+	r, err := repo.Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fork, _, found, err := repo.NewForkingSnapshotter(
+		ctx, r, "session-fork-low-turns", "session-far-ahead", 20, repo.WithClock(fixedClock()))
+	if err != nil {
+		t.Fatalf("NewForkingSnapshotter: %v", err)
+	}
+	if !found {
+		t.Fatal("found = false, want true")
+	}
+	t.Cleanup(func() {
+		if err := fork.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
+
+	writeFile(t, dir, "b.txt", "b\n")
+	// If the seeded state wrongly carried sourceTurn (20) as lastTurn, this
+	// would fail with ErrTurnNotIncreasing (1 <= 20) even though nothing in
+	// this session's own chain has ever recorded a turn 1.
+	if _, err := fork.Snapshot(ctx, 1); err != nil {
+		t.Fatalf("Snapshot(1) on a session forked from turn 20 = %v, want success", err)
+	}
+}
+
+// TestNewForkingSnapshotterAttachesAtTheHighestTurnNotExceedingTheRequest —
+// a turn that did not itself mutate the tree leaves no ref of its own, and
+// forking "from" it means forking from whatever *did* leave the most recent
+// one at or before it.
+func TestNewForkingSnapshotterAttachesAtTheHighestTurnNotExceedingTheRequest(t *testing.T) {
+	dir := newRepo(t)
+	ctx := context.Background()
+
+	_, src := newSnapshotter(t, dir, "session-gappy")
+	writeFile(t, dir, "one.txt", "1\n")
+	first, err := src.Snapshot(ctx, 1)
+	if err != nil {
+		t.Fatalf("Snapshot(1): %v", err)
+	}
+	// Turn 2 never snapshots — the model's turn 2 asked no mutating tool, say.
+	writeFile(t, dir, "three.txt", "3\n")
+	if _, err := src.Snapshot(ctx, 3); err != nil {
+		t.Fatalf("Snapshot(3): %v", err)
+	}
+
+	r, err := repo.Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, srcSnap, found, err := repo.NewForkingSnapshotter(
+		ctx, r, "session-fork-gap", "session-gappy", 2, repo.WithClock(fixedClock()))
+	if err != nil {
+		t.Fatalf("NewForkingSnapshotter(turn 2): %v", err)
+	}
+	if !found {
+		t.Fatal("found = false, want true: turn 1's snapshot is at or before turn 2")
+	}
+	if srcSnap.Commit != first.Commit {
+		t.Errorf("srcSnap.Commit = %s, want the turn-1 commit %s (turn 2 left no ref of its own)",
+			srcSnap.Commit, first.Commit)
+	}
+}
+
+// TestNewForkingSnapshotterWithNothingToForkFromStartsFresh — turn 0, or a
+// source session that never reached a mutating turn, both mean there is
+// nothing to attach to, and that is not an error: the new chain simply
+// starts parentless, exactly like NewSnapshotter's own first snapshot.
+func TestNewForkingSnapshotterWithNothingToForkFromStartsFresh(t *testing.T) {
+	dir := newRepo(t)
+	ctx := context.Background()
+
+	r, err := repo.Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fork, srcSnap, found, err := repo.NewForkingSnapshotter(
+		ctx, r, "session-fork-empty", "session-never-existed", 0, repo.WithClock(fixedClock()))
+	if err != nil {
+		t.Fatalf("NewForkingSnapshotter: %v", err)
+	}
+	if found {
+		t.Errorf("found = true, want false: srcSnap = %+v", srcSnap)
+	}
+	t.Cleanup(func() {
+		if err := fork.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
+
+	writeFile(t, dir, "a.txt", "a\n")
+	snap, err := fork.Snapshot(ctx, 1)
+	if err != nil {
+		t.Fatalf("Snapshot(1): %v", err)
+	}
+	if snap.Parent != "" {
+		t.Errorf("first snapshot on a fork with nothing to attach to has Parent = %q, want empty", snap.Parent)
+	}
+}
+
+// TestNewForkingSnapshotterRefusesACollisionOnTheNewID — the same refusal
+// NewSnapshotter itself makes, unrelaxed: a fork mints a brand-new session id
+// and must never silently attach to *that id's own* pre-existing chain, only
+// to the source's.
+func TestNewForkingSnapshotterRefusesACollisionOnTheNewID(t *testing.T) {
+	dir := newRepo(t)
+	ctx := context.Background()
+
+	_, existing := newSnapshotter(t, dir, "session-already-here")
+	writeFile(t, dir, "a.txt", "a\n")
+	if _, err := existing.Snapshot(ctx, 1); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	_, src := newSnapshotter(t, dir, "session-other-source")
+	writeFile(t, dir, "b.txt", "b\n")
+	if _, err := src.Snapshot(ctx, 1); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+
+	r, err := repo.Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, err = repo.NewForkingSnapshotter(
+		ctx, r, "session-already-here", "session-other-source", 1, repo.WithClock(fixedClock()))
+	if !errors.Is(err, repo.ErrSessionExists) {
+		t.Errorf("NewForkingSnapshotter onto a colliding new id = %v, want ErrSessionExists", err)
+	}
+}
+
+// TestNewForkingSnapshotterValidatesItsInputs holds the source session id and
+// the turn number to the same discipline every other entry point in this
+// package uses.
+func TestNewForkingSnapshotterValidatesItsInputs(t *testing.T) {
+	dir := newRepo(t)
+	ctx := context.Background()
+	r, err := repo.Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, _, err := repo.NewForkingSnapshotter(ctx, r, "session-new", "../escape", 0); !errors.Is(err, repo.ErrInvalidSessionID) {
+		t.Errorf("NewForkingSnapshotter with an unsafe source id = %v, want ErrInvalidSessionID", err)
+	}
+	if _, _, _, err := repo.NewForkingSnapshotter(ctx, r, "session-new", "session-source", -1); !errors.Is(err, repo.ErrTurnNotIncreasing) {
+		t.Errorf("NewForkingSnapshotter with a negative turn = %v, want ErrTurnNotIncreasing", err)
+	}
+}
+
+// TestNewForkingSnapshottersSourceTreeRestoresCleanly is the seam KAN-940's
+// engine half rests on: the Tree NewForkingSnapshotter hands back is exactly
+// what Restore needs, with no adaptation, to put tracked content back to the
+// state the forked session's copied history describes.
+//
+// It also documents, rather than papers over, Restore's own contract on the
+// point that matters most for a fork: Restore never clears dest first (see
+// [Repo.Restore]'s own doc comment), so a file a *later* turn created — one
+// the tree being restored to never had — survives a Restore call untouched.
+// engine.Fork's own tests hold the layer that turns this into an exact
+// checkout (clearing the working tree before calling Restore) to account;
+// this test is the proof of what Restore alone does and does not do, so the
+// two responsibilities are never conflated.
+func TestNewForkingSnapshottersSourceTreeRestoresCleanly(t *testing.T) {
+	dir := newRepo(t)
+	ctx := context.Background()
+
+	_, src := newSnapshotter(t, dir, "session-restore-source")
+	writeFile(t, dir, "keep.txt", "turn one\n")
+	if _, err := src.Snapshot(ctx, 1); err != nil {
+		t.Fatalf("Snapshot(1): %v", err)
+	}
+	// Turn 2 changes the tracked file and adds an untracked one.
+	writeFile(t, dir, "keep.txt", "turn two\n")
+	writeFile(t, dir, "only-in-turn-two.txt", "later\n")
+	if _, err := src.Snapshot(ctx, 2); err != nil {
+		t.Fatalf("Snapshot(2): %v", err)
+	}
+
+	r, err := repo.Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, srcSnap, found, err := repo.NewForkingSnapshotter(
+		ctx, r, "session-restore-fork", "session-restore-source", 1, repo.WithClock(fixedClock()))
+	if err != nil {
+		t.Fatalf("NewForkingSnapshotter: %v", err)
+	}
+	if !found {
+		t.Fatal("found = false, want true")
+	}
+
+	if err := r.Restore(ctx, srcSnap.Tree, dir); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	// Tracked content: reverted, because the tree being restored names it.
+	got, err := os.ReadFile(filepath.Join(dir, "keep.txt"))
+	if err != nil {
+		t.Fatalf("reading keep.txt after restore: %v", err)
+	}
+	if string(got) != "turn one\n" {
+		t.Errorf("keep.txt = %q after restoring turn 1's tree, want %q", got, "turn one\n")
+	}
+	// A file the tree does not mention: left exactly as it was, per Restore's
+	// own documented contract. A caller wanting an exact checkout clears dest
+	// first — engine.Fork is that caller, and its own tests hold it to doing
+	// so; this file is not claiming Restore does it unasked.
+	if _, err := os.Stat(filepath.Join(dir, "only-in-turn-two.txt")); err != nil {
+		t.Errorf("only-in-turn-two.txt is gone after Restore alone, but Restore never clears dest: %v", err)
+	}
+}
+
 // TestSnapshotRejectsANonIncreasingTurn — the ref name is the turn, so a
 // repeated turn would replace a published snapshot and orphan the commit it
 // replaced.

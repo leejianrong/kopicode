@@ -75,6 +75,7 @@ func samplePayloads() []journal.Payload {
 		},
 		journal.TurnCancelled{Phase: "provider_stream", Detail: journal.InlineText("context canceled")},
 		journal.SessionEnded{Reason: "completed", ExitCode: 0, Detail: journal.InlineText("")},
+		journal.SessionForked{SourceSessionID: "s-source", SourceTurn: 3, Copied: 17},
 		journal.UnknownPayload{EventType: "SomethingNewer", Raw: json.RawMessage(`{"a":1}`)},
 	}
 }
@@ -178,6 +179,7 @@ func TestTheEventKindNamesAreStable(t *testing.T) {
 		engine.EventVerification:        "verification",
 		engine.EventTurnCancelled:       "turn_cancelled",
 		engine.EventSessionEnded:        "session_ended",
+		engine.EventSessionForked:       "session_forked",
 		engine.EventUnknown:             "unknown",
 		engine.EventDelta:               "delta",
 	}

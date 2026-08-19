@@ -112,6 +112,14 @@ func (l *Loop) Render(e engine.Event) {
 	case engine.EventSessionEnded:
 		l.tag("session", fmt.Sprintf("ended: %s (exit %d)", e.Reason, e.ExitCode))
 
+	case engine.EventSessionForked:
+		// Detail is the source session id, ExitCode the turn branched from
+		// (see engine.eventOf's own mapping) and Size how many of its events
+		// were copied in. KAN-941 is what wires a --fork flag up to this; the
+		// rendering exists now so a kind the record can already hold never
+		// falls through to the "no rendering for" case below.
+		l.tag("fork", fmt.Sprintf("from %s turn %d (%d events copied)", e.Detail, e.ExitCode, e.Size))
+
 	case engine.EventUnknown:
 		// The journal's compatibility promise, carried to the screen. A build
 		// that cannot name the type can still say that something happened and
