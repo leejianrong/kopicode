@@ -336,6 +336,15 @@ var defaultHarnessConfig = Config{
 	// rather than imported so that a configuration is a value and not a
 	// view onto another package's registry — see hash.go on why this is
 	// held to internal/tools by a test instead.
+	//
+	// "ask" is last, added by docs/adr/0009-ask-tool-contract.md decision 5
+	// (KAN-946): it is meant to be the model's last resort, and the ordering
+	// says so a second time — a model reads ToolSet's own order as the order
+	// it is offered its options in (KAN-843). Turning ask on here, for this
+	// registered configuration, rather than leaving it implemented-but-dormant,
+	// is this card's own decision and is argued in its PR description: a tool
+	// nobody's config advertises would be unwired in every sense that matters
+	// to "implement and wire" the card's title asks for.
 	ToolSet: []string{
 		"read_file",
 		"list_dir",
@@ -344,6 +353,7 @@ var defaultHarnessConfig = Config{
 		"edit_file",
 		"edit_file_fuzzy",
 		"run_shell",
+		"ask",
 	},
 
 	// The wire's tool-definition catalogue (KAN-844), in ToolSet's
@@ -436,6 +446,19 @@ var defaultHarnessConfig = Config{
 					{Name: "timeout_seconds", Type: "integer", Description: "how many seconds to allow the command to run; 0 or omitted uses the tool's default of 120"},
 				},
 				Required: []string{"command"},
+			},
+		}},
+		{Type: "function", Function: provider.ToolFunction{
+			Name: "ask",
+			Description: "Ask the human a clarifying question when the repository cannot answer it, and receive their " +
+				"reply as this call's result. Use sparingly — read and grep first; most ambiguity is " +
+				"resolved by looking, not by asking.",
+			Parameters: provider.ToolParameters{
+				Properties: []provider.ToolProperty{
+					{Name: "question", Type: "string", Description: "the single question to put to the human, phrased so it can be answered in one reply"},
+					{Name: "context", Type: "string", Description: "what you have already tried or found and why you are stuck; shown to the human alongside the question so they do not have to read the whole session to answer it"},
+				},
+				Required: []string{"question"},
 			},
 		}},
 	},

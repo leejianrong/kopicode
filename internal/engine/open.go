@@ -188,6 +188,18 @@ type Options struct {
 	// had made it.
 	ConsentMode ConsentMode
 
+	// Ask answers the ask tool's calls (docs/adr/0009-ask-tool-contract.md).
+	// Nil refuses every question and says why, the same fail-closed direction
+	// as a nil Consent — see [noAnswerer].
+	Ask Answerer
+
+	// AskMode says who Ask's replies are attributed to, mirroring ConsentMode
+	// for the identical reason: attribution is not the surface's fact to
+	// assert about itself. The zero value, [AskInteractive], is what the REPL
+	// wants; `run --print`'s denyHeadlessAsk sets this to [AskUnattended] the
+	// same way its Consent sets ConsentMode.
+	AskMode AskMode
+
 	// Provider overrides the model provider. Nil builds the live OpenRouter
 	// client from OPENROUTER_API_KEY.
 	//
@@ -651,6 +663,8 @@ func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session,
 		return fail(err)
 	}
 
+	askFn, askSource := mustAnswerer(opts.Ask, opts.AskMode)
+
 	eng, err := New(Config{
 		SessionID: id,
 		Selection: opts.Selection,
@@ -664,6 +678,8 @@ func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session,
 		Journal:     teed,
 		Tools:       set,
 		Permissions: gate,
+		Ask:         askFn,
+		AskSource:   askSource,
 		Syntax:      &syntax.Gate{Root: set.Root.Path()},
 		// Verify is left nil on purpose: nil means the default verifier, and
 		// Options offers no way to say otherwise. See Options.
@@ -721,6 +737,26 @@ func mustAskPolicy(c Consenter, mode ConsentMode) permission.Policy {
 		panic("engine: building the consent policy: " + err.Error())
 	}
 	return p
+}
+
+// mustAnswerer resolves Options.Ask/Options.AskMode into what Config.Ask and
+// Config.AskSource need, mirroring mustAskPolicy's shape for the identical
+// reason (docs/adr/0009-ask-tool-contract.md decision 2): the source is
+// derived purely from mode, independent of whether a is nil, the same way
+// mustAskPolicy's source never depends on whether c is nil. A nil a is never
+// left nil for Engine.runAsk to call and panic on — noAnswerer takes its
+// place — and [New] would default it again anyway if this function's
+// caller were ever bypassed, but Open always calls it, so that fallback is
+// belt and suspenders rather than the only guard.
+func mustAnswerer(a Answerer, mode AskMode) (Answerer, string) {
+	source := askSourceUser
+	if mode == AskUnattended {
+		source = askSourcePolicy
+	}
+	if a == nil {
+		a = noAnswerer
+	}
+	return a, source
 }
 
 // requireProviderCredential fails fast when the live client Open would build

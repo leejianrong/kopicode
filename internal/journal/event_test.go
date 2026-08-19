@@ -181,6 +181,29 @@ func fixtures() map[journal.Type]journal.Payload {
 			SourceTurn:      3,
 			Copied:          17,
 		},
+		journal.TypeAskRequested: journal.AskRequested{
+			CallID:   "call_4",
+			Question: text("which config file should the retry backoff read from?"),
+			// Non-zero on purpose, per the doc comment on AskRequested.Context:
+			// fixtures() sets every field to a non-zero value so a round trip
+			// that drops one shows up as a diff. The zero Context ("the model
+			// gave none") is a real, meaningful case, but it needs no fixture
+			// of its own here — an empty string round-trips through Text
+			// exactly like any other, and this table exists to catch a field
+			// silently dropped, not to enumerate every legitimate value.
+			Context: text("found config.go and config_test.go, neither names a default"),
+		},
+		journal.TypeAskAnswered: journal.AskAnswered{
+			CallID: "call_4",
+			// Refused true and Answer carrying the refusal's own text, not a
+			// human's words — the two travel together by construction (see
+			// AskAnswered.Answer's doc comment) and Refused: true also keeps
+			// this field at a non-zero value, which is what fixtures() wants
+			// for every field it sets.
+			Answer:  text("no human is present to answer this question"),
+			Source:  "policy",
+			Refused: true,
+		},
 	}
 }
 

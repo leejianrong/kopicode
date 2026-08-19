@@ -114,6 +114,13 @@ func withStream(f func(provider.Delta)) harnessOption {
 // thing it is about.
 func withCWD(dir string) harnessOption { return func(c *engine.Config) { c.CWD = dir } }
 
+// withAsk sets the collaborator the ask tool calls directly, and who its
+// answers are attributed to — ask.go's own doc comment on why AskSource
+// travels beside Ask rather than being derived from anything else.
+func withAsk(a engine.Answerer, source string) harnessOption {
+	return func(c *engine.Config) { c.Ask = a; c.AskSource = source }
+}
+
 // withCatalogue replaces the tool schemas the repair loop consults.
 func withCatalogue(cat parse.Tools) harnessOption {
 	return func(c *engine.Config) { c.Catalogue = cat }

@@ -120,6 +120,23 @@ func (l *Loop) Render(e engine.Event) {
 		// falls through to the "no rendering for" case below.
 		l.tag("fork", fmt.Sprintf("from %s turn %d (%d events copied)", e.Detail, e.ExitCode, e.Size))
 
+	case engine.EventAskRequested:
+		// The question is [Loop.AnswerAsk], and by the time this lands the
+		// dispatch closure has already appended it and is about to call the
+		// Answerer: docs/adr/0009-ask-tool-contract.md decision 3 writes
+		// AskRequested *before* the Answerer runs, deliberately, so a turn
+		// cancelled mid-question still leaves it on the record. Rendering the
+		// question here would print it before AnswerAsk's own renderAsk gets
+		// to, the same "already handled, would show twice" reasoning
+		// EventPermissionRequested's own case gives.
+
+	case engine.EventAskAnswered:
+		if e.Reason == "refused" {
+			l.tag("ask", fmt.Sprintf("unanswered (%s): %s", e.Source, e.Text))
+		} else {
+			l.tag("ask", fmt.Sprintf("answered (%s)", e.Source))
+		}
+
 	case engine.EventUnknown:
 		// The journal's compatibility promise, carried to the screen. A build
 		// that cannot name the type can still say that something happened and

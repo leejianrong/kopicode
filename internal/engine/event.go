@@ -47,6 +47,8 @@ const (
 	EventTurnCancelled
 	EventSessionEnded
 	EventSessionForked
+	EventAskRequested
+	EventAskAnswered
 
 	// EventUnknown is an event this build has no typed payload for, preserved
 	// by the journal's compatibility promise and passed through here rather
@@ -91,6 +93,8 @@ var eventKindText = map[EventKind]string{
 	EventTurnCancelled:       "turn_cancelled",
 	EventSessionEnded:        "session_ended",
 	EventSessionForked:       "session_forked",
+	EventAskRequested:        "ask_requested",
+	EventAskAnswered:         "ask_answered",
 	EventUnknown:             "unknown",
 	EventDelta:               "delta",
 }
@@ -376,6 +380,26 @@ func eventOf(ev journal.Event) Event {
 		base.Detail = p.SourceSessionID
 		base.ExitCode, base.HasExitCode = p.SourceTurn, true
 		base.Size = int64(p.Copied)
+
+	case journal.AskRequested:
+		base.Kind = EventAskRequested
+		base.Detail = p.CallID
+		base.Text, base.Size = text(p.Question)
+		// Context travels summarised, the same way ToolCallParsed.Reason
+		// carries a route rather than a "why": Reason is this struct's
+		// generic secondary string, not a semantic commitment to "cause",
+		// and the full value stays in the journal for anything that needs
+		// it whole.
+		base.Reason = summarise(p.Context.Inline)
+
+	case journal.AskAnswered:
+		base.Kind = EventAskAnswered
+		base.Detail = p.CallID
+		base.Text, base.Size = text(p.Answer)
+		base.Source = p.Source
+		if p.Refused {
+			base.Reason = "refused"
+		}
 
 	case journal.UnknownPayload:
 		// The journal's compatibility promise, carried one layer further out. A

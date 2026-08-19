@@ -100,6 +100,17 @@ type (
 		// is a repair round trip nobody needed.
 		TimeoutSeconds int `json:"timeout_seconds" kopicode_desc:"how many seconds to allow the command to run; 0 or omitted uses the tool's default of 120"`
 	}
+
+	// askArgs is docs/adr/0009-ask-tool-contract.md decision 1's shape: two
+	// strings, no choices/suggested-answers argument. That is deliberate and
+	// not a placeholder — paramType below has no case for reflect.Slice and
+	// panics at init on one, so a structured argument is real, separable work
+	// the ADR leaves for later rather than a gap in this one. A model that
+	// wants to offer options writes them into Question itself.
+	askArgs struct {
+		Question string `json:"question" kopicode:"required" kopicode_desc:"the single question to put to the human, phrased so it can be answered in one reply"`
+		Context  string `json:"context" kopicode_desc:"what you have already tried or found and why you are stuck; shown to the human alongside the question so they do not have to read the whole session to answer it"`
+	}
 )
 
 // Catalogue returns the schemas for the named tools, which is what the repair

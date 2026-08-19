@@ -76,6 +76,13 @@ func samplePayloads() []journal.Payload {
 		journal.TurnCancelled{Phase: "provider_stream", Detail: journal.InlineText("context canceled")},
 		journal.SessionEnded{Reason: "completed", ExitCode: 0, Detail: journal.InlineText("")},
 		journal.SessionForked{SourceSessionID: "s-source", SourceTurn: 3, Copied: 17},
+		journal.AskRequested{
+			CallID: "kc-1", Question: journal.InlineText("which config?"),
+			Context: journal.InlineText("checked config.go, no default"),
+		},
+		journal.AskAnswered{
+			CallID: "kc-1", Answer: journal.InlineText("config/retry.toml"), Source: "user",
+		},
 		journal.UnknownPayload{EventType: "SomethingNewer", Raw: json.RawMessage(`{"a":1}`)},
 	}
 }

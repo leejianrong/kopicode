@@ -61,6 +61,18 @@ const (
 	// both would have to be adjudicated. That is a place to guess, inside the
 	// one path in this package that is allowed to be approximate at all.
 	ToolEditFileFuzzy = "edit_file_fuzzy"
+
+	// ToolAsk names the ask tool (docs/adr/0009-ask-tool-contract.md). It is
+	// declared here rather than only in internal/engine, the same way every
+	// other tool name above is, because TestToolSetMatchesInternalTools and
+	// engine.ToolNames() both derive their expectation from this package's
+	// Tool* constants by source inspection rather than from a hand-written
+	// list — even though ask, unlike every other name here, has no method on
+	// [Set]: nothing about it touches a repository root, a file or a
+	// subprocess. internal/engine dispatches it directly against the
+	// engine's own configured Answerer, never through this package, which is
+	// exactly ADR-0009 decision 2's point.
+	ToolAsk = "ask"
 )
 
 // Limits are the declared bounds the tools apply. Every one of them is stated

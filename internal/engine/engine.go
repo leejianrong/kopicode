@@ -81,6 +81,31 @@ type Config struct {
 	// not be the quiet way to get that.
 	Permissions *permission.Gate
 
+	// Ask answers the ask tool's calls (docs/adr/0009-ask-tool-contract.md).
+	// It is never routed through Permissions — ask raises no permission
+	// question at all (decision 2) — so this is a separate collaborator
+	// rather than a second thing Permissions decides.
+	//
+	// Nil does not mean "skip", the same direction Verify's own comment
+	// argues: [New] fills in [noAnswerer], which refuses every question and
+	// says why, rather than leaving a nil func value for [Engine.runAsk] to
+	// call and panic on. A caller that builds a Config directly and forgets
+	// this field gets a fail-closed refusal, never a crash and never a
+	// silent "yes".
+	Ask Answerer
+
+	// AskSource is the journal.AskAnswered.Source every answer Ask produces
+	// is attributed to: "user" or "policy", PermissionDecided's own
+	// vocabulary. It travels beside Ask rather than being re-derived from
+	// [Options.AskMode] at dispatch time, because Config is where a
+	// session's resolved collaborators live, not [Options].
+	//
+	// Empty defaults to "policy" in [New], the same fail-toward-nobody
+	// direction as [noAnswerer] itself: a caller that wired an Answerer but
+	// forgot to say who it speaks for should not have that silence read as
+	// a human.
+	AskSource string
+
 	// Syntax is the post-edit language check (ADR-0006 §4). Required, for the
 	// same reason: it is the gate whose *absence* reads as a pass. Where no
 	// checker exists for a language it records that honestly, so an
@@ -325,6 +350,19 @@ func New(cfg Config) (*Engine, error) {
 			Root:       cfg.Tools.Root.Path(),
 			Configured: cfg.Selection.Verify,
 		}
+	}
+
+	// A missing Ask is filled in the same direction as a missing Verify —
+	// nil does not mean "skip" — and a missing AskSource defaults to
+	// "policy" rather than assuming a human, for the reason both fields' own
+	// comments give. [Open] always sets both together for the REPL and
+	// headless surfaces; this branch is what a caller that builds a Config
+	// directly (internal/bench, this package's own tests) gets for free.
+	if cfg.Ask == nil {
+		cfg.Ask = noAnswerer
+	}
+	if cfg.AskSource == "" {
+		cfg.AskSource = askSourcePolicy
 	}
 
 	asm := NewAssembler(cfg.Selection.Config.SystemPrompt)

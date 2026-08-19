@@ -72,8 +72,15 @@ func everyConfig(t *testing.T) []harness.Config {
 // under version 1's hash, so nothing pools incorrectly either side of the
 // bump. A future move needs the same two sentences: which value or which
 // coverage changed, and what it means for results recorded under the old hash.
+//
+// It moved a third time on KAN-946, when "ask" landed in ToolSet and
+// ToolCatalogue. That is a configuration *value* changing — the tool set the
+// model is presented, not a new field the preimage did not cover — so
+// PreimageVersion stays at 2, the same category KAN-843's own move was. No
+// bench run had happened under the prior hash either, so nothing pools
+// incorrectly across this move.
 func TestDefaultConfigHashIsStable(t *testing.T) {
-	const want = "5d7c99ef4bd34a2028a449dac942bfed8827e186ccc5726bfd5cef81713dc03a"
+	const want = "a4f65adc19b06d9777edba143bbe0cfaf94054c88773cc73b64ec25ebb17b589"
 
 	got := defaultConfig(t).Hash()
 	if got != want {
@@ -98,7 +105,7 @@ func TestDefaultConfigHashIsStable(t *testing.T) {
 // TestNoTwoConfigsShareAHash below is what checks that expectation rather
 // than this test silently passing if they happened to collide.
 func TestMinimaxM2ConfigHashIsStable(t *testing.T) {
-	const want = "11b7fe204d49aee63c9e28fa36e9a65d28f6b8c0ba2542653d9a73e84cf14880"
+	const want = "4171f94309eb8a46e7ec95db015145f0767b8b41aae682722838ef43210a66e1"
 
 	got := configByName(t, harness.MinimaxM2ConfigName).Hash()
 	if got != want {

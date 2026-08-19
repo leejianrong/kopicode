@@ -120,6 +120,20 @@ empty stdin. A non-zero exit is a result, not an error — read the output, it i
 why you ran the command. Prefer one command that answers the question to several
 that circle it.
 
+### ask
+`{"question": "...", "context": "..."}` — asks the human directly. Use it last
+and sparingly: read, grep and try the obvious fix first, and reach for this only
+on genuine ambiguity the repository itself cannot answer. `question` is required
+and should be answerable in one reply; `context` is optional and should say what
+you already tried or found, so the human does not have to read the whole session
+to answer it. The reply comes back as this call's result, verbatim, including an
+empty one — a human who answered with nothing to add is not the same as no
+answer at all.
+
+Some sessions have nobody to answer. The result then says so in plain text, and
+that refusal is an answer: do not send the same question again — proceed on your
+own judgement instead.
+
 ## Verification
 
 This repository's own check — its `test` target, `go test ./...`, `npm test`,

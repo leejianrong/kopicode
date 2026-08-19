@@ -129,6 +129,7 @@ func TestEveryEventTheEngineRecordsReachesTheUser(t *testing.T) {
 		engine.EventProviderResponse:    "clears it",
 		engine.EventToolCallRequested:   "the repair or failure that follows says what was wrong",
 		engine.EventPermissionRequested: "is asked by Loop.Ask rather than printed",
+		engine.EventAskRequested:        "is asked by Loop.AnswerAsk rather than printed",
 	}
 
 	for _, e := range everyKind() {
