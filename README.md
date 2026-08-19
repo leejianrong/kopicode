@@ -109,9 +109,20 @@ scope for this quickstart — see `cmd/kopicode/print.go`'s doc comment for the 
 
 ### Pre-built binaries
 
-There is no GitHub Release yet, so building from source above is the only path
-today. Pre-built binaries for the usual platforms are coming via GitHub Releases;
-check the repository's Releases page once one exists.
+There is no GitHub Release yet — no tag has been pushed, so building from source above
+is the only path today. Once one exists, `scripts/install.sh` (KAN-934) installs a
+pre-built binary for linux or darwin (amd64/arm64) from the latest release in one line:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/leejianrong/kopicode/main/install.sh | sh
+```
+
+It detects your OS and architecture, downloads the matching `kopicode-<os>-<arch>`
+asset staged by `.github/workflows/release.yml` (KAN-931), and installs it to
+`~/.local/bin`. Run today, with no release yet to find, it fails with a clear
+"no GitHub release found" error rather than downloading nothing silently — that
+failure mode is the thing to expect until the first tag is pushed. Windows and any
+architecture outside the Makefile's `PLATFORMS` list stay on building from source.
 
 ## The thesis
 
