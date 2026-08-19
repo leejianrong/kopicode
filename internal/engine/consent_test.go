@@ -110,6 +110,31 @@ func TestHeadlessConsentIsAttributedToPolicyNotAUser(t *testing.T) {
 	}
 }
 
+// TestUnattendedNilConsentGetsASpecificReasonNotBareRefused is `kopicode run
+// --print`'s actual wiring (cmd/kopicode/print.go leaves Options.Consent nil
+// under ConsentUnattended): it must not take the generic "no Consenter was
+// supplied" path TestANilConsenterRefuses below covers, because that path
+// answers through an error and never reaches the journal as a
+// PermissionDecided at all. KAN-953's self-drive PoC is the reason this
+// matters beyond the record: a bare "refused" reason is indistinguishable
+// from a one-off human "no", and burned 7 of 20 turns on retries before this
+// fix.
+func TestUnattendedNilConsentGetsASpecificReasonNotBareRefused(t *testing.T) {
+	events := shellConsentEvents(t, nil, engine.ConsentUnattended)
+
+	dec := sole[journal.PermissionDecided](t, events)
+	if dec.Source != permission.SourcePolicy.String() {
+		t.Errorf("source = %q, want %q", dec.Source, permission.SourcePolicy)
+	}
+	if dec.Decision != "deny" {
+		t.Errorf("decision = %q, want deny — nobody is present to approve a shell command headlessly", dec.Decision)
+	}
+	if dec.Reason == "" || dec.Reason == "refused" {
+		t.Errorf("reason = %q, want a reason specific enough that the model does not retry the same call",
+			dec.Reason)
+	}
+}
+
 // TestANilConsenterRefuses is the fail-closed default, and it is the one that
 // matters most: a front end that forgot to wire consent must not thereby get a
 // session that runs model-authored shell unasked.

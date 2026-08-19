@@ -179,13 +179,13 @@ type Options struct {
 	// [ConsentInteractive], is what a caller gets by not setting the field,
 	// and it is what the REPL wants — see [ConsentMode].
 	//
-	// This is KAN-885's fix: `run --print` has no terminal and no human, and
-	// its Consent (see denyHeadless in cmd/kopicode) answers on its own, so it
-	// sets this to [ConsentUnattended] and every resulting
-	// journal.PermissionDecided is stamped permission.SourcePolicy instead of
-	// permission.SourceUser. Without this field the engine had no way to tell
-	// the two apart, and every headless denial was recorded as though a human
-	// had made it.
+	// This is KAN-885's fix: `run --print` has no terminal and no human, so it
+	// leaves Consent nil and sets this to [ConsentUnattended] — mustAskPolicy
+	// answers that combination itself (permission.NewUnattendedDeny) — and
+	// every resulting journal.PermissionDecided is stamped
+	// permission.SourcePolicy instead of permission.SourceUser. Without this
+	// field the engine had no way to tell the two apart, and every headless
+	// denial was recorded as though a human had made it.
 	ConsentMode ConsentMode
 
 	// Ask answers the ask tool's calls (docs/adr/0009-ask-tool-contract.md).
@@ -248,12 +248,13 @@ const (
 	ConsentInteractive ConsentMode = iota
 
 	// ConsentUnattended says nobody is present to ask: Consent, if it answers
-	// at all, is the harness answering its own question — `run --print`'s
-	// denyHeadless, for instance — and every PermissionDecided this session
-	// journals is stamped permission.SourcePolicy instead. A caller sets this
-	// exactly when Options.Consent has no human behind it; setting it while
-	// Consent really does put the question to a person just misattributes in
-	// the opposite direction.
+	// at all, is the harness answering its own question, and every
+	// PermissionDecided this session journals is stamped permission.SourcePolicy
+	// instead. `run --print` leaves Consent nil under this mode — mustAskPolicy
+	// answers for it — rather than supplying its own Consenter; a caller sets
+	// this exactly when Options.Consent has no human behind it, and setting it
+	// while Consent really does put the question to a person just misattributes
+	// in the opposite direction.
 	ConsentUnattended
 )
 
@@ -723,7 +724,22 @@ func streamTo(obs Observer) func(int, provider.Delta) {
 // one is never nil: a nil Consenter is handled inside, by denying and saying
 // so, which keeps "nobody wired consent" distinct from "consent was refused"
 // on the record.
+//
+// A nil Consenter under [ConsentUnattended] is handled differently again, and
+// on purpose (KAN-953's self-drive PoC is why): that combination names
+// exactly one real case — a headless surface with no answerer wired, which is
+// `kopicode run --print`'s ordinary state, not a caller that forgot to wire
+// consent. [permission.NewUnattendedDeny] answers that case through the
+// ordinary VerdictDeny path with a Reason specific enough not to invite a
+// retry; the generic "no Consenter" refusal below answers through an error
+// instead, which never reaches the journal as a PermissionDecided and is the
+// right shape only for [ConsentInteractive] — a caller that left Consent nil
+// there is a misconfigured front end, and that failure mode is what the
+// generic message is for.
 func mustAskPolicy(c Consenter, mode ConsentMode) permission.Policy {
+	if c == nil && mode == ConsentUnattended {
+		return permission.NewUnattendedDeny()
+	}
 	source := permission.SourceUser
 	if mode == ConsentUnattended {
 		source = permission.SourcePolicy

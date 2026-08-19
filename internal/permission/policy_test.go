@@ -284,6 +284,42 @@ func TestAskerSeesTheRequestUnchanged(t *testing.T) {
 	}
 }
 
+// TestUnattendedDenyPolicyNamesWhyNotJustRefused is KAN-953's fix: a bare
+// "refused" cannot be told apart from a one-off human "no", and the
+// self-drive PoC that found this spent 7 of 20 turns retrying run_shell
+// variants because of exactly that ambiguity. Every answer must still deny —
+// this policy exists because there is genuinely nobody to ask — but the
+// reason has to say the refusal is permanent for this mode, not just name the
+// rule that fired.
+func TestUnattendedDenyPolicyNamesWhyNotJustRefused(t *testing.T) {
+	policy := permission.NewUnattendedDeny()
+
+	cases := []struct {
+		name string
+		kind permission.Kind
+	}{
+		{"run_shell", permission.KindRunShell},
+		{"write_outside_root", permission.KindWriteOutsideRoot},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dec, err := policy.Decide(t.Context(), permission.Request{Kind: c.kind})
+			if err != nil {
+				t.Fatalf("Decide: %v", err)
+			}
+			if dec.Verdict != permission.VerdictDeny {
+				t.Errorf("verdict = %s, want deny — nobody is present to approve anything here", dec.Verdict)
+			}
+			if dec.Source != permission.SourcePolicy {
+				t.Errorf("source = %s, want %s — this was never a human's answer", dec.Source, permission.SourcePolicy)
+			}
+			if dec.Reason == "" || dec.Reason == "refused" {
+				t.Errorf("reason = %q, want something specific enough that a model does not retry", dec.Reason)
+			}
+		})
+	}
+}
+
 // TestPolicyIsAValue is the seam the card is about, stated as a test: an
 // unrelated third policy drops in without this package changing.
 func TestPolicyIsAValue(t *testing.T) {

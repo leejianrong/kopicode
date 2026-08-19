@@ -203,3 +203,41 @@ func (p *BenchPolicy) confine(path, what string) (Decision, error) {
 		Reason:  fmt.Sprintf("%s is inside the task worktree", what),
 	}, nil
 }
+
+// UnattendedDenyPolicy is the policy an unattended surface gets when nothing
+// answers consent requests at all — `kopicode run --print`'s ordinary case,
+// where there is no sandbox yet (docs/SLICE-1.md §9) and the honest answer to
+// every request is no.
+//
+// It exists as its own [Policy] rather than as [AskPolicy] wrapping a nil
+// [Asker], because that path answers through an *error* — "an asker that
+// fails" — not through [Decision]'s ordinary [VerdictDeny] branch: the error
+// path never populates [Decision.Reason], so [Gate.Check] falls back to the
+// bare word "refused", and it never sets [Outcome.Required], so no
+// [Decision] reaches the journal as a PermissionDecided at all. Neither is
+// right for a state that is not a failure — nobody being present to answer
+// headlessly is the expected, permanent condition of this mode, not an
+// asker that broke. A model told only "refused" cannot tell a one-off no
+// from a mode with no answerer at all, and retries variations of the same
+// call rather than changing strategy; this policy's Reason says so
+// explicitly instead, once, for run_shell and for a write outside the root,
+// the two [Kind]s consent can be asked about at all.
+type UnattendedDenyPolicy struct{}
+
+// NewUnattendedDeny builds the policy. It takes nothing because every answer
+// is the same regardless of what asked: no.
+func NewUnattendedDeny() *UnattendedDenyPolicy { return &UnattendedDenyPolicy{} }
+
+// Decide always denies, attributed to [SourcePolicy] since nobody answered it.
+func (UnattendedDenyPolicy) Decide(_ context.Context, req Request) (Decision, error) {
+	reason := fmt.Sprintf("no answerer is wired for %s in this unattended mode", req.Kind)
+	switch req.Kind {
+	case KindRunShell:
+		reason = "shell commands are never approved in unattended mode (no sandbox exists yet to contain " +
+			"them) — this will not be approved on retry; use the file tools instead"
+	case KindWriteOutsideRoot:
+		reason = "writes outside the working tree are never approved in unattended mode — this will not " +
+			"be approved on retry; keep changes inside the working tree"
+	}
+	return Decision{Verdict: VerdictDeny, Source: SourcePolicy, Reason: reason}, nil
+}
