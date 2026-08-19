@@ -45,3 +45,16 @@ func AskForTest(ctx context.Context, c Consenter, req ConsentRequest) (string, e
 	})
 	return v.String(), err
 }
+
+// ReplayHistoryForTest exposes resume.go's replayHistory to the external test
+// package (KAN-939).
+//
+// It is unexported in product code because a caller building a session
+// through [Open] never calls it directly — [Config.ResumeHistory] is the
+// public seam, consumed once inside [New] — but the mapping from journal
+// events to [Assembler] calls is exactly what resume_test.go needs to hold to
+// account event kind by event kind, which a whole-session test can only do
+// indirectly.
+func ReplayHistoryForTest(asm *Assembler, events []journal.Event) error {
+	return replayHistory(asm, events)
+}

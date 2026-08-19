@@ -111,6 +111,11 @@ func interactive(args []string, _, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	overrides := engine.BindSelectionFlags(fs)
 	debug := fs.Bool("debug", false, "engine diagnostics on stderr")
+	// --resume is deliberately minimal: the id of an existing session, and
+	// nothing to help find one. Listing sessions and resuming "the latest
+	// one" are KAN-941's job — presentation the REPL can grow once this,
+	// the engine-level capability, exists to grow it on top of.
+	resume := fs.String("resume", "", "resume an existing session by id, instead of starting a new one")
 	if err := fs.Parse(args); err != nil {
 		// flag has already printed the error and the usage.
 		return exitUsage
@@ -143,7 +148,12 @@ func interactive(args []string, _, stderr io.Writer) int {
 	// the journal).
 	slog.Debug("arm resolved", "selection", selection)
 
-	return session(stdio(stderr), engine.Options{Dir: dir, Selection: selection})
+	opts := engine.Options{Dir: dir, Selection: selection}
+	if *resume != "" {
+		opts.SessionID = *resume
+		opts.Resume = true
+	}
+	return session(stdio(stderr), opts)
 }
 
 // streams is where the REPL reads and writes, and how it tells whether it has a

@@ -86,7 +86,61 @@ type Options struct {
 	// its own: the id is one of the three injected sources that criterion rests
 	// on (docs/SLICE-1.md §Test Plan), and a generated one is the source that
 	// would otherwise differ.
+	//
+	// Resuming a session (see [Options.Resume]) reuses this same field: SessionID
+	// is required either way, and what changes is only whether it is expected to
+	// already exist.
 	SessionID string
+
+	// Resume tells Open that SessionID names an existing session to continue
+	// rather than a new one (KAN-939). It requires a non-empty SessionID —
+	// resuming "mint one for me" is not a request Open can satisfy — and a
+	// session directory that already exists at that id; either failing is a
+	// configuration error reported before anything else opens.
+	//
+	// It changes three things, all downstream of the same one bit rather than
+	// three independent flags, because "this is a continuation" is one fact
+	// and asking a caller to keep three switches in agreement about it is how
+	// they drift:
+	//
+	//   - The journal opens in append mode and keeps the existing sequence
+	//     numbering. This already happens for *any* SessionID that names an
+	//     existing session directory — [journal.Open] resumes unconditionally
+	//     — so Resume changes nothing about the journal itself; it only makes
+	//     the intent explicit rather than incidental.
+	//   - The session's prior events are read back and replayed into the
+	//     turn loop's message history ([Config.ResumeHistory]), so the first
+	//     new turn's request carries the whole prior conversation rather than
+	//     starting from nothing.
+	//   - Inside a git repository with [SnapshotsAuto], the turn snapshotter
+	//     attaches to the session's existing shadow-ref chain
+	//     ([repo.NewResumingSnapshotter]) instead of refusing it, so the next
+	//     snapshot chains onto the last recorded turn.
+	//
+	// False (the zero value) is what every ordinary session gets, including
+	// one whose caller-supplied SessionID happens to collide with an old
+	// session's id by accident: the journal still resumes (as it always has),
+	// but the assembler starts with no history and, inside a repository, the
+	// snapshotter still refuses a session id that already has shadow refs —
+	// exactly as it did before this field existed. Resume has to be asked for;
+	// a collision alone is never read as a request to continue.
+	//
+	// # What Resume deliberately does not do
+	//
+	// It does not restore the working tree to any prior snapshot's state.
+	// [Open] does not call [repo.Repo.Restore] on a caller's behalf, and this
+	// is an argued decision rather than a gap: the ordinary reason to resume a
+	// session is that a process was interrupted and the tree is exactly where
+	// it was left, and force-restoring in that case would be work with no
+	// payoff at best. The case that is not ordinary — the user made changes to
+	// the tree between the interruption and the resume, by hand or with
+	// another tool — is exactly the case where restoring would silently
+	// discard that work with no consent asked, which is the direction ADR-0006
+	// and this project's edit tool spend real effort refusing to be wrong in.
+	// A caller that wants the tree rewound first has [repo.Repo.Restore]
+	// available as its own explicit step, before calling Open, using the
+	// Tree recorded on the last journal.TurnSnapshot event this session wrote.
+	Resume bool
 
 	// Events receives the session's events as they are recorded, in record
 	// order, on the goroutine running the turn. Nil means nothing is announced.
@@ -292,6 +346,10 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 		return nil, fmt.Errorf("%w: Options.Selection carries no model id; resolve the arm with "+
 			"ResolveSelection before opening a session (ADR-0007 decision 4)", ErrConfig)
 	}
+	if opts.Resume && opts.SessionID == "" {
+		return nil, fmt.Errorf("%w: Options.Resume is set but SessionID is empty; resuming needs "+
+			"the id of an existing session, and minting a fresh one would not be resuming anything", ErrConfig)
+	}
 
 	dir := opts.Dir
 	if dir == "" {
@@ -313,6 +371,21 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 	id := opts.SessionID
 	if id == "" {
 		id = newSessionID(now())
+	}
+
+	if opts.Resume {
+		// A read-only check, before anything opens for write: Options.Resume is
+		// the caller asserting a specific prior session exists, and a caller
+		// that is wrong about that should be told so rather than silently
+		// handed a new, empty session under the id it expected to continue.
+		eventsPath := filepath.Join(journal.SessionDir(abs, id), journal.EventsFile)
+		if _, err := os.Stat(eventsPath); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil, fmt.Errorf("%w: Options.Resume is set for session %q, but %s does not exist; "+
+					"there is no prior session to resume", ErrConfig, id, eventsPath)
+			}
+			return nil, fmt.Errorf("engine: checking for a resumable session at %s: %w", eventsPath, err)
+		}
 	}
 
 	// Process lifecycle, not session content: which directory, which session
@@ -407,7 +480,7 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 	// the record — so this failure is not fatal. What is not legitimate is a
 	// repository whose state directory could not be excluded, because that is
 	// the promise never to touch the user's git state (ADR-0002 §3).
-	head, snaps, err := openRepo(ctx, abs, id, now, opts.Snapshots)
+	head, snaps, err := openRepo(ctx, abs, id, now, opts.Snapshots, opts.Resume)
 	if err != nil {
 		return fail(err)
 	}
@@ -417,6 +490,23 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 		return fail(fmt.Errorf("engine: opening the session record: %w", err))
 	}
 	s.closers = append(s.closers, jrn.Close)
+
+	// Read back before anything new is appended to jrn — in particular before
+	// Start below writes this Open call's own SessionStarted — so "history"
+	// means exactly the resumed session's prior record and nothing this
+	// invocation is about to add to it. jrn.Read rehydrates blob-spilled
+	// fields (unlike journal.ReadSession, which does not know this journal's
+	// blob store), which matters here: the assembler needs a tool result's
+	// actual content, not just that it was large.
+	var history []journal.Event
+	if opts.Resume {
+		for ev, rerr := range jrn.Read(ctx) {
+			if rerr != nil {
+				return fail(fmt.Errorf("engine: replaying session %s's prior history: %w", id, rerr))
+			}
+			history = append(history, ev)
+		}
+	}
 
 	// The teed journal exists before the provider does, and deliberately: a
 	// live client's retry observer is wired to it below, so a retry the client
@@ -446,8 +536,9 @@ func Open(ctx context.Context, opts Options) (*Session, error) {
 		Syntax:      &syntax.Gate{Root: set.Root.Path()},
 		// Verify is left nil on purpose: nil means the default verifier, and
 		// Options offers no way to say otherwise. See Options.
-		Snapshots: snaps,
-		Stream:    streamTo(opts.Events),
+		Snapshots:     snaps,
+		Stream:        streamTo(opts.Events),
+		ResumeHistory: history,
 	})
 	if err != nil {
 		return fail(err)
@@ -593,7 +684,9 @@ func journalRetryObserver(jrn journal.Journal) provider.RetryObserver {
 // one and whose exclude could not be written **is** an error, because the
 // alternative is .kopicode/ showing up in the user's `git status` — the one
 // thing ADR-0002 §3 promises will not happen.
-func openRepo(ctx context.Context, dir, sessionID string, now func() time.Time, mode SnapshotMode) (string, Snapshotter, error) {
+func openRepo(
+	ctx context.Context, dir, sessionID string, now func() time.Time, mode SnapshotMode, resume bool,
+) (string, Snapshotter, error) {
 	r, err := repo.Open(ctx, dir)
 	if err != nil {
 		return "", nil, nil //nolint:nilerr // not a repository is a supported case, not a failure
@@ -616,7 +709,20 @@ func openRepo(ctx context.Context, dir, sessionID string, now func() time.Time, 
 		return head, nil, nil
 	}
 
-	snaps, err := repo.NewSnapshotter(ctx, r, sessionID, repo.WithClock(now))
+	// resume decides which of repo's two constructors runs, and that choice is
+	// the whole of KAN-939's snapshotter half: NewSnapshotter refuses a session
+	// id that already has shadow refs (the right answer for two sessions that
+	// collided on an id by accident), and NewResumingSnapshotter attaches to
+	// them instead (the right answer when [Options.Resume] said this id is
+	// being continued on purpose). Neither call is reachable from the other
+	// branch, so a caller that did not ask to resume can never silently attach
+	// to somebody else's chain.
+	var snaps *repo.Snapshotter
+	if resume {
+		snaps, err = repo.NewResumingSnapshotter(ctx, r, sessionID, repo.WithClock(now))
+	} else {
+		snaps, err = repo.NewSnapshotter(ctx, r, sessionID, repo.WithClock(now))
+	}
 	if err != nil {
 		return "", nil, fmt.Errorf("engine: preparing turn snapshots: %w", err)
 	}

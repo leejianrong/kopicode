@@ -99,7 +99,7 @@ type Snapshotter struct {
 	snapped  bool
 }
 
-// NewSnapshotter prepares a session to be snapshotted.
+// NewSnapshotter prepares a session to be snapshotted from scratch.
 //
 // It validates the session id, ensures StateDir is excluded from git (see
 // [Repo.ExcludeStateDir] — without which the throwaway index stages itself into
@@ -109,9 +109,49 @@ type Snapshotter struct {
 // That last refusal is deliberate. Continuing a session whose refs exist would
 // start a second chain from no parent while the ref names collide with the
 // first, orphaning commits and leaving a snapshot history that describes a
-// sequence of turns that never happened. Picking up an existing chain is
-// resume, and resume is slice 2.
+// sequence of turns that never happened. That refusal is exactly right for two
+// independent sessions that happen to collide on an id — a bug, or a stale
+// leftover directory — and it is also what a genuine resume must *not* trip.
+// [NewResumingSnapshotter] is the other case: a caller that knows it is
+// continuing a specific, named session asks for that explicitly, and the
+// refusal above stays in force for everyone who does not (KAN-939).
 func NewSnapshotter(ctx context.Context, r *Repo, sessionID string, opts ...Option) (*Snapshotter, error) {
+	return newSnapshotter(ctx, r, sessionID, false, opts...)
+}
+
+// NewResumingSnapshotter attaches to sessionID's existing shadow-ref chain
+// instead of refusing it, so the next [Snapshotter.Snapshot] call chains onto
+// the latest recorded turn rather than starting a second, colliding chain
+// (KAN-939).
+//
+// It is [NewSnapshotter]'s deliberate exception, not a relaxation of it: the
+// caller is asserting — because it is resuming a specific session by id, not
+// because a ref happened to exist — that sessionID names a session being
+// continued rather than two sessions that collided on an id by accident.
+// Everything NewSnapshotter does before its refusal (validating the id,
+// excluding StateDir, preparing the throwaway index) is identical here; only
+// what happens when refs already exist differs.
+//
+// When no refs exist yet — a resumed session that never got as far as a
+// mutating turn before it stopped — this behaves exactly like NewSnapshotter
+// on a fresh id: the first [Snapshotter.Snapshot] call has no parent. There is
+// nothing to attach to, so there is nothing to distinguish.
+//
+// When refs do exist, the ref naming the highest turn number is read back —
+// not the journal's TurnSnapshot events, which would be a second account of
+// the same fact and could in principle disagree with what git actually
+// committed — and the snapshotter's internal chain state is seeded from it, so
+// the next Snapshot call's Parent is that ref's commit and Snapshot's own
+// "turn must increase" check is enforced against the real last turn rather
+// than against a fresh chain that has forgotten it.
+func NewResumingSnapshotter(ctx context.Context, r *Repo, sessionID string, opts ...Option) (*Snapshotter, error) {
+	return newSnapshotter(ctx, r, sessionID, true, opts...)
+}
+
+// newSnapshotter is NewSnapshotter and NewResumingSnapshotter's shared body.
+// attach selects which of the two the caller asked for; see their doc
+// comments for what that means and why the distinction exists.
+func newSnapshotter(ctx context.Context, r *Repo, sessionID string, attach bool, opts ...Option) (*Snapshotter, error) {
 	if r == nil {
 		return nil, fmt.Errorf("repo: NewSnapshotter needs a repository")
 	}
@@ -143,6 +183,19 @@ func NewSnapshotter(ctx context.Context, r *Repo, sessionID string, opts ...Opti
 		now:       o.now,
 	}
 
+	if attach {
+		turn, commit, found, err := s.latest(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if found {
+			s.parent = commit
+			s.lastTurn = turn
+			s.snapped = true
+		}
+		return s, nil
+	}
+
 	existing, err := r.git(ctx, "for-each-ref", "--count=1", "--format=%(refname)", s.refPrefix())
 	if err != nil {
 		return nil, fmt.Errorf("repo: checking for existing snapshots of session %s: %w", sessionID, err)
@@ -153,6 +206,44 @@ func NewSnapshotter(ctx context.Context, r *Repo, sessionID string, opts ...Opti
 	}
 
 	return s, nil
+}
+
+// latest reports the highest turn number sessionID has a shadow ref for, and
+// that ref's commit, so [NewResumingSnapshotter] can seed the chain state a
+// fresh [Snapshotter] would otherwise start from scratch.
+//
+// found is false when the session has no refs at all — a resume of a session
+// that never reached a mutating turn — which is not an error: there is simply
+// nothing to attach to yet.
+func (s *Snapshotter) latest(ctx context.Context) (turn int, commit string, found bool, err error) {
+	out, err := s.repo.git(ctx, "for-each-ref", "--format=%(refname) %(objectname)", s.refPrefix())
+	if err != nil {
+		return 0, "", false, fmt.Errorf("repo: listing existing snapshots of session %s: %w", s.sessionID, err)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			return 0, "", false, fmt.Errorf(
+				"repo: unexpected for-each-ref output %q while listing session %s's snapshots",
+				line, s.sessionID)
+		}
+		refname, obj := fields[0], fields[1]
+		turnPart := strings.TrimPrefix(refname, s.refPrefix())
+		t, perr := strconv.Atoi(turnPart)
+		if perr != nil {
+			return 0, "", false, fmt.Errorf(
+				"repo: ref %q under session %s's namespace does not name a turn number: %w",
+				refname, s.sessionID, perr)
+		}
+		if !found || t > turn {
+			turn, commit, found = t, obj, true
+		}
+	}
+	return turn, commit, found, nil
 }
 
 // refPrefix is the namespace this session's refs live under, with the trailing
