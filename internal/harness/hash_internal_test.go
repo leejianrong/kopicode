@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/leejianrong/kopicode/internal/anchor"
@@ -48,5 +49,53 @@ func TestPreimageIsUnambiguous(t *testing.T) {
 	if a.Hash() == b.Hash() {
 		t.Errorf("%+v and %+v hash to the same value (%s) — the preimage is being concatenated "+
 			"without length prefixes, so field boundaries can be forged by content", a, b, a.Hash())
+	}
+}
+
+// TestMinimaxM2ConfigOnlyChangesSeedPolicy holds MinimaxM2ConfigName's own
+// doc comment in harness.go to the code it describes: the configuration is
+// the default's value in every field except the sampling seed policy (and
+// the seed value that policy makes meaningless), and the name that
+// identifies it.
+//
+// It is an internal test because minimaxM2Config is unexported — the whole
+// point of building the second configuration by copying the first (see
+// defaultHarnessConfig's own doc comment) is that the diff is checkable
+// structurally rather than by eye across two long literals, and this is the
+// check.
+func TestMinimaxM2ConfigOnlyChangesSeedPolicy(t *testing.T) {
+	base := defaultHarnessConfig
+	got := minimaxM2Config(base)
+
+	if got.Name != MinimaxM2ConfigName {
+		t.Errorf("Name = %q, want %q", got.Name, MinimaxM2ConfigName)
+	}
+	if got.Sampling.SeedPolicy != SeedUnseeded {
+		t.Errorf("Sampling.SeedPolicy = %q, want %q — the argument for this configuration "+
+			"(docs/provider-pin.md §minimax/minimax-m2) is that the pinned endpoint does not "+
+			"support seed at all", got.Sampling.SeedPolicy, SeedUnseeded)
+	}
+	if got.Sampling.Seed != 0 {
+		t.Errorf("Sampling.Seed = %d, want 0: meaningless once SeedPolicy is SeedUnseeded, and a "+
+			"nonzero value sitting here unused would read as a seed nobody meant to send", got.Sampling.Seed)
+	}
+
+	// Name and Version are expected to differ — a configuration is
+	// identified by its name (Config.Name's own doc comment) — so normalise
+	// those and the two seed fields already checked above, then require
+	// everything else to compare equal wholesale. That is what proves
+	// nothing else moved, without hand-listing every remaining field of
+	// Config the way the doc comment's claim would otherwise rest on
+	// nothing but review.
+	normalised := got
+	normalised.Name = base.Name
+	normalised.Version = base.Version
+	normalised.Sampling.SeedPolicy = base.Sampling.SeedPolicy
+	normalised.Sampling.Seed = base.Sampling.Seed
+
+	if !reflect.DeepEqual(base, normalised) {
+		t.Errorf("minimaxM2Config(base) differs from base in more than Name, Version and the seed "+
+			"fields; MinimaxM2ConfigName's doc comment in harness.go claims exactly one axis changed\n"+
+			"base: %+v\ngot:  %+v", base, normalised)
 	}
 }

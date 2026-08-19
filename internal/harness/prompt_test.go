@@ -27,37 +27,43 @@ import (
 // if someone were to hash the prompt's length, or a normalised form of it, or
 // hash nothing and leave a field that happens to move for another reason, the
 // reflection test would still pass and this one would not.
+//
+// It runs over every registered configuration, not only the default, for the
+// same reason TestHashCoversEveryConfigField does.
 func TestSystemPromptIsInTheConfigHash(t *testing.T) {
-	base := defaultConfig(t)
+	for _, base := range everyConfig(t) {
+		t.Run(base.Name, func(t *testing.T) {
+			// Positive control: the hash must be stable for an unchanged
+			// prompt, or every "the hash moved" assertion below passes for
+			// the wrong reason.
+			if base.Hash() != configByName(t, base.Name).Hash() {
+				t.Fatalf("the same configuration hashed twice gave %s and %s; nothing below means anything",
+					base.Hash(), configByName(t, base.Name).Hash())
+			}
 
-	// Positive control: the hash must be stable for an unchanged prompt, or
-	// every "the hash moved" assertion below passes for the wrong reason.
-	if base.Hash() != defaultConfig(t).Hash() {
-		t.Fatalf("the same configuration hashed twice gave %s and %s; nothing below means anything",
-			base.Hash(), defaultConfig(t).Hash())
-	}
+			if base.SystemPrompt == "" {
+				t.Fatal("the shipped harness configuration carries no system prompt")
+			}
 
-	if base.SystemPrompt == "" {
-		t.Fatal("the shipped harness configuration carries no system prompt")
-	}
-
-	cases := map[string]string{
-		"one character appended":  base.SystemPrompt + " ",
-		"one character removed":   base.SystemPrompt[:len(base.SystemPrompt)-1],
-		"leading newline added":   "\n" + base.SystemPrompt,
-		"no prompt at all":        "",
-		"whitespace-only rewrite": strings.ReplaceAll(base.SystemPrompt, "\n", " "),
-	}
-	for name, prompt := range cases {
-		t.Run(name, func(t *testing.T) {
-			mutated := base
-			mutated.SystemPrompt = prompt
-			if mutated.Hash() == base.Hash() {
-				t.Errorf("%s left the harness config hash at %s\n"+
-					"the system prompt is in the hash preimage by digest "+
-					"(docs/adr/0007-model-selection-and-harness-config-shape.md decision 6): "+
-					"two arms running different prompts would otherwise pool as one",
-					name, base.Hash())
+			cases := map[string]string{
+				"one character appended":  base.SystemPrompt + " ",
+				"one character removed":   base.SystemPrompt[:len(base.SystemPrompt)-1],
+				"leading newline added":   "\n" + base.SystemPrompt,
+				"no prompt at all":        "",
+				"whitespace-only rewrite": strings.ReplaceAll(base.SystemPrompt, "\n", " "),
+			}
+			for name, prompt := range cases {
+				t.Run(name, func(t *testing.T) {
+					mutated := base
+					mutated.SystemPrompt = prompt
+					if mutated.Hash() == base.Hash() {
+						t.Errorf("%s left the harness config hash at %s\n"+
+							"the system prompt is in the hash preimage by digest "+
+							"(docs/adr/0007-model-selection-and-harness-config-shape.md decision 6): "+
+							"two arms running different prompts would otherwise pool as one",
+							name, base.Hash())
+					}
+				})
 			}
 		})
 	}
@@ -77,29 +83,38 @@ func TestSystemPromptIsInTheConfigHash(t *testing.T) {
 // TestToolSetMatchesInternalTools already holds to internal/tools' own
 // constants — so this closes the chain from the source to the prose without a
 // hand-written list anywhere in it.
+//
+// It runs over every registered configuration: today they all share
+// DefaultSystemPrompt (KAN-942's [harness.MinimaxM2ConfigName] varies only
+// the sampling seed policy), so this is currently the same check repeated,
+// but a configuration that ever carries its own prompt inherits it from the
+// day it is registered rather than from whenever someone notices the gap.
 func TestSystemPromptDocumentsEveryTool(t *testing.T) {
-	cfg := defaultConfig(t)
-	sections := promptSections(t, cfg.SystemPrompt)
+	for _, cfg := range everyConfig(t) {
+		t.Run(cfg.Name, func(t *testing.T) {
+			sections := promptSections(t, cfg.SystemPrompt)
 
-	// Positive control: a section scan that found nothing would accept a prompt
-	// documenting no tools at all.
-	if len(sections) == 0 {
-		t.Fatalf("positive control failed: no `### <tool>` section was found in the system prompt, "+
-			"so this test would accept any prose at all\nprompt begins:\n%s",
-			firstLines(cfg.SystemPrompt, 5))
-	}
+			// Positive control: a section scan that found nothing would accept
+			// a prompt documenting no tools at all.
+			if len(sections) == 0 {
+				t.Fatalf("positive control failed: no `### <tool>` section was found in the system prompt, "+
+					"so this test would accept any prose at all\nprompt begins:\n%s",
+					firstLines(cfg.SystemPrompt, 5))
+			}
 
-	var documented []string
-	for _, s := range sections {
-		documented = append(documented, s.name)
-	}
+			var documented []string
+			for _, s := range sections {
+				documented = append(documented, s.name)
+			}
 
-	if !slices.Equal(documented, cfg.ToolSet) {
-		t.Errorf("the system prompt documents %v; harness configuration %q presents %v\n"+
-			"the prompt is the only tool description the model receives (provider.Request carries "+
-			"no tool definitions yet, KAN-844), and ToolSet's order is the order the model is shown "+
-			"them, so the two must agree exactly",
-			documented, cfg.Name, cfg.ToolSet)
+			if !slices.Equal(documented, cfg.ToolSet) {
+				t.Errorf("the system prompt documents %v; harness configuration %q presents %v\n"+
+					"the prompt is the only tool description the model receives (provider.Request carries "+
+					"no tool definitions yet, KAN-844), and ToolSet's order is the order the model is shown "+
+					"them, so the two must agree exactly",
+					documented, cfg.Name, cfg.ToolSet)
+			}
+		})
 	}
 }
 
@@ -127,61 +142,69 @@ func TestSystemPromptDocumentsEveryTool(t *testing.T) {
 // imports harness (internal/engine/selection.go), so the dependency cannot run
 // the other way. internal/harness/registry_test.go takes the same route into
 // internal/tools for the same reason.
+// It runs over every registered configuration for the same reason
+// TestSystemPromptDocumentsEveryTool does.
 func TestSystemPromptDocumentsEveryToolArgument(t *testing.T) {
-	cfg := defaultConfig(t)
-	sections := promptSections(t, cfg.SystemPrompt)
 	args := catalogueArgs(t)
-
-	byName := make(map[string]promptSection, len(sections))
-	for _, s := range sections {
-		byName[s.name] = s
-	}
-
-	// Both directions, because a tool whose argument struct nobody wrote is as
-	// invisible to this test as one nobody documented.
 	catalogued := slices.Sorted(maps.Keys(args))
-	offered := slices.Sorted(slices.Values(cfg.ToolSet))
-	if !slices.Equal(catalogued, offered) {
-		t.Fatalf("internal/engine's catalogue carries argument structs for %v; harness "+
-			"configuration %q presents %v\nthe struct name is the tool name in lowerCamel plus "+
-			"`Args`, and a mismatch means either a tool the engine cannot decode a call for or "+
-			"one whose arguments this test is silently not checking",
-			catalogued, cfg.Name, offered)
-	}
 
-	checked := 0
-	for _, tool := range cfg.ToolSet {
-		section, ok := byName[tool]
-		if !ok {
-			t.Errorf("the system prompt has no `### %s` section", tool)
-			continue
-		}
-		names := args[tool]
-		if len(names) == 0 {
-			t.Errorf("positive control failed: the argument struct for %q parsed with no json "+
-				"tags, so the tool is unchecked", tool)
-			continue
-		}
+	for _, cfg := range everyConfig(t) {
+		t.Run(cfg.Name, func(t *testing.T) {
+			sections := promptSections(t, cfg.SystemPrompt)
 
-		for _, arg := range names {
-			checked++
-			// As a quoted JSON key, not as a bare word: `path` and `pattern`
-			// occur in ordinary prose, and a substring match on those would
-			// pass for a section that never shows the argument at all.
-			if !strings.Contains(section.body, `"`+arg+`"`) {
-				t.Errorf("the system prompt's %s section never shows %q as a JSON key\n"+
-					"the json tags in internal/engine/catalogue.go are the only place the "+
-					"model-facing argument names exist, and the prompt is the only place the "+
-					"model is told them, so an argument missing here is one it cannot send",
-					tool, arg)
+			byName := make(map[string]promptSection, len(sections))
+			for _, s := range sections {
+				byName[s.name] = s
 			}
-		}
-	}
 
-	// Positive control: a walk that checked nothing would pass silently.
-	if checked < len(cfg.ToolSet) {
-		t.Fatalf("positive control failed: only %d arguments were checked across %d tools",
-			checked, len(cfg.ToolSet))
+			// Both directions, because a tool whose argument struct nobody
+			// wrote is as invisible to this test as one nobody documented.
+			offered := slices.Sorted(slices.Values(cfg.ToolSet))
+			if !slices.Equal(catalogued, offered) {
+				t.Fatalf("internal/engine's catalogue carries argument structs for %v; harness "+
+					"configuration %q presents %v\nthe struct name is the tool name in lowerCamel plus "+
+					"`Args`, and a mismatch means either a tool the engine cannot decode a call for or "+
+					"one whose arguments this test is silently not checking",
+					catalogued, cfg.Name, offered)
+			}
+
+			checked := 0
+			for _, tool := range cfg.ToolSet {
+				section, ok := byName[tool]
+				if !ok {
+					t.Errorf("the system prompt has no `### %s` section", tool)
+					continue
+				}
+				names := args[tool]
+				if len(names) == 0 {
+					t.Errorf("positive control failed: the argument struct for %q parsed with no json "+
+						"tags, so the tool is unchecked", tool)
+					continue
+				}
+
+				for _, arg := range names {
+					checked++
+					// As a quoted JSON key, not as a bare word: `path` and
+					// `pattern` occur in ordinary prose, and a substring
+					// match on those would pass for a section that never
+					// shows the argument at all.
+					if !strings.Contains(section.body, `"`+arg+`"`) {
+						t.Errorf("the system prompt's %s section never shows %q as a JSON key\n"+
+							"the json tags in internal/engine/catalogue.go are the only place the "+
+							"model-facing argument names exist, and the prompt is the only place the "+
+							"model is told them, so an argument missing here is one it cannot send",
+							tool, arg)
+					}
+				}
+			}
+
+			// Positive control: a walk that checked nothing would pass
+			// silently.
+			if checked < len(cfg.ToolSet) {
+				t.Fatalf("positive control failed: only %d arguments were checked across %d tools",
+					checked, len(cfg.ToolSet))
+			}
+		})
 	}
 }
 
@@ -199,8 +222,9 @@ func TestSystemPromptDocumentsEveryToolArgument(t *testing.T) {
 // The reasons are read out of internal/tools' source, so a fifth one added
 // without prompt guidance fails here rather than showing up as a retry loop in
 // a bench run.
+// It runs over every registered configuration for the same reason
+// TestSystemPromptDocumentsEveryTool does.
 func TestSystemPromptAnswersEveryRejectReason(t *testing.T) {
-	cfg := defaultConfig(t)
 	reasons := toolsRejectReasons(t)
 
 	// Positive control: an extraction that found nothing would accept a prompt
@@ -210,13 +234,17 @@ func TestSystemPromptAnswersEveryRejectReason(t *testing.T) {
 			"so this test would accept a prompt that documents none of them")
 	}
 
-	for _, reason := range reasons {
-		if !strings.Contains(cfg.SystemPrompt, reason) {
-			t.Errorf("the system prompt never names the rejection reason %q\n"+
-				"internal/tools can refuse an edit with it, and each reason implies a different "+
-				"recovery (docs/adr/0006-hash-anchored-edits-and-failure-attribution.md); a reason "+
-				"the prompt does not explain is a turn spent guessing", reason)
-		}
+	for _, cfg := range everyConfig(t) {
+		t.Run(cfg.Name, func(t *testing.T) {
+			for _, reason := range reasons {
+				if !strings.Contains(cfg.SystemPrompt, reason) {
+					t.Errorf("the system prompt never names the rejection reason %q\n"+
+						"internal/tools can refuse an edit with it, and each reason implies a different "+
+						"recovery (docs/adr/0006-hash-anchored-edits-and-failure-attribution.md); a reason "+
+						"the prompt does not explain is a turn spent guessing", reason)
+				}
+			}
+		})
 	}
 }
 
@@ -230,13 +258,18 @@ func TestSystemPromptAnswersEveryRejectReason(t *testing.T) {
 // it to open the prompt and decide whether the anchor instructions still
 // describe the format — which is the review the boundary is supposed to
 // trigger, made mechanical instead of remembered.
+// It runs over every registered configuration for the same reason
+// TestSystemPromptDocumentsEveryTool does.
 func TestSystemPromptStatesTheAnchorVersion(t *testing.T) {
-	cfg := defaultConfig(t)
-	if !strings.Contains(cfg.SystemPrompt, anchor.Version) {
-		t.Errorf("the system prompt does not contain the anchor contract version %q\n"+
-			"a bump to anchor.Version changes every anchor the model sees and opens a new "+
-			"experiment series (ADR-0006 §7); the prompt states the version so that a bump "+
-			"cannot happen without someone reading the anchor instructions again", anchor.Version)
+	for _, cfg := range everyConfig(t) {
+		t.Run(cfg.Name, func(t *testing.T) {
+			if !strings.Contains(cfg.SystemPrompt, anchor.Version) {
+				t.Errorf("the system prompt does not contain the anchor contract version %q\n"+
+					"a bump to anchor.Version changes every anchor the model sees and opens a new "+
+					"experiment series (ADR-0006 §7); the prompt states the version so that a bump "+
+					"cannot happen without someone reading the anchor instructions again", anchor.Version)
+			}
+		})
 	}
 }
 

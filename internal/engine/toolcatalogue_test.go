@@ -30,58 +30,76 @@ import (
 // one side and not the other fails here, the same way
 // harness.TestSystemPromptDocumentsEveryToolArgument catches a prompt and a
 // struct tag disagreeing.
+//
+// It checks every registered configuration (harnesscfg.ConfigNames()), not
+// only the default: harnesscfg.MinimaxM2ConfigName happens to carry the same
+// ToolSet and ToolCatalogue today (KAN-942 varies only the sampling seed
+// policy), but nothing enforces that staying true, and a configuration with
+// its own catalogue deserves this guard from the day it is registered.
 func TestHarnessToolCatalogueMatchesEngineCatalogue(t *testing.T) {
-	cfg, ok := harnesscfg.ConfigByName(harnesscfg.DefaultConfigName)
-	if !ok {
-		t.Fatalf("no %q harness configuration is registered", harnesscfg.DefaultConfigName)
+	names := harnesscfg.ConfigNames()
+	if len(names) == 0 {
+		t.Fatal("positive control failed: harnesscfg.ConfigNames() lists no configuration at all")
 	}
 
-	// Positive control 1: the configuration must actually carry a rendered
-	// catalogue, or the comparison below passes by both sides being empty.
-	if len(cfg.ToolCatalogue) == 0 {
-		t.Fatal("positive control failed: the default harness configuration's ToolCatalogue is empty")
-	}
-	if len(cfg.ToolCatalogue) != len(cfg.ToolSet) {
-		t.Fatalf("ToolCatalogue has %d entries but ToolSet lists %d tools; they must be the same "+
-			"tools in the same order", len(cfg.ToolCatalogue), len(cfg.ToolSet))
-	}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			cfg, ok := harnesscfg.ConfigByName(name)
+			if !ok {
+				t.Fatalf("no %q harness configuration is registered", name)
+			}
 
-	cat, err := engine.Catalogue(cfg.ToolSet)
-	if err != nil {
-		t.Fatalf("building the engine catalogue over %v: %v", cfg.ToolSet, err)
-	}
+			// Positive control 1: the configuration must actually carry a
+			// rendered catalogue, or the comparison below passes by both
+			// sides being empty.
+			if len(cfg.ToolCatalogue) == 0 {
+				t.Fatalf("positive control failed: %q harness configuration's ToolCatalogue is empty", name)
+			}
+			if len(cfg.ToolCatalogue) != len(cfg.ToolSet) {
+				t.Fatalf("ToolCatalogue has %d entries but ToolSet lists %d tools; they must be the same "+
+					"tools in the same order", len(cfg.ToolCatalogue), len(cfg.ToolSet))
+			}
 
-	// Rendered in ToolSet's own order — the presentation order, not
-	// catalogue.Names()'s sorted one (engine.Catalogue sorts its name list for
-	// a stable unknown-tool message, which is a different concern from
-	// presentation order; see engine.Engine.wireTools' own doc comment).
-	var schemas []parse.Schema
-	for _, name := range cfg.ToolSet {
-		schema, ok := cat.Schema(name)
-		if !ok {
-			t.Fatalf("engine.Catalogue built over %v has no schema for %q, which ToolSet lists",
-				cfg.ToolSet, name)
-		}
-		schemas = append(schemas, schema)
-	}
+			cat, err := engine.Catalogue(cfg.ToolSet)
+			if err != nil {
+				t.Fatalf("building the engine catalogue over %v: %v", cfg.ToolSet, err)
+			}
 
-	// Positive control 2: every schema found must actually carry a
-	// description, or a comparison against a harness literal that also forgot
-	// one would pass for the wrong reason. engine.schemaOf panics at package
-	// init on a tool or argument with no description, so this is a sanity
-	// check on the walk above rather than on schemaOf itself.
-	for _, s := range schemas {
-		if s.Description == "" {
-			t.Fatalf("positive control failed: engine.Catalogue's schema for %q carries no description", s.Name)
-		}
-	}
+			// Rendered in ToolSet's own order — the presentation order, not
+			// catalogue.Names()'s sorted one (engine.Catalogue sorts its name
+			// list for a stable unknown-tool message, which is a different
+			// concern from presentation order; see engine.Engine.wireTools'
+			// own doc comment).
+			var schemas []parse.Schema
+			for _, toolName := range cfg.ToolSet {
+				schema, ok := cat.Schema(toolName)
+				if !ok {
+					t.Fatalf("engine.Catalogue built over %v has no schema for %q, which ToolSet lists",
+						cfg.ToolSet, toolName)
+				}
+				schemas = append(schemas, schema)
+			}
 
-	want := provider.RenderTools(schemas)
-	if diff := cmp.Diff(want, cfg.ToolCatalogue); diff != "" {
-		t.Errorf("harness.Config.ToolCatalogue disagrees with the engine's own rendered catalogue "+
-			"(-engine +harness):\n%s\n"+
-			"ToolCatalogue is a literal copy of what internal/engine/catalogue.go's argument structs "+
-			"declare (see ToolCatalogue's own doc comment in internal/harness/harness.go); a name, "+
-			"type, required flag or description changed on one side and not the other", diff)
+			// Positive control 2: every schema found must actually carry a
+			// description, or a comparison against a harness literal that
+			// also forgot one would pass for the wrong reason.
+			// engine.schemaOf panics at package init on a tool or argument
+			// with no description, so this is a sanity check on the walk
+			// above rather than on schemaOf itself.
+			for _, s := range schemas {
+				if s.Description == "" {
+					t.Fatalf("positive control failed: engine.Catalogue's schema for %q carries no description", s.Name)
+				}
+			}
+
+			want := provider.RenderTools(schemas)
+			if diff := cmp.Diff(want, cfg.ToolCatalogue); diff != "" {
+				t.Errorf("harness.Config.ToolCatalogue disagrees with the engine's own rendered catalogue "+
+					"(-engine +harness):\n%s\n"+
+					"ToolCatalogue is a literal copy of what internal/engine/catalogue.go's argument structs "+
+					"declare (see ToolCatalogue's own doc comment in internal/harness/harness.go); a name, "+
+					"type, required flag or description changed on one side and not the other", diff)
+			}
+		})
 	}
 }
