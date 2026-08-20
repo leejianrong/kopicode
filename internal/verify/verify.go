@@ -276,6 +276,12 @@ func (r Result) Ran() bool { return r.Outcome != NotRun }
 // package doc on why a [NotRun] does not.
 func (r Result) Blocks() bool { return r.Outcome == Failed }
 
+// Summary is [Result.Output]'s headline alone, with no raw stream behind it —
+// the one-line form the engine hands the model when a run passes (KAN-960).
+// A pass has nothing further worth spending tokens on every time it recurs,
+// unlike a failure, where the stream is the fix's own evidence.
+func (r Result) Summary() string { return "verification: " + headline(r) }
+
 // Verifier runs forced verification for one repository.
 //
 // The engine builds one per session and calls [Verifier.Run] after each turn

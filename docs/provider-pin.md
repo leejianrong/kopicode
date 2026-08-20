@@ -432,6 +432,36 @@ one of the twelve documented values `internal/provider/fixture`'s vocabulary acc
 Nothing here was invented: every real endpoint for this model reports either `fp8` or
 `fp4`, both real, and `fp8` was chosen for fidelity, not assumed.
 
+### Cost, as of 2026-08-20 (a real corpus run, KAN-936)
+
+The full 10-task corpus ran against this pin for the first time on 2026-08-20 — the same
+`bench.RunCorpus` KAN-800 ran for `qwen/qwen3-coder-next`, against the arm
+`z-ai/glm-5.2` / `default` (harness config hash `a4f65adc19b0…`). **9/10 tasks passed.**
+Total usage across the successful run: 232,681 prompt tokens, 3,278 completion tokens —
+at this pin's own prices ($0.50/$3.15 per million) that is **≈$0.127**, the same order of
+magnitude as `qwen/qwen3-coder-next`'s $0.0846 (KAN-800) despite this pin costing roughly
+4x per token, because most tasks finished in 4–5 turns.
+
+The one failure, `go-flag-equals-form`, is classified `harness` per KAN-797's mechanical
+rule, and the reason is worth recording because it is a **methodology finding, not a pin
+problem**: OpenRouter enforces a **10-requests-per-minute limit on new accounts** for this
+model specifically (`"limit_source":"openrouter_new_account"` in the 429 body), and this
+account is one. The provider client's retry budget (6 attempts, capped exponential
+backoff with full jitter) rides out an ordinary 429 but is not built to ride out a
+sustained per-minute account cap. A first attempt at this run with the runner's default
+`--jobs 4` failed **every single task** the same way — four concurrent sessions each
+issuing several requests a minute exhausts a shared 10rpm ceiling almost immediately, and
+every task's failure looked identical (`retries exhausted after 6 attempt(s)`). Re-running
+with `--jobs 1` (serialising every task's own requests) got 9 of 10 through cleanly; one
+otherwise-passing task, `go-config-retries`, still tripped the limit on a late turn after
+its fix was already correct, which is a second, independent illustration of KAN-960: the
+extra turns a model spends re-verifying work that has already passed are not free, and
+here one of them was the turn that ran the account out of request budget for the minute.
+**Until this account ages past whatever OpenRouter's new-account window is** (undocumented;
+not re-checked here), a `z-ai/glm-5.2` corpus run needs `--jobs 1`, and even then is not
+guaranteed clean — re-verify against the account's current rate limit before trusting a
+future run's task count at face value.
+
 ### Re-checking either new pin
 
 The same three-part check applies as for `qwen/qwen3-coder-next`, per model: the slug is
@@ -439,7 +469,10 @@ still in the catalogue under that exact spelling, the chosen `tag` still serves 
 that endpoint still reports the quantization recorded here. If any of the three has
 changed, the pin is **not** silently updated — change the value in
 `internal/harness/registry.go`, date the change here, and start a new experiment series
-per ADR-0005 §2's discard rule. Neither `minimax/minimax-m2` nor `z-ai/glm-5.2` has had a
-live completion request driven against it yet (no `make smoke-live` equivalent exists per
-model); both pins are argued from the endpoints response only, the same position
-`qwen/qwen3-coder-next` was in before KAN-852.
+per ADR-0005 §2's discard rule. `minimax/minimax-m2` has not had a live completion request
+driven against it yet (no `make smoke-live` equivalent exists per model), and its pin is
+argued from the endpoints response only, the same position `qwen/qwen3-coder-next` was in
+before KAN-852. `z-ai/glm-5.2` now has: the corpus run above resolved every successful
+request to `sail-research/fp8`'s endpoint without a routing failure, which confirms the
+pin routes even though the rate-limit finding above means it is not yet a *clean* run in
+the sense KAN-800's was.

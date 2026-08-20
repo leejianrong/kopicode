@@ -511,6 +511,15 @@ func (e *Engine) verify(ctx context.Context, turn int) (Stop, error) {
 	case res.Ran():
 		// A passing run answers an outstanding rejection; nothing else does.
 		e.unverified = ""
+		// The model has no other way to learn this ran at all, let alone that
+		// it passed (KAN-960): unattended mode denies every run_shell call
+		// outright, so a model that does not trust silence as "passed" has no
+		// remaining move but to retry the same denied call. One line, not the
+		// full output res.Blocks() sends above — a pass has nothing further to
+		// spend tokens restating every time it recurs.
+		if err := e.observe(res.Summary()); err != nil {
+			return StopHarnessError, err
+		}
 	}
 	return StopUnspecified, nil
 }
