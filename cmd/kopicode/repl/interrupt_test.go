@@ -193,3 +193,5 @@ type fakeTerminal struct{}
 func (fakeTerminal) IsInteractive() bool { return true }
 
 func (fakeTerminal) MakeRaw() (func() error, error) { return func() error { return nil }, nil }
+
+func (fakeTerminal) Width() int { return 0 }

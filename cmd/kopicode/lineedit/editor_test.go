@@ -26,6 +26,10 @@ import (
 // method got called.
 type fakeTerminal struct {
 	interactive bool
+	// width is what Width reports. Zero, the default, matches the old
+	// single-row behaviour every existing test in this file exercises;
+	// only a test specifically about wrapping sets it.
+	width int
 
 	mu       sync.Mutex
 	rawCalls int
@@ -34,6 +38,8 @@ type fakeTerminal struct {
 }
 
 func (t *fakeTerminal) IsInteractive() bool { return t.interactive }
+
+func (t *fakeTerminal) Width() int { return t.width }
 
 func (t *fakeTerminal) MakeRaw() (func() error, error) {
 	t.mu.Lock()
@@ -482,6 +488,74 @@ func TestInteractiveOutputRedrawsOnlyTheCurrentLine(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "abXc") {
 		t.Errorf("the edited line was never drawn: %q", out.String())
+	}
+}
+
+// TestWrappedLineRedrawsWithoutDuplicating is KAN-951's regression test.
+//
+// Before the fix, a redraw always returned to column zero and erased with
+// csiClearToEnd, both of which act on the terminal's *current* row only.
+// Once prompt+text grew past the terminal's width, the terminal's own
+// autowrap put the cursor on a lower row than the redraw assumed, so "\r"
+// returned to that lower row's column zero and csiClearToEnd erased only
+// it — the row above kept whatever text had been there, and every
+// subsequent keystroke's repaint looked like that text duplicating
+// downward.
+//
+// The proxy for "the earlier rows get touched now" is the escape sequences
+// this package is documented to emit for exactly that: a redraw following
+// one that used more than one row must move the cursor up before erasing,
+// and must erase to the end of the screen rather than the end of the line
+// — csiClearToEnd alone reappearing forever, with no cursorUp anywhere in
+// the stream, would be this bug back.
+func TestWrappedLineRedrawsWithoutDuplicating(t *testing.T) {
+	term := &fakeTerminal{interactive: true, width: 10}
+	out := &bytes.Buffer{}
+	// Prompt "> " is 2 columns; 9 typed characters take promptWidth+text to
+	// 11, past width 10, so this line wraps before it is done.
+	e := lineedit.New(lineedit.Config{
+		In:       strings.NewReader("123456789" + enter),
+		Out:      out,
+		Terminal: term,
+		Prompt:   "> ",
+	})
+
+	if got, want := readOne(t, e), "123456789"; got != want {
+		t.Fatalf("ReadLine() = %q, want %q — the fix must not change what gets typed", got, want)
+	}
+
+	text := out.String()
+	if !strings.Contains(text, "\x1b[1A") {
+		t.Errorf("output never moves the cursor up a row even though the line wrapped "+
+			"(prompt 2 cols + 9 chars > width 10):\n%q", text)
+	}
+	if !strings.Contains(text, "\x1b[J") {
+		t.Errorf("output never erases to the end of the screen even though a previous "+
+			"redraw used more than one row:\n%q", text)
+	}
+}
+
+// TestUnknownWidthKeepsTheOldSingleRowBehaviour holds the fallback: a
+// terminal whose width could not be determined (Width() == 0) must never
+// see the multi-row escapes — an erase-to-end-of-screen or a cursor-up —
+// because there is nothing to base the row math on, and guessing a width
+// that might be wrong is worse than the single-row behaviour this replaces.
+func TestUnknownWidthKeepsTheOldSingleRowBehaviour(t *testing.T) {
+	e, _, out := interactiveEditor(strings.Repeat("x", 40) + enter)
+
+	if got, want := readOne(t, e), strings.Repeat("x", 40); got != want {
+		t.Fatalf("ReadLine() = %q, want %q", got, want)
+	}
+
+	text := out.String()
+	if strings.Contains(text, "\x1b[J") {
+		t.Errorf("output erases to end of screen with an unknown terminal width:\n%q", text)
+	}
+	for _, seq := range []string{"\x1b[1A", "\x1b[2A", "\x1b[3A", "\x1b[4A"} {
+		if strings.Contains(text, seq) {
+			t.Errorf("output contains %q with an unknown terminal width, "+
+				"which has nothing to compute a row count from:\n%q", seq, text)
+		}
 	}
 }
 
