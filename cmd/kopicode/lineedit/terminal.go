@@ -26,6 +26,13 @@ type Terminal interface {
 	// puts it back. It is called once per ReadLine, so the terminal spends
 	// the time between lines in its normal state.
 	MakeRaw() (restore func() error, err error)
+
+	// Width reports the terminal's column count, or 0 if it could not be
+	// determined. 0 is the safe direction: the redraw logic treats it as
+	// "assume the line never wraps" rather than guessing a number, which is
+	// what a repaint needs to know before it can account for a line that
+	// wraps past it (KAN-951).
+	Width() int
 }
 
 // OSTerminal drives a real terminal through golang.org/x/term.
@@ -48,6 +55,19 @@ func (t *osTerminal) IsInteractive() bool {
 		return false
 	}
 	return term.IsTerminal(int(t.in.Fd())) && term.IsTerminal(int(t.out.Fd()))
+}
+
+// Width queries the output side, since that is the side wrapping happens on
+// — the redraw escapes it drives all go to t.out. 0 on error rather than a
+// guessed default: GetSize failing means this process cannot see a real
+// terminal size, and assuming one that might be wrong is how a redraw ends up
+// erasing or positioning against a width the actual terminal disagrees with.
+func (t *osTerminal) Width() int {
+	w, _, err := term.GetSize(int(t.out.Fd()))
+	if err != nil {
+		return 0
+	}
+	return w
 }
 
 func (t *osTerminal) MakeRaw() (func() error, error) {
@@ -84,3 +104,9 @@ func (nonInteractive) MakeRaw() (func() error, error) {
 	// wrong finds out.
 	return nil, fmt.Errorf("lineedit: MakeRaw on a non-interactive terminal")
 }
+
+// Width is never consulted: redraw, the one caller, only runs on the
+// raw-mode path. 0 all the same, for the same reason MakeRaw errors rather
+// than no-ops — a Terminal that answered this convincingly would make a
+// caller that reached it by mistake harder to notice.
+func (nonInteractive) Width() int { return 0 }

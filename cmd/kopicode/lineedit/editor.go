@@ -46,8 +46,13 @@
 // reads. [Editor.Restore] is the exception and is safe from anywhere,
 // including a signal handler.
 //
-// Lines longer than the terminal is wide will wrap, and the repaint does not
-// account for the wrap. Multi-line editing is not in this card.
+// Lines longer than the terminal is wide will wrap, and the repaint accounts
+// for it (KAN-951) when the terminal's width can be determined — see
+// [Editor.redraw] and [termPos]. What is still out of scope: display width
+// (a CJK ideograph or a combining mark moves the rune cursor correctly but
+// draws in the wrong column, per line.go's own doc comment) and a terminal
+// resize mid-line, since width is read once per ReadLine and not watched
+// for SIGWINCH.
 package lineedit
 
 import (
@@ -95,6 +100,13 @@ type Editor struct {
 
 	prompt      string
 	promptWidth int
+
+	// width is the terminal's column count for the ReadLine in progress, 0
+	// if unknown. lastRows is how many terminal rows the previous redraw
+	// occupied. Both are reset at the start of readInteractive and updated
+	// by redraw — see redraw's own doc comment for why they exist (KAN-951).
+	width    int
+	lastRows int
 
 	history []string
 
@@ -240,6 +252,13 @@ func (e *Editor) readInteractive() (string, error) {
 	keys := &keyReader{r: e.in}
 	s := newSession(e.history)
 
+	// Queried once per ReadLine, not per keystroke: a resize mid-line is out
+	// of scope, the same way MakeRaw is called once per ReadLine rather than
+	// once per key. lastRows starts at 1 — nothing is drawn yet at the
+	// current row, so the first redraw has nothing above it to return to.
+	e.width = e.terminal.Width()
+	e.lastRows = 1
+
 	if err := e.redraw(&s.line); err != nil {
 		return "", err
 	}
@@ -319,26 +338,103 @@ func (e *Editor) remember(text string) {
 // csiClearToEnd erases from the cursor to the end of the line.
 const csiClearToEnd = "\x1b[K"
 
-// redraw repaints the current line in place.
+// csiClearToEndOfScreen erases from the cursor to the end of the screen. A
+// redraw needs this once a line has wrapped onto more than one terminal
+// row: csiClearToEnd only reaches the end of the row the cursor is
+// currently on, leaving every wrapped row below it untouched — which is
+// KAN-951's bug (see redraw's own doc comment).
+const csiClearToEndOfScreen = "\x1b[J"
+
+// cursorUp returns the escape that moves the cursor up n rows, or "" for
+// n <= 0 — moving up zero rows is a no-op worth skipping rather than a
+// sequence worth sending.
+func cursorUp(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return "\x1b[" + strconv.Itoa(n) + "A"
+}
+
+// cursorForward returns the escape that moves the cursor right n columns,
+// or "" for n <= 0, mirroring cursorUp.
+func cursorForward(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return "\x1b[" + strconv.Itoa(n) + "C"
+}
+
+// termPos returns the row and column an insertion point n characters into
+// the prompt+line lands on, given a terminal width columns wide. Both are
+// 0-indexed from the row the prompt's own first character sits on.
 //
-// One line, always the current one, never scrollback — ADR-0004 decision 3.
-// The sequence is: return to column zero, erase the line, write prompt and
-// text, return to column zero again, then move right to where the cursor
-// belongs. Repainting the whole line on every keystroke is more bytes than a
-// clever incremental update and cannot get out of step with the buffer, which
-// at one prompt's worth of text is the right trade.
+// "Insertion point" — where the cursor sits with n characters typed and
+// none yet at that slot — is the convention throughout redraw rather than
+// "where does the cursor sit right after the nth character was written",
+// because the latter is genuinely ambiguous at a row boundary on a real
+// terminal: deferred autowrap leaves the cursor pinned to the last column
+// of a just-filled row until another character actually forces the wrap,
+// and modelling that needs state this package does not keep. An insertion
+// point has no such ambiguity — floor division always names a single slot
+// — so termPos is used uniformly for both the cursor's target position and
+// for how many rows the full line occupies, and the two therefore always
+// agree with each other even on the one input (a line whose length is an
+// exact multiple of width) where this package's answer and a real
+// terminal's momentary display can differ by a row until the next
+// keystroke. That is the same kind of simplification line.go's own doc
+// comment already makes for display width, stated here rather than
+// discovered later.
+func termPos(n, width int) (row, col int) {
+	if width <= 0 {
+		return 0, n
+	}
+	return n / width, n % width
+}
+
+// redraw repaints the current line in place, wrapped rows included.
+//
+// Nothing here touches a row above the prompt's own first row, or
+// scrollback — ADR-0004 decision 3 still holds. What changed from the
+// single-row version this replaced is that a repaint can no longer assume
+// the cursor comes back to the row it started on: once prompt+text is
+// wider than the terminal, "\r" only returns to column zero of whatever row
+// the terminal wrapped onto, and csiClearToEnd only erases that one row —
+// so the rows above kept whatever they held before, and every keystroke
+// that redrew made it look like the earlier text had duplicated downward
+// (KAN-951).
+//
+// The fix tracks how many rows the *previous* redraw actually used
+// (e.lastRows) and, when that was more than one, moves up to the first of
+// them before erasing to the end of the screen rather than the end of the
+// line. e.width is queried once per ReadLine by readInteractive; 0 means it
+// could not be determined, and termPos's own fallback for that (treat the
+// line as one unbounded row) reduces this whole function to exactly the
+// single-row behaviour it replaces, which is deliberate: a terminal this
+// package cannot measure gets the old, safe assumption rather than a guess.
 func (e *Editor) redraw(l *line) error {
 	var b strings.Builder
-	b.WriteString("\r")
-	b.WriteString(csiClearToEnd)
+	if e.lastRows > 1 {
+		b.WriteString(cursorUp(e.lastRows - 1))
+		b.WriteString("\r")
+		b.WriteString(csiClearToEndOfScreen)
+	} else {
+		b.WriteString("\r")
+		b.WriteString(csiClearToEnd)
+	}
 	b.WriteString(e.prompt)
 	b.WriteString(l.String())
+
+	full := e.promptWidth + utf8.RuneCountInString(l.String())
+	pos := e.promptWidth + l.pos
+
+	endRow, _ := termPos(full, e.width)
+	posRow, posCol := termPos(pos, e.width)
+	e.lastRows = endRow + 1
+
+	b.WriteString(cursorUp(endRow - posRow))
 	b.WriteString("\r")
-	if n := e.promptWidth + l.pos; n > 0 {
-		b.WriteString("\x1b[")
-		b.WriteString(strconv.Itoa(n))
-		b.WriteString("C")
-	}
+	b.WriteString(cursorForward(posCol))
+
 	return e.writeString(b.String())
 }
 
