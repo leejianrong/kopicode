@@ -262,6 +262,9 @@ func (l *Loop) Run(ctx context.Context) (engine.Stop, error) {
 }
 
 func (l *Loop) loop(ctx context.Context) (engine.Stop, error) {
+	l.out.line(l.out.dim("Type /exit, /quit, or press Ctrl-D on an empty line to leave. " +
+		"Ctrl-C cancels the current line or turn, not the session."))
+
 	for {
 		// The session's own context, not a turn's: a cancelled one means the
 		// process is going away, which is an orderly end rather than a
