@@ -303,6 +303,45 @@ func TestAFailedVerificationBecomesTheNextTurnsObservation(t *testing.T) {
 	}
 }
 
+// TestAPassingVerificationTellsTheModel is KAN-960's fix. A model that never
+// learns a passing verification even ran has no way to tell "nobody has
+// checked yet" from "it already passed" — and unattended mode denies every
+// run_shell call it tries instead, so a model that does not trust silence has
+// no move left but to keep retrying the same denied call, sometimes past
+// max_turns. A pass now answers back, in one line rather than the whole
+// stream: the model's confirmation costs a few tokens once, not the entire
+// suite's output every time it recurs.
+func TestAPassingVerificationTellsTheModel(t *testing.T) {
+	p := script(t, writeThenStop(), oneAttemptPerTurn(2))
+	spy := &recordingProvider{inner: p}
+	h := newHarness(t, p, nil,
+		withMaxTurns(2), withProvider(spy), withHelperVerification(t, "big"))
+
+	if _, err := h.eng.Run(t.Context(), "add a greeting"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if len(spy.requests) < 2 {
+		t.Fatalf("the loop sent %d requests; the second turn is where the confirmation lands",
+			len(spy.requests))
+	}
+	last := spy.requests[len(spy.requests)-1]
+
+	found := false
+	for _, m := range last.Messages {
+		if strings.Contains(m.Content, "verification:") && strings.Contains(m.Content, "passed") {
+			found = true
+		}
+		if strings.Contains(m.Content, "verification line 0000") {
+			t.Errorf("a pass sent the whole 3000-line stream to the model rather than a one-line "+
+				"summary:\n%+v", last.Messages)
+		}
+	}
+	if !found {
+		t.Errorf("a passing verification never told the model it ran at all:\n%+v", last.Messages)
+	}
+}
+
 // TestAPassingVerificationAnswersAnEarlierFailure is what makes the rule usable
 // rather than a trap. A model that fixes what the suite complained about must be
 // able to finish; only a later passing run clears an earlier rejection.

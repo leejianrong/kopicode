@@ -79,8 +79,15 @@ func everyConfig(t *testing.T) []harness.Config {
 // PreimageVersion stays at 2, the same category KAN-843's own move was. No
 // bench run had happened under the prior hash either, so nothing pools
 // incorrectly across this move.
+//
+// It moved a fourth time on KAN-960, when prompt_default.md's Verification
+// section was rewritten to say a pass answers back with a one-line
+// confirmation rather than staying silent — another prompt *value* change,
+// not new preimage coverage, so PreimageVersion again stays where it was.
+// One real bench run (z-ai/glm-5.2, 2026-08-20) had already happened under
+// the prior hash; see docs/provider-pin.md for that arm's own record.
 func TestDefaultConfigHashIsStable(t *testing.T) {
-	const want = "a4f65adc19b06d9777edba143bbe0cfaf94054c88773cc73b64ec25ebb17b589"
+	const want = "34f95a0068f38695dfeb45ba4da3dbb4a756ea88a386abc5ebea15e1a3ace4ee"
 
 	got := defaultConfig(t).Hash()
 	if got != want {
@@ -105,7 +112,7 @@ func TestDefaultConfigHashIsStable(t *testing.T) {
 // TestNoTwoConfigsShareAHash below is what checks that expectation rather
 // than this test silently passing if they happened to collide.
 func TestMinimaxM2ConfigHashIsStable(t *testing.T) {
-	const want = "4171f94309eb8a46e7ec95db015145f0767b8b41aae682722838ef43210a66e1"
+	const want = "c1169a045ee59785abf5ca6e6c19087125f7fcce8f3a08204de0c0b5428d32ef"
 
 	got := configByName(t, harness.MinimaxM2ConfigName).Hash()
 	if got != want {

@@ -137,18 +137,19 @@ own judgement instead.
 ## Verification
 
 This repository's own check — its `test` target, `go test ./...`, `npm test`,
-whatever it uses — is run for you after every reply in which you changed
-anything. You do not have to run the whole suite yourself.
+whatever it uses — runs for you after every reply that changed anything. Do
+not run it yourself to check the same thing again.
 
-It speaks only when it fails: the output arrives as your next message. Until it
-passes you cannot finish — a reply with no tool call while the check is failing
-ends the session as a failure, whatever the reply says. So a failure is the
-work, not an obstacle to reporting it. Read the output, fix the cause, and let
-the next run answer it.
+A pass answers in one line: `verification: ... passed`. That line is the
+confirmation; nothing more is owed once it arrives. A failure answers in
+full — the whole output arrives as your next message, and until it passes you
+cannot finish: a reply with no tool call while the check is failing ends the
+session as a failure, whatever the reply says. Read the output, fix the
+cause, and let the next run answer it.
 
-Silence therefore means one of two things: it passed, or this project has no
-check kopicode could find. On a project you do not recognise, run its checks
-once yourself to see which.
+Silence means only one thing now: this project has no check kopicode could
+find. On a project you do not recognise, run its checks once yourself to see
+which.
 
 ## Working
 
