@@ -1,0 +1,27 @@
+title = "kopicode gitleaks config"
+
+# gitleaks's default rule set, unchanged. This file only adds an allowlist —
+# it does not narrow or replace what the default config already scans for.
+[extend]
+useDefault = true
+
+# `make secrets` runs both `gitleaks detect` (git history) and `gitleaks dir .`
+# (the working tree) — see the Makefile's `secrets` target and
+# .github/workflows/ci.yml's "Secret scan" job, which runs the identical
+# command so the two cannot drift.
+#
+# `gitleaks dir .` scans the filesystem, not git's index, so it sees `.env`
+# even though `.gitignore` (line: `/.env`) keeps it out of every commit. That
+# file is the documented, intended place for a real OPENROUTER_API_KEY
+# locally (see .env.example and CLAUDE.md's Commands section) so that `make
+# bench` and `make smoke-live` can read it without it ever touching the
+# shell's history or environment inheritance rules. Scanning it is a false
+# positive on every machine that has followed that instruction, and it is not
+# a gap this allowlist opens: `gitleaks detect` (history) is untouched, so a
+# key that ever actually reached a commit is still caught there regardless of
+# this file.
+[[allowlists]]
+description = "the local .env is gitignored (/.env) and never committed; it exists so make bench/smoke-live can read OPENROUTER_API_KEY without it reaching the shell"
+paths = [
+  '''^\.env$''',
+]
