@@ -16,7 +16,7 @@ import (
 )
 
 // TestSmokeRunOverTheRealCorpus is `make bench-smoke` as a test: the frozen
-// ten-task corpus, the real engine loop, the replay provider, zero tokens.
+// corpus, the real engine loop, the replay provider, zero tokens.
 //
 // It is what makes the smoke target's *acceptance* checkable rather than
 // observed by eye — the target itself runs the shipped binary against the
@@ -33,8 +33,8 @@ import (
 // that outlives the checkout, and every worktree reclaimed — which is the half
 // that has to be right before an arm's numbers mean anything.
 //
-// Behind the integration tag because it compiles ten small projects and runs
-// their suites.
+// Behind the integration tag because it compiles every task's small project
+// and runs its suite.
 func TestSmokeRunOverTheRealCorpus(t *testing.T) {
 	f := newCorpusCopyFixture(t)
 
@@ -51,8 +51,8 @@ func TestSmokeRunOverTheRealCorpus(t *testing.T) {
 		t.Fatalf("RunCorpus: %v", err)
 	}
 
-	if got := len(res.Tasks); got != corpus.MinTasks {
-		t.Fatalf("results = %d, want %d", got, corpus.MinTasks)
+	if got := len(res.Tasks); got != f.TaskCount {
+		t.Fatalf("results = %d, want %d", got, f.TaskCount)
 	}
 
 	// The bar for the smoke run is that every task was *put a question*, not
@@ -69,8 +69,8 @@ func TestSmokeRunOverTheRealCorpus(t *testing.T) {
 	}
 
 	c := res.Reclamation
-	if c.Created != corpus.MinTasks || c.Removed != corpus.MinTasks || len(c.Failed) != 0 {
-		t.Errorf("reclamation = %+v, want created and removed %d", c, corpus.MinTasks)
+	if c.Created != f.TaskCount || c.Removed != f.TaskCount || len(c.Failed) != 0 {
+		t.Errorf("reclamation = %+v, want created and removed %d", c, f.TaskCount)
 	}
 	if paths := worktreePaths(t, f.Root); len(paths) != 1 {
 		t.Errorf("the smoke run left worktrees registered: %v", paths)
@@ -105,20 +105,20 @@ func TestSmokeRunOverTheRealCorpus(t *testing.T) {
 		t.Fatalf("WriteReport: %v", err)
 	}
 	if !strings.Contains(report.String(), fmt.Sprintf("created %d, removed %d, kept 0",
-		corpus.MinTasks, corpus.MinTasks)) {
+		f.TaskCount, f.TaskCount)) {
 		t.Errorf("the report does not account for the worktrees:\n%s", report.String())
 	}
 	// The whole tally, and the `unattributed` line ADR-0006 §3 asks for by
 	// name, on a run where that bucket is empty.
 	for _, want := range []string{
 		fmt.Sprintf("attribution over %d failed task(s): harness 0, unattributed 0, model %d, "+
-			"unclassified 0", corpus.MinTasks, corpus.MinTasks),
+			"unclassified 0", f.TaskCount, f.TaskCount),
 		"unattributed = 0",
 		// KAN-905: this is `make bench-smoke`'s actual run, so the footer
 		// explaining a 0-pass mock run must appear on the real thing and not
 		// only in a hand-built unit test.
 		"SMOKE BASELINE",
-		fmt.Sprintf("0/%d passing is EXPECTED", corpus.MinTasks),
+		fmt.Sprintf("0/%d passing is EXPECTED", f.TaskCount),
 	} {
 		if !strings.Contains(report.String(), want) {
 			t.Errorf("the report does not say %q:\n%s", want, report.String())
@@ -212,7 +212,12 @@ func newCorpusCopyFixture(t *testing.T) *fixture {
 
 	git(t, root, "add", "-A")
 	git(t, root, "commit", "-q", "-m", "corpus")
-	return &fixture{Root: root, CorpusDir: dst, Commit: git(t, root, "rev-parse", "HEAD")}
+	return &fixture{
+		Root:      root,
+		CorpusDir: dst,
+		Commit:    git(t, root, "rev-parse", "HEAD"),
+		TaskCount: len(copied.Tasks),
+	}
 }
 
 func copyTree(t *testing.T, src, dst string) {
