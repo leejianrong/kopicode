@@ -70,6 +70,10 @@ var cancellableTools = []cancellable{
 		_, err := s.WriteFile(ctx, tools.WriteRequest{Path: "new.txt", Content: "x\n"})
 		return err
 	}},
+	{"DeleteFile", func(ctx context.Context, s *tools.Set) error {
+		_, err := s.DeleteFile(ctx, tools.DeleteRequest{Path: "main.go"})
+		return err
+	}},
 	{"EditFile", func(ctx context.Context, s *tools.Set) error {
 		// Anchors that would resolve on an unended context, so the cancellation
 		// is what this row observes rather than a rejection standing in for it.
