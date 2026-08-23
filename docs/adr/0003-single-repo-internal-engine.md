@@ -11,11 +11,11 @@ the original kopicode and kopi-engine READMEs.
 
 The original plan split the work across two repos: `kopi-engine` (agent loop, tool
 dispatch, permission model, session state, model routing, context management) and
-`kopicode` (the terminal surface). The justification was a second consumer, sotong,
+`kopicode` (the terminal surface). The justification was a second consumer, cuttlefish,
 which would share the engine but need a stricter safety model.
 
 Two things changed. [ADR-0002](0002-no-durable-runtime-own-journal.md) removed
-Satay, which was the main thing kopi-engine existed to wrap. And sotong is not
+Satay, which was the main thing kopi-engine existed to wrap. And cuttlefish is not
 started and has no timeline.
 
 That left two repos, two CI setups, two release cadences and a version-compatibility
@@ -60,7 +60,7 @@ human is asked for permission belong to the front ends. The engine decides *that
 permission is required and what the decision means, never how it is presented. This
 clause from the kopi-engine README is correct and carries over unchanged.
 
-**5. Splitting later is a rename.** If sotong is built and genuinely needs the
+**5. Splitting later is a rename.** If cuttlefish is built and genuinely needs the
 engine, promoting `internal/engine` to a published module is mechanical. Doing it
 now is not recoverable effort — it is effort spent on a guess about which seams
 matter.

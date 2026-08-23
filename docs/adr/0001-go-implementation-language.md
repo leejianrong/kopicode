@@ -73,7 +73,7 @@ coding agents into cyclic compilation-error loops. This is the one language clai
 
 **Not decided here: porting Satay to Go.** That is a separate and much larger
 question — a runtime with replay, forking, nondeterminism detection and 400+ tests.
-Do not conflate "kopicode is Go" with "Satay gets ported." If sotong later proves
+Do not conflate "kopicode is Go" with "Satay gets ported." If cuttlefish later proves
 durability is essential *and* Python is the wrong host, that is when the port gets
 priced.
 
