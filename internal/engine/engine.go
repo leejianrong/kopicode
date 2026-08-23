@@ -275,6 +275,32 @@ type Engine struct {
 	// parameter at all, so nothing in the binary read the field the hash
 	// claimed to be describing.
 	parseOrder []parse.Route
+
+	// lastDispatch is the identity and outcome of the most recently
+	// *dispatched* call — across calls within a turn and across turns alike —
+	// used only to collapse a run of byte-identical, already-denied tool
+	// calls on the wire (ADR-0012 decision 1; KAN-989). It is transient
+	// in-memory loop state, not a journaled payload type: every
+	// PermissionRequested, PermissionDecided and ToolResult event is still
+	// written in full for every call, collapsed or not. Only the string
+	// dispatch hands to [Assembler.AppendToolResult] — what the model sees
+	// next — is shortened, and only when this call's (tool, raw arguments)
+	// pair is byte-identical to the immediately preceding one and both were
+	// denied. Any call that doesn't match resets it, so a repeat that
+	// succeeds, or a different call in between, never collapses.
+	lastDispatch dispatchOutcome
+}
+
+// dispatchOutcome is one dispatched call's identity, for the repeat-denial
+// comparison lastDispatch holds. args is compared byte-for-byte
+// ([parse.ToolCall.Arguments] is always compact JSON), not decoded and
+// deep-compared, because decoding could normalise away a real difference the
+// model intended.
+type dispatchOutcome struct {
+	tool    string
+	args    []byte
+	denied  bool
+	repeats int // consecutive identical denials collapsed so far, beyond the first
 }
 
 // New checks a configuration and returns the engine it describes. It journals

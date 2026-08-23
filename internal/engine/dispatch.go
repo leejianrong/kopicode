@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -265,13 +266,29 @@ func (e *Engine) dispatch(ctx context.Context, turn int, ext parse.Extraction) (
 			return mutated, err
 		}
 
-		output, mut, err := e.runTool(ctx, turn, id, call)
+		output, mut, denied, err := e.runTool(ctx, turn, id, call)
 		if err != nil {
 			return mutated, err
 		}
 		mutated = mutated || mut
 
-		if err := e.asm.AppendToolResult(call.ID, output); err != nil {
+		// ADR-0012 decision 1 (KAN-989): a call byte-identical in tool name
+		// and raw arguments to the one dispatched immediately before it,
+		// where both were denied, carries zero information beyond the first
+		// denial's reason — the model already has the complete text. Only
+		// what reaches the assembler is shortened; journalToolResult above
+		// (inside runTool) already wrote the full output to the journal, and
+		// that record is untouched by this.
+		wire := output
+		if denied && e.lastDispatch.denied && e.lastDispatch.tool == call.Name &&
+			bytes.Equal(e.lastDispatch.args, call.Arguments) {
+			e.lastDispatch.repeats++
+			wire = collapsedDenial(call.Name, e.lastDispatch.repeats)
+		} else {
+			e.lastDispatch = dispatchOutcome{tool: call.Name, args: call.Arguments, denied: denied}
+		}
+
+		if err := e.asm.AppendToolResult(call.ID, wire); err != nil {
 			return mutated, fmt.Errorf("engine: placing the result of %s (call %q): %w", call.Name, id, err)
 		}
 	}
@@ -286,10 +303,15 @@ func (e *Engine) dispatch(ctx context.Context, turn int, ext parse.Extraction) (
 // runTool decodes, gates and runs one call, journaling everything it produced.
 //
 // The string it returns is what the model sees next, and it is never empty and
-// never clipped. The bool says the tree may have changed. The error is fatal
-// and only ever the harness's own: a tool that failed is an observation, not an
-// exception.
-func (e *Engine) runTool(ctx context.Context, turn int, callID string, call parse.ToolCall) (string, bool, error) {
+// never clipped — it is journal.ToolResult.Output verbatim; dispatch is the
+// only place that may shorten what reaches the model, and only for a detected
+// repeat denial. The first bool says the tree may have changed. The second
+// says the permission gate itself ran and refused the call — the "denied" this
+// package's repeat-collapse cares about, as opposed to a tool failing for any
+// other reason (an unknown tool, arguments that didn't decode, the tool's own
+// error). The error is fatal and only ever the harness's own: a tool that
+// failed is an observation, not an exception.
+func (e *Engine) runTool(ctx context.Context, turn int, callID string, call parse.ToolCall) (string, bool, bool, error) {
 	entry, ok := toolByName[call.Name]
 	if !ok || !e.offered[call.Name] {
 		// Two ways in, and both are refusals rather than surprises. The name
@@ -307,18 +329,18 @@ func (e *Engine) runTool(ctx context.Context, turn int, callID string, call pars
 			Reason: parse.KindUnknownTool.String(),
 			Detail: journal.InlineText(detail),
 		}); err != nil {
-			return "", false, err
+			return "", false, false, err
 		}
-		return detail, false, nil
+		return detail, false, false, nil
 	}
 
 	args := entry.newArgs()
 	if err := json.Unmarshal(call.Arguments, args); err != nil {
 		detail := fmt.Sprintf("the arguments for %s did not decode: %v", call.Name, err)
 		if jerr := e.journalToolResult(ctx, turn, callID, call.Name, detail, nil, tools.FaultTask); jerr != nil {
-			return "", false, jerr
+			return "", false, false, jerr
 		}
-		return detail, false, nil
+		return detail, false, false, nil
 	}
 
 	act := permission.Action{ID: callID, Tool: call.Name, Operation: entry.op}
@@ -330,25 +352,25 @@ func (e *Engine) runTool(ctx context.Context, turn int, callID string, call pars
 	outcome, perr := e.cfg.Permissions.Check(ctx, act)
 	if outcome.Required {
 		if err := e.journalPermission(ctx, turn, outcome); err != nil {
-			return "", false, err
+			return "", false, false, err
 		}
 	}
 	if perr != nil {
 		detail := perr.Error()
 		if jerr := e.journalToolResult(ctx, turn, callID, call.Name, detail, nil, faultOf(perr)); jerr != nil {
-			return "", false, jerr
+			return "", false, false, jerr
 		}
-		return detail, false, nil
+		return detail, false, true, nil
 	}
 
 	res, err := entry.run(ctx, e, turn, callID, args)
 	if err != nil {
-		return "", false, err
+		return "", false, false, err
 	}
 	if jerr := e.journalToolResult(ctx, turn, callID, call.Name, res.output, res.exitCode, faultOf(res.err)); jerr != nil {
-		return "", false, jerr
+		return "", false, false, jerr
 	}
-	return res.output, entry.mutates, nil
+	return res.output, entry.mutates, false, nil
 }
 
 // journalToolResult writes the outcome of one call. Output goes in whole:
@@ -487,6 +509,20 @@ func faultOf(err error) tools.Fault {
 		return tools.FaultTask
 	}
 	return tools.FaultOf(err)
+}
+
+// collapsedDenial is what the model sees instead of the full denial text for
+// the (n+1)th consecutive byte-identical denial of one call — ADR-0012
+// decision 1. n is the number of times this exact call has now been denied
+// beyond the first, so the message stays honest about the count without
+// repeating the reason, which the model already has from the first denial.
+func collapsedDenial(tool string, n int) string {
+	plural := "s"
+	if n == 1 {
+		plural = ""
+	}
+	return fmt.Sprintf("...denied %d more time%s, identically — same %s call as before; see the first denial above.",
+		n, plural, tool)
 }
 
 // modelText is what the model is shown for one call: the tool's own rendering,
