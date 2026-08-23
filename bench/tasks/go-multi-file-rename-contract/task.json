@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "go-multi-file-rename-contract",
+  "title": "Thread the customer's tier through every discount call site",
+  "statement": "Gold members are supposed to get a bigger discount than everyone else, but when I check a gold customer's order, the invoice and the printed receipt still show the regular discount -- only the cart total looks right. Please fix it so a gold customer's discount is correct everywhere it shows up, not just in one place. `go test ./...` should pass once it's fixed.",
+  "language": "go",
+  "requires": ["go"],
+  "oracle": {
+    "argv": ["go", "test", "./..."],
+    "env": {
+      "GOFLAGS": "-mod=readonly",
+      "GOPROXY": "off"
+    },
+    "timeout_seconds": 120
+  },
+  "traits": ["multi_file", "requires_read"],
+  "max_turns": 20,
+  "notes": "Needs the Go toolchain only. Discounter.Apply ignores the tier it's pricing for, so every customer gets the regular rate; the test file already calls Apply with a tier argument, so the package does not even build until the interface and its one implementation grow that parameter -- that part is the easy, forced half. The harder half is that three independent paths reach Apply -- Cart.Total, the invoice line-builder (computeLine), and the receipt line-builder (formatLine) -- and only Cart.Total already has the customer's tier sitting in scope; computeLine and formatLine take just a Discounter and an Item, so passing the real tier through means widening their own signatures too, and widening their callers (GenerateInvoice, BuildReceipt) to supply it. A fix that changes the interface everywhere it needs to compile, threads the tier correctly through the cart, but hardcodes or drops it at computeLine/formatLine because they don't already take one, still builds cleanly and even passes every regular-tier test -- it only shows up as a wrong total on a gold customer's invoice or receipt, which is exactly what TestInvoiceGoldTier and TestReceiptGoldTier check. Written to catch a shallow, compiles-and-looks-done fix that a diff skim would wave through."
+}
