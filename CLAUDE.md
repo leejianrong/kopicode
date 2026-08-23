@@ -438,6 +438,8 @@ fixture is hand-authored rather than recorded from a real run.
 - [`docs/adr/`](docs/adr/) — decisions of record, 0001–0011
 - [`docs/provider-pin.md`](docs/provider-pin.md) — which provider and quantization
   every benchmark request pins, and why
+- [`docs/token-growth.md`](docs/token-growth.md) — real per-turn context growth from
+  two dogfood sessions (KAN-935/947); what it does and doesn't say about compaction
 - [`README.md`](README.md) — the thesis, where the harness gains are, the model table
 - `../agentic-harness-ideas.md` — pre-ADR strategy notes; superseded where an ADR
   disagrees, still holds the open questions ADRs haven't resolved yet
