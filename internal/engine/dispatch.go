@@ -149,6 +149,21 @@ var toolEntries = []toolEntry{
 			return toolOutcome{output: modelText(res.Output, err), err: err}, nil
 		}),
 
+	// delete_file is classified permission.OperationWrite, matching write_file:
+	// a delete inside the repository root is the agent's own job (permission
+	// gate's fixed rule "inside it, writing is the agent's job"), and one
+	// outside it always asks — see internal/permission/gate.go's doc comment.
+	// mutates is true because a delete changes the tree and earns the turn a
+	// TurnSnapshot, exactly like write_file and edit_file.
+	entryOf(tools.ToolDeleteFile,
+		"Delete a file.",
+		permission.OperationWrite, true,
+		func(a *deleteFileArgs, _ string, act *permission.Action) { act.Path = a.Path },
+		func(ctx context.Context, e *Engine, _ int, _ string, a *deleteFileArgs) (toolOutcome, error) {
+			res, err := e.cfg.Tools.DeleteFile(ctx, tools.DeleteRequest{Path: a.Path})
+			return toolOutcome{output: modelText(res.Output, err), err: err}, nil
+		}),
+
 	entryOf(tools.ToolRunShell,
 		"Run a command line through the platform shell and return its combined output and exit status.",
 		permission.OperationShell, true,

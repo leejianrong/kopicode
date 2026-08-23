@@ -269,7 +269,7 @@ internal/
   engine/            agent loop, turn state, context assembly
   provider/          OpenRouter client, mock/replay provider
   parse/             tool-call extraction + repair
-  tools/             read, write, edit, list, grep, shell
+  tools/             read, write, edit, delete, list, grep, shell
   journal/           append-only tagged-union event log
   repo/              git shadow refs, worktrees, diff rendering
   permission/        policy decisions (what needs asking, not how to ask)

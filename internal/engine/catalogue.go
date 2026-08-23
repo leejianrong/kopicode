@@ -92,6 +92,10 @@ type (
 		After  string `json:"after" kopicode:"required" kopicode_desc:"the replacement text for whatever before matched"`
 	}
 
+	deleteFileArgs struct {
+		Path string `json:"path" kopicode:"required" kopicode_desc:"the file's path, relative to the repository root"`
+	}
+
 	runShellArgs struct {
 		Command string `json:"command" kopicode:"required" kopicode_desc:"the command line to run, interpreted by the platform shell"`
 		Dir     string `json:"dir" kopicode_desc:"the working directory, relative to the repository root; empty means the repository root"`
