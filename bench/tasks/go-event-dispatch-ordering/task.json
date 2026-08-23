@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "go-event-dispatch-ordering",
+  "title": "Customer names are missing from the order report and shipping notice",
+  "statement": "Our order pipeline has a bug: the daily order report and the shipping notifications we send customers are both missing the customer's name -- every single order, every time. Everything else about an order (the ID, the total) looks correct, just not the name. Can you track this down and fix it so both show the right customer name? `go test ./...` should pass once it's fixed.",
+  "language": "go",
+  "requires": ["go"],
+  "oracle": {
+    "argv": ["go", "test", "./..."],
+    "env": {
+      "GOFLAGS": "-mod=readonly",
+      "GOPROXY": "off"
+    },
+    "timeout_seconds": 120
+  },
+  "traits": ["multi_file", "requires_read"],
+  "max_turns": 20,
+  "notes": "Needs the Go toolchain only. Handlers run in ascending priority order (lowest first), assigned when each is registered, not by the order Register is called in -- and the shared Registry's sort (registry.go) is correct. The bug is that the pipeline is wired up in two independent places -- the live order pipeline and the one support tooling uses to replay a past order on demand -- and both assign the enrichment handler and the notification handler the wrong priority relative to each other, so notification building runs before the customer's name has been looked up and enrichment runs dead last, too late to help either consumer. Neither the report/notification formatting code nor the registry's sort logic is at fault, which is what makes this a trap for a fix that patches the text-building code, or 'fixes' the sort, without noticing the actual defect is two swapped priority numbers, declared twice, once per pipeline builder -- fixing only one leaves the other's test failing."
+}
