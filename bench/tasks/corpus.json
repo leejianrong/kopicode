@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "corpus_version": "2.0.0",
-  "digest": "sha256:117cc20486a5b2e20e4a569eea44f6b8cc4e95f1e8f5e1724d4069f15c69110c",
+  "digest": "sha256:41a488d27c72417bb646baf11331b3cc822fabf8c8b00b7ce0308fe6dcce23ad",
   "description": "kopicode slice-1 benchmark corpus: ten small deterministic repair-and-extend tasks, Go and Python, oracle-graded by each task's own test suite.",
   "tasks": [
     "go-unicode-reverse",
@@ -15,6 +15,7 @@
     "go-config-retries",
     "py-calc-modulo",
     "go-multi-file-rename-contract",
-    "go-event-dispatch-ordering"
+    "go-event-dispatch-ordering",
+    "go-partial-fix-trap-validation"
   ]
 }
