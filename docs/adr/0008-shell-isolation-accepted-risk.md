@@ -16,6 +16,11 @@ isolation for the bench runner" deferral. Both name the gap; neither says what f
 it. This ADR is the concrete answer slice 3 will need, or the concrete argument for why
 slice 3 should not spend effort here yet.
 
+Amended by [ADR-0011](0011-unattended-invocation-policy-gate.md), which answers
+trigger condition 1 below (now fired) with a second, opt-in trust-model mode —
+policy-gated, unattended, containment provided by the invoking orchestrator — read
+alongside, not in place of, the single-trusted-developer model stated below.
+
 ## Context
 
 **What `run_shell` contains today, read from the code rather than assumed.**
@@ -111,12 +116,12 @@ discipline is the argument for writing it down rather than leaving it as five se
 hedges a reader has to assemble.
 
 It also matches where kopicode sits relative to its sibling project. CLAUDE.md states
-outright: "Satay's natural consumer in this suite is sotong (unattended, triggered,
+outright: "Satay's natural consumer in this suite is cuttlefish (unattended, triggered,
 credential-holding, not started), not kopicode." kopicode is the supervised,
 interactive tool; a human is present, watching, and asked before every shell command.
 The risk this ADR accepts — a consented command has full privilege — is the risk that
 belongs to a supervised tool whose operator is also its sole trust boundary. It stops
-being the right risk to accept the moment kopicode's usage looks like sotong's.
+being the right risk to accept the moment kopicode's usage looks like cuttlefish's.
 
 ### Why not (a) now
 
@@ -231,8 +236,8 @@ tree, live — is incompatible with running against a copy.
   and dependency posture at that time** — not a quiet addition of Docker calls to
   `internal/bench`. Revisiting the decision is cheap; the decision itself should not be
   reversed by a PR that never named the reversal.
-- **This ADR makes no claim about sotong.** Its unattended, credential-holding, "not
+- **This ADR makes no claim about cuttlefish.** Its unattended, credential-holding, "not
   started" workload is exactly the shape that would fail this ADR's trigger conditions on
-  day one, and CLAUDE.md is explicit that sotong — not kopicode — is where that
-  problem belongs. Nothing here should be read as a template for sotong's isolation
+  day one, and CLAUDE.md is explicit that cuttlefish — not kopicode — is where that
+  problem belongs. Nothing here should be read as a template for cuttlefish's isolation
   story; it would need its own, harder, ADR.

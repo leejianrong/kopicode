@@ -14,6 +14,13 @@ Also extends ADR-0005 by defining the unit its paired method compares, and
 [ADR-0006](0006-hash-anchored-edits-and-failure-attribution.md) §7 by saying what the
 harness config hash it writes into actually hashes.
 
+Amended by [ADR-0010](0010-declarative-harness-configs-and-self-tuning.md), which adds
+a second, *declared* class of harness configuration alongside the built-in registry
+decision 5 defines below. Decision 5's "users do not author one" now holds only for
+the built-in class — see ADR-0010 decision 3 for exactly what a declared configuration
+may and may not do, and why this does not reopen the reproducibility argument
+decision 5's alternatives-rejected section made.
+
 ## Context
 
 **One binary with the model chosen at run time is inferable from five places and
