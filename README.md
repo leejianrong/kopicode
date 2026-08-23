@@ -220,9 +220,13 @@ being CGo; the resolution sketch is stdlib `go/ast` for Go plus an optional exte
 | Paired A/B methodology, pinned providers, mock provider | [0005](docs/adr/0005-benchmark-and-ab-methodology.md) |
 | Hash-anchored edits; three-bucket failure attribution | [0006](docs/adr/0006-hash-anchored-edits-and-failure-attribution.md) |
 | One binary for every model; harness config resolved from the model id; what an arm is | [0007](docs/adr/0007-model-selection-and-harness-config-shape.md) |
+| Model-authored shell isolation is an accepted risk, not a sandbox | [0008](docs/adr/0008-shell-isolation-accepted-risk.md) *(Proposed)* |
+| The `ask` tool: a sibling to consent, not an extension of it | [0009](docs/adr/0009-ask-tool-contract.md) *(Proposed)* |
+| Declarative harness configs and a self-tuning search loop (`kopitune`) | [0010](docs/adr/0010-declarative-harness-configs-and-self-tuning.md) |
+| A policy gate for unattended invocation, containment left to the caller | [0011](docs/adr/0011-unattended-invocation-policy-gate.md) |
 
-Two of these reverse earlier plans in this repo, and it is worth being explicit
-about why:
+Two of these reverse earlier plans in this repo, and two more amend earlier ones
+without reversing them. Worth being explicit about all four.
 
 **Satay is out.** The original bet was "a kopicode session is a journal" — replay
 it, fork it at the turn where it went wrong. The hole in that: Satay forks by
@@ -234,9 +238,27 @@ never moved, which is worse than not forking. For a coding agent the state that
 matters is the filesystem, and the thing that versions filesystems is git. Details
 and the replacement design in [ADR-0002](docs/adr/0002-no-durable-runtime-own-journal.md).
 
-**kopi-engine is folded in.** With Satay out and sotong unstarted, a separate engine
+**kopi-engine is folded in.** With Satay out and cuttlefish unstarted, a separate engine
 repo was two CI setups and a version matrix for one unbuilt product. Go's
 `internal/` gives the boundary for free. [ADR-0003](docs/adr/0003-single-repo-internal-engine.md).
+
+**Declared configs sit next to the built-in registry.** ADR-0007 said users don't
+author a harness configuration. That held for the case it was written for: a
+published benchmark result, which has to reproduce from the artifact alone. A
+private one doesn't carry that requirement, so
+[ADR-0010](docs/adr/0010-declarative-harness-configs-and-self-tuning.md) adds a
+second, declarative config class, TOML, base configuration plus field overrides, for
+a model with no built-in entry, plus `kopitune`: a search loop over the fields the
+harness already has. It's local-only by design. A declared config never anchors a
+published number.
+
+**The unattended case needed its own trust model, not a workaround.** ADR-0008
+accepted that a consented shell command runs with the operator's full privilege, on
+the premise that the operator and the person whose task is running are the same
+trusted person. cuttlefish breaks that premise on purpose, so
+[ADR-0011](docs/adr/0011-unattended-invocation-policy-gate.md) adds a second mode: a
+declared allowlist policy instead of a human answering, with real containment
+supplied by whoever calls kopicode unattended, not by kopicode itself.
 
 ## Layout
 
@@ -332,7 +354,7 @@ registers one configuration and measures one model against it.
 ## Where this sits
 
 ```
-kopicode (this repo)          sotong (later, not started)
+kopicode (this repo)          cuttlefish (later, not started)
    terminal coding agent        always-on assistant
    interactive, supervised      unattended, triggered
                                   |
@@ -340,7 +362,7 @@ kopicode (this repo)          sotong (later, not started)
                           durable execution, journal, replay, fork
 ```
 
-sotong is where durable execution earns its cost: unattended, trigger-driven,
+cuttlefish is where durable execution earns its cost: unattended, trigger-driven,
 long-running, holding credentials, with no human watching to hit Ctrl-C. Replay
 from the top is designed for exactly that workload. kopicode is the opposite case
 and pays the determinism tax for benefits it does not collect.
