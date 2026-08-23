@@ -46,12 +46,13 @@ import (
 
 // Tool names, as the model calls them and as journal.ToolResult records them.
 const (
-	ToolReadFile  = "read_file"
-	ToolListDir   = "list_dir"
-	ToolGrep      = "grep"
-	ToolRunShell  = "run_shell"
-	ToolWriteFile = "write_file"
-	ToolEditFile  = "edit_file"
+	ToolReadFile   = "read_file"
+	ToolListDir    = "list_dir"
+	ToolGrep       = "grep"
+	ToolRunShell   = "run_shell"
+	ToolWriteFile  = "write_file"
+	ToolEditFile   = "edit_file"
+	ToolDeleteFile = "delete_file"
 
 	// ToolEditFileFuzzy is the fallback of ADR-0006 §2, for when the model
 	// cannot produce a usable anchor. It is a separate tool and not a second

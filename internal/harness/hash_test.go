@@ -86,8 +86,14 @@ func everyConfig(t *testing.T) []harness.Config {
 // not new preimage coverage, so PreimageVersion again stays where it was.
 // One real bench run (z-ai/glm-5.2, 2026-08-20) had already happened under
 // the prior hash; see docs/provider-pin.md for that arm's own record.
+//
+// It moved a fifth time on KAN-988, when "delete_file" landed in ToolSet and
+// ToolCatalogue (between edit_file_fuzzy and run_shell) with a matching
+// system-prompt section. Both are configuration *value* changes — the tool
+// set and the prose describing it, not new preimage coverage — so
+// PreimageVersion stays at 2.
 func TestDefaultConfigHashIsStable(t *testing.T) {
-	const want = "34f95a0068f38695dfeb45ba4da3dbb4a756ea88a386abc5ebea15e1a3ace4ee"
+	const want = "e6d896ac8f3f82f87f4c29e357422ed0c02027d219a0a41d432fc8617376790f"
 
 	got := defaultConfig(t).Hash()
 	if got != want {
@@ -112,7 +118,7 @@ func TestDefaultConfigHashIsStable(t *testing.T) {
 // TestNoTwoConfigsShareAHash below is what checks that expectation rather
 // than this test silently passing if they happened to collide.
 func TestMinimaxM2ConfigHashIsStable(t *testing.T) {
-	const want = "c1169a045ee59785abf5ca6e6c19087125f7fcce8f3a08204de0c0b5428d32ef"
+	const want = "8161544674d41757915fdde138fe0432960ce7b49f2f590d1e870456049cc972"
 
 	got := configByName(t, harness.MinimaxM2ConfigName).Hash()
 	if got != want {

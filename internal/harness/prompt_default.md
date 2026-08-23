@@ -111,6 +111,13 @@ Use it last. A fuzzy edit that lands in the wrong place still reports success,
 which no rejection can undo. When you can read the file, read it and use
 `edit_file`.
 
+### delete_file
+`{"path": "..."}` — deletes one file. Refuses a path that does not exist or a
+path that is a directory. Use it to remove a file you created — a scratch
+test, a throwaway script — instead of `run_shell rm`: a shell command needs
+consent every time and is never approved unattended, so retrying it does
+nothing but spend turns.
+
 ### run_shell
 `{"command": "go build ./...", "dir": "", "timeout_seconds": 0}` — runs the
 command line through the platform shell. `dir` is relative to the repository

@@ -67,7 +67,7 @@ not this list:
   would pool with real ones. A leaf package; the one exception on `cmd/`'s import
   allowlist.
 - **`internal/tools`** — `read_file`, `list_dir`, `grep`, `write_file`, `edit_file`,
-  `edit_file_fuzzy`, `run_shell`. Anchors come from `read_file` and nowhere else, so an
+  `edit_file_fuzzy`, `delete_file`, `run_shell`. Anchors come from `read_file` and nowhere else, so an
   edit into a region the model was never shown is structurally impossible. Bounds are
   declared, never silent. Every path goes through `Root.Resolve` (symlinks resolved
   before cleaning, then `os.Root` refuses traversal at the syscall level).

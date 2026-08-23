@@ -68,4 +68,14 @@ var DefaultSystemPrompt string
 // to make growth a decision somebody takes rather than one that accumulates. The
 // next addition that does not fit is a paragraph to cut or a line in a pull
 // request raising this, and either way somebody chose.
-const promptBudget = 8 << 10
+//
+// It moved to 9 KiB on KAN-988. By then the 8 KiB margin had already eroded to
+// five bytes — earlier additions (ask, the syntax-gate note, KAN-960's
+// verification rewrite) had already spent the headroom this comment describes
+// without anyone raising the ceiling — so delete_file's section, at under 350
+// bytes, was the addition that could not fit rather than an unusually large
+// one. Raising it restores roughly the original margin instead of trimming an
+// unrelated section to make room for this one; the next addition that does not
+// fit is still a paragraph to cut or a line in a pull request raising this
+// again.
+const promptBudget = 9 << 10

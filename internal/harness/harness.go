@@ -352,6 +352,7 @@ var defaultHarnessConfig = Config{
 		"write_file",
 		"edit_file",
 		"edit_file_fuzzy",
+		"delete_file",
 		"run_shell",
 		"ask",
 	},
@@ -434,6 +435,16 @@ var defaultHarnessConfig = Config{
 					{Name: "after", Type: "string", Description: "the replacement text for whatever before matched"},
 				},
 				Required: []string{"path", "before", "after"},
+			},
+		}},
+		{Type: "function", Function: provider.ToolFunction{
+			Name:        "delete_file",
+			Description: "Delete a file.",
+			Parameters: provider.ToolParameters{
+				Properties: []provider.ToolProperty{
+					{Name: "path", Type: "string", Description: "the file's path, relative to the repository root"},
+				},
+				Required: []string{"path"},
 			},
 		}},
 		{Type: "function", Function: provider.ToolFunction{
