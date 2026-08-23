@@ -148,6 +148,21 @@ func runPrint(args []string, stdout, stderr io.Writer) int {
 	fork := fs.String("fork", "", "not supported here; forking wipes the working tree and needs a "+
 		"human's typed confirmation, which this headless surface has nobody to ask for — use `kopicode "+
 		"repl --fork` instead")
+	// --policy-file is ADR-0011's opt-in: with nothing passed, this surface's
+	// default is exactly what it was before this flag existed —
+	// denyHeadless's refuse-everything policy, wired below through
+	// engine.ConsentUnattended with no Options.Policy set. A caller that
+	// passes this flag is an orchestrator like cuttlefish-agent stating, up
+	// front and in a file it authored, the closed set of shell commands this
+	// invocation may run and the root writes outside the repo root are
+	// confined to — see internal/permission/allowlist_file.go's own doc
+	// comment for the file's grammar. This flag exists only here: ADR-0011
+	// decision 5 and ADR-0008 keep the REPL's single-trusted-developer,
+	// always-interactive mode exclusive, and a human at a terminal has no use
+	// for a policy file answering questions on their behalf.
+	policyFile := fs.String("policy-file", "", "load a declared-allowlist policy file (ADR-0011) and let "+
+		"it answer shell/write consent instead of refusing everything; unset means the existing default, "+
+		"refuse everything")
 	if err := fs.Parse(args); err != nil {
 		// flag has already printed the error and the usage.
 		return exitUsage
@@ -199,6 +214,19 @@ func runPrint(args []string, stdout, stderr io.Writer) int {
 	if *resume != "" {
 		opts.SessionID = *resume
 		opts.Resume = true
+	}
+
+	// Loaded here, alongside --model/--harness resolution above and for the
+	// identical reason (ADR-0007 decision 4's ordering): a malformed
+	// --policy-file is the caller's own mistake, refused before the working
+	// directory is locked, the journal is opened, or anything is billed.
+	if *policyFile != "" {
+		pf, err := engine.LoadPolicyFile(*policyFile)
+		if err != nil {
+			say(stderr, "kopicode: %v\n", err)
+			return exitUsage
+		}
+		opts.Policy = &pf
 	}
 
 	// context.Background() is built here rather than inside headless, so that
