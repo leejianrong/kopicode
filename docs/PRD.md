@@ -217,5 +217,5 @@ half ship without the other, which is exactly the state ADR-0007 was written to 
   exist to measure rather than now.
 - Whether cheap A/B by replaying an unchanged prefix is worth building, and whether it is
   enough to reopen the durable-runtime question ADR-0002 closed.
-- Whether sotong ever happens, which is the only thing that would justify promoting the
+- Whether cuttlefish ever happens, which is the only thing that would justify promoting the
   engine out of `internal/`.

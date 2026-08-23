@@ -88,7 +88,7 @@ call-by-call compare are worth their cost, a second implementation can be writte
 against a durable runtime without touching the engine. Deferring is cheap; the
 seam is what keeps it cheap.
 
-**5. Satay's natural consumer in this suite is sotong.** Unattended, triggered,
+**5. Satay's natural consumer in this suite is cuttlefish.** Unattended, triggered,
 long-running, credential-holding, with no human watching. Replay from the top is
 designed for that workload.
 
