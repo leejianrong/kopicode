@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "go-interface-implementation-gap",
+  "title": "Shipping quotes are missing the fuel surcharge on some carriers",
+  "statement": "Finance flagged that we're eating our fuel surcharge on some shipments -- an international air order priced out on Tuesday with no surcharge on the base rate at all. Every carrier's shipping quote is supposed to add the current surcharge, not just the one a customer happened to catch. Can you fix the quotes so the surcharge actually shows up wherever it's owed? `go test ./...` should pass once it's fixed.",
+  "language": "go",
+  "requires": ["go"],
+  "oracle": {
+    "argv": ["go", "test", "./..."],
+    "env": {
+      "GOFLAGS": "-mod=readonly",
+      "GOPROXY": "off"
+    },
+    "timeout_seconds": 120
+  },
+  "traits": ["multi_file", "requires_read"],
+  "max_turns": 20,
+  "notes": "Needs the Go toolchain only. Carrier is satisfied by three types spread across separate files (ground.go, air.go, freight.go) and reachable only through NewCarrier's registry (registry.go) -- grepping for 'Carrier' or the interface's Quote method eventually turns up all three, but grepping for the actual missing behavior, the fuel surcharge, turns up only its declaration in types.go, since none of the three apply it yet. The statement's own anecdote is an international air shipment, which is the trap: a fix that patches only airCarrier.Quote compiles cleanly -- Carrier's method set is unchanged, so Go never notices the other two implementers didn't grow the same arithmetic -- and even makes the anecdote true, but TestGroundQuoteIncludesSurcharge and the two TestFreightQuoteIncludesSurcharge cases, exercising the carriers the statement never names, still fail. Written to catch a fix aimed at the one carrier a user happened to complain about rather than the shared behavior the interface promises every implementer keeps."
+}
