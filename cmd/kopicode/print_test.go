@@ -392,6 +392,53 @@ func TestUsageErrorsAreRefusedBeforeAnythingRuns(t *testing.T) {
 	}
 }
 
+// TestABadPolicyFileIsRefusedBeforeAnythingRuns is ADR-0011's --policy-file
+// flag, refused the same way TestUsageErrorsAreRefusedBeforeAnythingRuns'
+// cases are: a fact about the command line (here, about the file it names)
+// settled before the arm is resolved, before a journal exists, and — unlike
+// every case in that test — before any network round trip could even be
+// attempted, since loading the file is pure local file I/O.
+//
+// Both conditions below are the caller's own mistake (a path that does not
+// exist, a file this reader cannot parse), which is exactly why they map to
+// exit 2 rather than exit 4 — see internal/permission/allowlist_file.go's own
+// doc comment for why every LoadAllowlistFile error is a usage error and
+// engine.LoadPolicyFile's own doc comment for why cmd/kopicode reads it that
+// way.
+func TestABadPolicyFileIsRefusedBeforeAnythingRuns(t *testing.T) {
+	dir := t.TempDir()
+	malformed := filepath.Join(dir, "malformed.toml")
+	if err := os.WriteFile(malformed, []byte("allow = []\n"), 0o600); err != nil { // no root key
+		t.Fatalf("writing the malformed fixture: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		path    string
+		mention string
+	}{
+		{"a policy file that does not exist", filepath.Join(dir, "nope.toml"), "nope.toml"},
+		{"a policy file missing its required root key", malformed, "root"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout, stderr strings.Builder
+			args := []string{"run", "--print", "--policy-file", tc.path, "fix it"}
+
+			if code := run(args, &stdout, &stderr); code != exitUsage {
+				t.Errorf("exit code = %d, want %d. stderr:\n%s", code, exitUsage, stderr.String())
+			}
+			if stdout.String() != "" {
+				t.Errorf("a refused invocation wrote to stdout, which --print owns:\n%s", stdout.String())
+			}
+			if !strings.Contains(stderr.String(), tc.mention) {
+				t.Errorf("the refusal does not mention %q:\n%s", tc.mention, stderr.String())
+			}
+		})
+	}
+}
+
 // --- exit 3: provider error -------------------------------------------------
 
 // TestAProviderRefusalExitsThree.

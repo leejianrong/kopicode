@@ -200,6 +200,51 @@ type Options struct {
 	// same way its Consent sets ConsentMode.
 	AskMode AskMode
 
+	// Policy, when non-nil, is ADR-0011's declared allowlist: the caller
+	// states, up front, the closed set of shell argv this session may run and
+	// the root writes outside the repo root are confined to, and [Open] builds
+	// [permission.AllowlistPolicy] from it instead of routing consent through
+	// [Consent]/[ConsentMode] at all. `cmd/kopicode run --print --policy-file`
+	// is the first caller (docs/adr/0011-unattended-invocation-policy-gate.md).
+	//
+	// It carries [PolicyFile]'s declared *shape* rather than a live
+	// permission.Policy value, for the same reason the syntax gate, the
+	// permission gate and the tool set are not Options fields at all (see this
+	// struct's own doc comment, "what is deliberately not here"):
+	// [permission.NewAllowlist] needs a [permission.Resolver], and the only one
+	// that judges paths correctly for this session is the one built from this
+	// session's own tool root a few lines into [openSession] — before that
+	// point, nothing exists for a caller-supplied resolver to agree with. A
+	// field of the finished interface type would therefore either force this
+	// file to expose its internal resolver to every caller, or accept a
+	// resolver built some other way and risk two implementations of
+	// containment disagreeing (see [permission.Resolver]'s own doc comment for
+	// why that is the failure this package works to avoid). Declared data that
+	// [Open] turns into the real policy itself has neither problem.
+	//
+	// The zero value (nil) is every existing caller's behaviour, unchanged:
+	// [Open] still calls [mustAskPolicy] on [Consent]/[ConsentMode] exactly as
+	// it did before this field existed, so `run --print` with no
+	// --policy-file and the REPL are both byte-for-byte what they were.
+	//
+	// Setting this alongside a non-nil [Consent] is refused outright, as an
+	// [ErrConfig] — never "one wins silently." The two are different live
+	// answerers to the identical question ("may this action proceed"), and a
+	// caller that wired both has not said which one it means; guessing would
+	// be exactly the kind of ambiguity ADR-0007 decision 4's ordering exists
+	// to refuse before anything is touched, and refusing loudly costs nothing
+	// here since it is caught before the working tree is even looked at.
+	//
+	// [ConsentMode] is deliberately *not* part of that check. It only decides
+	// attribution for the [Consent]-based path — [mustAskPolicy]'s branch,
+	// which [gatePolicy] never calls at all once Policy is set — so a caller
+	// like `headless` that always sets ConsentMode to [ConsentUnattended]
+	// regardless of whether --policy-file was passed is not stating a second
+	// conflicting answerer; it is a mode flag that this Policy-set branch
+	// simply has no use for. [permission.AllowlistPolicy] stamps
+	// [permission.SourcePolicy] on its own, independent of ConsentMode.
+	Policy *PolicyFile
+
 	// Provider overrides the model provider. Nil builds the live OpenRouter
 	// client from OPENROUTER_API_KEY.
 	//
@@ -445,6 +490,12 @@ func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session,
 		return nil, fmt.Errorf("%w: Options.Resume is set but SessionID is empty; resuming needs "+
 			"the id of an existing session, and minting a fresh one would not be resuming anything", ErrConfig)
 	}
+	if opts.Policy != nil && opts.Consent != nil {
+		return nil, fmt.Errorf("%w: Options.Policy is set together with Options.Consent; these are two "+
+			"different answerers for the same question ('may this action proceed') and this package will "+
+			"not guess which one a caller meant — leave Consent nil when using Options.Policy "+
+			"(docs/adr/0011-unattended-invocation-policy-gate.md)", ErrConfig)
+	}
 
 	dir := opts.Dir
 	if dir == "" {
@@ -595,7 +646,11 @@ func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session,
 	}
 	s.closers = append(s.closers, set.Close)
 
-	gate, err := permission.New(set.Root.Path(), set.Root.Resolver(), mustAskPolicy(opts.Consent, opts.ConsentMode))
+	policy, err := gatePolicy(opts, set.Root.Resolver())
+	if err != nil {
+		return fail(fmt.Errorf("engine: building the consent policy: %w", err))
+	}
+	gate, err := permission.New(set.Root.Path(), set.Root.Resolver(), policy)
 	if err != nil {
 		return fail(fmt.Errorf("engine: building the consent gate: %w", err))
 	}
@@ -717,6 +772,25 @@ func streamTo(obs Observer) func(int, provider.Delta) {
 		return nil
 	}
 	return func(turn int, d provider.Delta) { obs(deltaEvent(turn, d)) }
+}
+
+// gatePolicy resolves what answers the permission gate for this session: the
+// ADR-0011 declared allowlist built from [Options.Policy] when it is set, or
+// [mustAskPolicy]'s Consent/ConsentMode path otherwise (KAN-885's existing
+// behaviour, unchanged). openSession's own early refusal already guarantees
+// the two are never both configured by the time this runs, so this function
+// itself never has to choose between them — it only has to pick the one
+// field that is actually set.
+//
+// resolver is [tools.Root.Resolver] — the one built for this session's own
+// tool root a few lines above this call in openSession — which is exactly
+// why this cannot happen inside [Options] validation any earlier: nothing
+// resolves paths for this session until the tool root exists.
+func gatePolicy(opts Options, resolver permission.Resolver) (permission.Policy, error) {
+	if opts.Policy == nil {
+		return mustAskPolicy(opts.Consent, opts.ConsentMode), nil
+	}
+	return permission.NewAllowlist(opts.Policy.Root, resolver, opts.Policy.Allow)
 }
 
 // mustAskPolicy builds the policy that forwards to Consent, attributing every
