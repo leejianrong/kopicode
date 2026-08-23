@@ -293,6 +293,13 @@ type fixture struct {
 	CorpusDir string
 	// Commit is the commit the corpus was frozen at.
 	Commit string
+	// TaskCount is the number of tasks the corpus at CorpusDir actually holds.
+	// The synthetic fixture always has exactly corpus.MinTasks; a copy of the
+	// real corpus does not — the corpus has grown past that floor as the
+	// hardening batch (KAN-990..994) lands tasks, and a test comparing against
+	// corpus.MinTasks itself rather than this field would be asserting a
+	// coincidence, not a contract. Zero for callers that never set it.
+	TaskCount int
 }
 
 // taskSpec describes one synthetic task.

@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/leejianrong/kopicode/internal/bench"
-	"github.com/leejianrong/kopicode/internal/corpus"
 	"github.com/leejianrong/kopicode/internal/engine"
 	"github.com/leejianrong/kopicode/internal/harness"
 )
@@ -25,7 +24,7 @@ import (
 // before spending anything on the live one" a checked claim rather than a
 // description of manual steps nobody re-runs. Behind the integration tag for
 // the same reason [TestSmokeRunOverTheRealCorpus] is: it compiles the real
-// ten-task corpus's suites, twice.
+// corpus's suites, twice.
 //
 // # Why this pairs two harness configurations rather than two models
 //
@@ -107,10 +106,10 @@ func TestPairedRunSaveCompareOverTheRealCorpus(t *testing.T) {
 		t.Fatalf("LoadResult (arm B): %v", err)
 	}
 
-	if got, want := len(loadedA.Tasks), corpus.MinTasks; got != want {
+	if got, want := len(loadedA.Tasks), fA.TaskCount; got != want {
 		t.Fatalf("loaded arm A has %d tasks, want %d", got, want)
 	}
-	if got, want := len(loadedB.Tasks), corpus.MinTasks; got != want {
+	if got, want := len(loadedB.Tasks), fB.TaskCount; got != want {
 		t.Fatalf("loaded arm B has %d tasks, want %d", got, want)
 	}
 	if loadedA.Arm.HarnessConfigName != harness.DefaultConfigName {
