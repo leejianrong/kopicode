@@ -1,15 +1,25 @@
 # ADR-0012: A supersession-based compaction strategy, and a smaller fix that ships first
 
-- **Status:** Proposed
-- **Date:** 2026-08-23
-- **Deciders:** Jian (leejianrong2@gmail.com) — pending explicit accept
+- **Status:** Decision 1 Accepted; decision 2 **Rejected**
+- **Date:** 2026-08-23 (drafted); 2026-08-23 (reviewed)
+- **Deciders:** Jian (leejianrong2@gmail.com)
 
 Drafted by an agent from [`docs/token-growth.md`](../token-growth.md)'s two real dogfood
-sessions (KAN-935/936/947). Left **Proposed** rather than **Accepted**, unlike
-ADR-0010/0011: those were reviewed and accepted by Jian in the same sitting they were
-drafted, and this one has not been. It amends nothing by itself — see decision 4 for the
-one existing guarantee it proposes narrowing, which does not take effect until this ADR
-does.
+sessions (KAN-935/936/947), then reviewed by Jian the same day. The review's outcome is
+mixed, and this document has been edited in place to record it rather than left as the
+original draft with a note appended, because a reader six months from now should not
+have to reconstruct which parts of a "Proposed" document turned out to be the actual
+decision: **decision 1 is accepted and shipped** (KAN-989); **decision 2 is rejected
+outright** — not deferred, not "needs more data," rejected as a direction. Jian's own
+reasoning: "I honestly don't really see the point of compaction; would prefer just a
+handoff doc plus refresh the whole context or some other way to manage agent memory."
+The objection is to piecemeal redaction of history as a *mechanism*, not to controlling
+context growth as a *goal* — decision 1 doesn't redact or drop anything (a repeated,
+byte-identical denial carries zero information to begin with), which is why it survives
+the same review that decision 2 does not. KAN-991 (the kopicode board's tracker, not a
+file in this repo) scopes the actual preferred direction — a handoff-document-plus-
+fresh-context approach — as its own follow-up, replacing decision 2 rather than amending
+it.
 
 ## Context
 
@@ -81,10 +91,20 @@ session's final context, from turns that had already finished the actual task). 
 its own follow-up card rather than folded into KAN-988's tool-only PR, since it touches
 `internal/engine`'s loop rather than `internal/tools`.
 
-**2. The design direction for the harder problem: supersession-based redaction of a
-stale `read_file` result, once specific, provable conditions all hold.** Not implemented
-by this ADR — decision 5 explains why a follow-up card, not this document, is where that
-happens. The shape:
+**2. REJECTED. The design direction that was proposed for the harder problem —
+supersession-based redaction of a stale `read_file` result, once specific, provable
+conditions all hold — is not being pursued.** Jian's review: not because the argument
+below is wrong on its own terms (nothing in the review disputed the reasoning), but
+because piecemeal redaction of already-appended history is the wrong *shape* of
+solution to be spending effort on at all, regardless of how carefully the exception is
+scoped. The shape is kept below, struck through in spirit rather than deleted outright,
+because the reasoning in decisions 3–4 is still useful context for *why* a
+redaction-based approach is harder to get right than it first looks — that argument is
+part of why the rejected alternative below ("do nothing until more data") stops looking
+like the safe choice next to a redaction mechanism, and is worth keeping visible even
+though this ADR no longer recommends building it:
+
+<!-- The following is the original decision 2, kept for its reasoning, not as a plan. -->
 
 A `read_file` (or `grep`/`list_dir`) tool-result message already in history becomes
 eligible for redaction when **all** of the following are true, checked against the
@@ -130,15 +150,12 @@ broader. The line is drawn at "provably superseded and verified," not at "looks 
 "looks big": no other trigger (turn age, byte size alone, a heuristic guess at
 relevance) qualifies.
 
-**5. This ADR settles the direction; it does not land the mechanism.** SLICE-1's own
-argument for why `Assembler` started naive applies again here in miniature: a
-compaction mechanism chosen without watching it run against real sessions is a second
-guess dressed as a fix for the first one. Decision 2's shape should be built behind a
-mechanism that can be turned off, exercised against the mock/replay provider first
-(zero token cost, per this project's existing test-seam discipline), and dogfooded
-before it ever runs against a live billed session — the same staged caution ADR-0005
-already applies to a harness change generally. A follow-up implementation card is filed
-for this (see Consequences), separate from decision 1's smaller, low-risk fix.
+**5. Superseded by the review.** This decision originally argued that landing decision
+2's mechanism should wait on a flag and a dogfood pass rather than shipping straight to
+always-on. That caution turned out not to matter — decision 2 itself was rejected before
+reaching the "how carefully do we land it" question. Left here, marked moot rather than
+deleted, so a reader does not wonder whether the staging discipline was overlooked: it
+wasn't reached, because the thing being staged was never approved.
 
 ## Alternatives rejected
 
@@ -164,32 +181,34 @@ for this (see Consequences), separate from decision 1's smaller, low-risk fix.
   the worst time — the mistake decision 4 is written to rule out by name.
 - **Doing nothing until a third and fourth dogfood run produce more data.** Considered
   seriously — n=2 is explicitly not a curve (`docs/token-growth.md`'s own caveat) — but
-  rejected as the ADR's outcome because decision 1 needs no more data to be worth
-  doing (it fixes a measured, unambiguous waste with no downside), and decision 2's
-  design can be argued and reviewed now while its landing waits on the mechanism being
-  built behind a flag and dogfooded, per decision 5. Waiting to write anything down
-  would just mean re-deriving this same argument from the same two sessions later.
+  rejected as the *draft's* proposed outcome, because decision 1 needed no more data to
+  be worth doing. Overtaken by the review regardless: decision 2 was rejected on
+  direction, not on insufficient data, so more dogfood runs would not have changed the
+  outcome.
+- **What the review actually chose instead of decision 2: not "more data," and not "no
+  mechanism at all," but a different mechanism entirely.** Jian's stated preference — a
+  handoff document plus a fresh context, rather than redacting pieces of an existing one
+  — is not one of the alternatives this draft considered and rejected; it is a genuinely
+  different shape of solution this ADR did not evaluate. KAN-991 scopes it. Recorded here
+  rather than silently added as a sixth rejected-and-replaced alternative, because it is
+  not this ADR's decision to make — it belongs to whatever ADR eventually comes out of
+  KAN-991's scoping.
 
 ## Consequences
 
-- No code changes ship with this ADR. Decision 1 (identical-denial collapse) and
-  decision 2 (supersession redaction) are each filed as their own follow-up
-  implementation card, the same shape ADR-0011 became KAN-987 — decision 1 is
-  immediately actionable; decision 2 is not, until it exists behind a flag per
-  decision 5.
-- `internal/engine/context.go`'s doc comment and `TestAssemblerNeverTruncates` will need
-  a stated, narrow amendment when decision 2 lands — "never truncates content that could
-  still justify an unresolved change" rather than an unqualified "nothing here
-  truncates" — and that amendment is part of decision 2's implementation card, not a
-  separate one.
-- Nothing about the journal's completeness changes. Every tool result is recorded in
-  full exactly as it is today; only what a later request re-sends to the provider can
-  ever be affected, and only for messages meeting decision 2's conditions.
-- This ADR does not amend ADR-0007's hash-preimage discipline: whether compaction is
-  active, and any of its parameters, would itself need to be a per-arm harness-config
-  value in the hash preimage if it ever varies between arms — decision 2's
-  implementation card inherits that requirement rather than this ADR re-deriving it.
-- Until Jian reviews and this ADR's Status moves to Accepted, no implementation card
-  spawned from it should be treated as authorizing a change to `context.go`'s stated
-  guarantees — decision 1 does not touch those guarantees and is not blocked on that
-  review; decision 2 is.
+- Decision 1 (identical-denial collapse) is filed as its own follow-up implementation
+  card, KAN-989, the same shape ADR-0011 became KAN-987 — immediately actionable, and
+  not affected by decision 2's rejection.
+- Decision 2 is rejected. `internal/engine/context.go`'s doc comment and
+  `TestAssemblerNeverTruncates` are **not** amended by this ADR or by anything downstream
+  of it — the "nothing here truncates" guarantee stands exactly as it already reads,
+  unqualified. KAN-990, the card that would have implemented decision 2, is closed
+  without implementation.
+- Nothing about the journal's completeness changes, which was already true regardless of
+  decision 2's outcome — the journal was never in scope for either decision.
+- This ADR does not amend ADR-0007's hash-preimage discipline, and now never will on
+  decision 2's account — there is no compaction mechanism whose activation would need to
+  be a hash-preimage value.
+- KAN-991 scopes the direction the review actually chose (a handoff document plus a
+  fresh context) as a separate, later piece of work — not a continuation of this ADR,
+  and not obligated to reuse anything decision 2 sketched.
