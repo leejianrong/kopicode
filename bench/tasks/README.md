@@ -1,6 +1,6 @@
 # The kopicode task corpus
 
-Ten small coding tasks with unit-test oracles. This is the thing every A/B number
+Thirteen small coding tasks with unit-test oracles. This is the thing every A/B number
 in this project is measured against, so most of what follows is about the
 properties that make a number trustworthy rather than about the tasks themselves.
 
@@ -158,7 +158,7 @@ Not built yet — that is KAN-796 — but three constraints belong with the data
   assumption.
 - **Keep the Go build cache warm.** A worktree per task with a temp `HOME` gives
   each task a cold `GOCACHE`, which turns a two-second suite into a
-  thirty-second one, ten times per arm. Pass `GOCACHE`/`GOMODCACHE` through while
+  thirty-second one, thirteen times per arm. Pass `GOCACHE`/`GOMODCACHE` through while
   keeping `HOME` temporary.
 - **Record `corpus_version` and `digest` in every result**, next to the provider
   pin ADR-0005 §2 already requires.

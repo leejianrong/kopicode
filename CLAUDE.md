@@ -175,7 +175,7 @@ not this list:
   `harness`, then `unattributed`, then `model` — `harness` outranks `unattributed`
   deliberately, because letting ambiguity swallow a known harness failure would move it
   out of the one bucket with a zero acceptance bar.
-- **`bench/tasks` + `internal/corpus`** — the frozen 10-task corpus. `Load` refuses a
+- **`bench/tasks` + `internal/corpus`** — the frozen 13-task corpus. `Load` refuses a
   corpus whose contents don't match its digest, and every task's oracle is checked in
   both directions (fails before the fix, passes after).
 
@@ -239,7 +239,7 @@ make check        # fmtcheck + vet + lint + tidycheck — every cheap static gat
 make test         # go test -short -race -count=1 ./...  — fast inner loop, mock provider only
 make test-all     # the FULL suite as CI runs it: -race, integration build tag, e2e git fixtures
 make xbuild       # cross-compile AND vet every GOOS/GOARCH target
-make bench-smoke  # the 10-task corpus against the MOCK provider — zero tokens, required in CI
+make bench-smoke  # the 13-task corpus against the MOCK provider — zero tokens, required in CI
 make bench        # the corpus against the real pinned provider — COSTS MONEY (~$0.08 observed)
 make smoke-live   # ONE 16-token request against the pinned endpoint — costs cents, behind `live`
 make secrets      # gitleaks over history + tree

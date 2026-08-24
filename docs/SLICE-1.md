@@ -217,7 +217,7 @@ left open:
 
 - **"The repo" is the *working tree*, not the git directory.** A linked worktree shares
   `.git/config`, the object store and the ref store with its parent — only `HEAD` and the
-  index are private — so the git-directory reading would serialise the ten concurrent
+  index are private — so the git-directory reading would serialise the thirteen concurrent
   task worktrees the bench runner creates on purpose. The lock root is
   `repo.WorkTreeRoot`, which is `git rev-parse --show-toplevel` and falls back to the
   directory itself outside a repository. A session started in a subdirectory therefore
@@ -245,7 +245,7 @@ One `git worktree` per task off a frozen corpus commit, plus a temp `HOME`. The 
 is the task's own unit tests, run in a subprocess with a timeout. Report includes, per
 task: pass/fail, turns used, tokens in/out, wall clock, and a failure classification.
 
-**Worktrees must be reclaimed.** A worktree per task per corpus run means 10 full
+**Worktrees must be reclaimed.** A worktree per task per corpus run means 13 full
 checkouts per arm, and an A/B series is many arms — left alone this silently fills the
 disk, and an agent harness that auto-creates worktrees is the textbook offender. So:
 `git worktree remove` in a deferred cleanup on every path including panic and
@@ -358,7 +358,7 @@ Ordered so each step produces something the next depends on.
     stdout. Exit codes: `0` success, `1` task not completed, `2` usage error,
     `3` provider error, `4` harness error.
 
-15. **Task corpus.** 10 tasks, frozen at a commit, versioned. Each is a small repo with
+15. **Task corpus.** 13 tasks, frozen at a commit, versioned. Each is a small repo with
     a fast deterministic suite, a task statement, and an oracle command completing in
     ≤20 turns. Include at least two that require reading before editing and one that
     requires a multi-file change.
@@ -383,7 +383,7 @@ diff that passes that repository's existing test suite, with the REPL streaming
 readable output, one permission prompt for the test command, and `Ctrl-C` proven to
 cancel cleanly mid-stream.
 
-**Bench:** `kopibench run --arm baseline` executes the frozen 10-task corpus against
+**Bench:** `kopibench run --arm baseline` executes the frozen 13-task corpus against
 `qwen/qwen3-coder-next` on a pinned provider, prints a scored report with per-task
 token cost and three-bucket classification, and completes for under **$2**. The same
 corpus runs against the mock provider in CI at **zero** token cost.
@@ -509,7 +509,7 @@ These are the acceptance criteria for the slice.
 7. **Provider pins are not permanent.** A pinned provider can disappear and invalidate
    an experiment series mid-flight. Mitigated by recording the pin per result so the
    break is loud.
-8. **Corpus overfitting.** 10 in-house tasks will flatter whatever the harness happens
+8. **Corpus overfitting.** 13 in-house tasks will flatter whatever the harness happens
    to do well. Mitigated by freezing and versioning the corpus, and by the deferred
    SWE-bench-Verified anchor — which means slice-1 numbers are internal-only and must
    not be quoted as comparable.

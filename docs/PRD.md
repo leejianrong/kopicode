@@ -130,7 +130,7 @@ make it credible, and any shortcut there costs the project its point.
 
 In: the agent loop, the six tools, hash-anchored editing with a fuzzy fallback, forced
 verification, the typed journal, git turn snapshots, engine-side permissions, the REPL,
-the headless runner, the mock and OpenRouter providers, a ten-task corpus, and mechanical
+the headless runner, the mock and OpenRouter providers, a thirteen-task corpus, and mechanical
 attribution. One model measured and one harness configuration registered — a scope limit
 on what slice 1 exercises, not on what the binary can select, which is
 [ADR-0007](adr/0007-model-selection-and-harness-config-shape.md)'s subject. The full
@@ -176,7 +176,7 @@ one of them ships session trees we thought were our differentiator. Competing on
 is not the plan; being better at the specific thing (serving a weak model well, with
 evidence) is.
 
-**The in-house corpus will flatter us.** Ten tasks chosen by the person building the
+**The in-house corpus will flatter us.** Thirteen tasks chosen by the person building the
 harness is close to the definition of overfitting. Mitigated by freezing and versioning
 the corpus, reporting what was excluded, and anchoring against a public benchmark subset
 before quoting any number outside the project.
