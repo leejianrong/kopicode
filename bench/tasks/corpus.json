@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "corpus_version": "2.0.0",
-  "digest": "sha256:41a488d27c72417bb646baf11331b3cc822fabf8c8b00b7ce0308fe6dcce23ad",
+  "digest": "sha256:6f8010f0c0605145af975a0860f9946ee917bbcab231f991cfb0d7977203553a",
   "description": "kopicode slice-1 benchmark corpus: ten small deterministic repair-and-extend tasks, Go and Python, oracle-graded by each task's own test suite.",
   "tasks": [
     "go-unicode-reverse",
@@ -10,7 +10,7 @@
     "go-interval-merge",
     "go-lru-cache",
     "go-wordwrap-width",
-    "py-csv-blank-rows",
+    "py-multi-module-exploration",
     "go-flag-equals-form",
     "go-config-retries",
     "py-calc-modulo",
