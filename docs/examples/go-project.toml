@@ -1,0 +1,7 @@
+# Go project. Verification discovery finds `go test ./...` from go.mod, or a
+# Makefile `test` target if one exists — see docs/SLICE-1.md's discovery order.
+model = "qwen/qwen3-coder-next"
+
+# Uncomment to pin verification instead of relying on discovery. kopicode
+# records and replays argv, so this is an array, never a shell string.
+# verify = ["go", "test", "./..."]
