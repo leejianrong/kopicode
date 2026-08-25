@@ -99,3 +99,63 @@ func TestMinimaxM2ConfigOnlyChangesSeedPolicy(t *testing.T) {
 			"base: %+v\ngot:  %+v", base, normalised)
 	}
 }
+
+// TestNaiveV1ConfigOnlyChangesItsClaimedFields holds NaiveV1ConfigName's own
+// doc comment in harness.go to the code it describes: the configuration is
+// the default's value in every field except SystemPrompt, ParseRoutes,
+// RepairBudget and Verification.Forced (KAN-1012's design record), and the
+// name and version that identify it.
+//
+// It is an internal test for the same reason
+// TestMinimaxM2ConfigOnlyChangesSeedPolicy is: naiveV1Config is unexported,
+// and the whole point of building the second configuration by copying the
+// first is that the diff is checkable structurally rather than by eye across
+// two long literals.
+func TestNaiveV1ConfigOnlyChangesItsClaimedFields(t *testing.T) {
+	base := defaultHarnessConfig
+	got := naiveV1Config(base)
+
+	if got.Name != NaiveV1ConfigName {
+		t.Errorf("Name = %q, want %q", got.Name, NaiveV1ConfigName)
+	}
+	if got.SystemPrompt != NaiveSystemPrompt {
+		t.Error("SystemPrompt is not NaiveSystemPrompt — the whole argument for a separate prompt " +
+			"(NaiveSystemPrompt's own doc comment) is that it honestly reflects ParseRoutes and " +
+			"Verification.Forced changing, not DefaultSystemPrompt reused")
+	}
+	if got.SystemPrompt == "" {
+		t.Fatal("positive control failed: naiveV1Config carries no system prompt at all")
+	}
+	if !reflect.DeepEqual(got.ParseRoutes, []string{"native"}) {
+		t.Errorf("ParseRoutes = %v, want [native] — KAN-1012's argument is that a naive harness "+
+			"tolerates no fallback extraction route", got.ParseRoutes)
+	}
+	if got.RepairBudget != 0 {
+		t.Errorf("RepairBudget = %d, want 0 — a naive harness gives a malformed tool call no repair "+
+			"round trips; internal/engine treats 0 as the legal floor, not an edge case", got.RepairBudget)
+	}
+	if got.Verification.Forced {
+		t.Error("Verification.Forced = true, want false — this is the headline lever KAN-1012 chose: " +
+			"a naive harness never runs a forced check-and-correct loop at all")
+	}
+
+	// Name, Version and the four claimed fields are expected to differ.
+	// Normalise those, then require everything else to compare equal
+	// wholesale — the same technique
+	// TestMinimaxM2ConfigOnlyChangesSeedPolicy uses, and for the same reason:
+	// it proves nothing else moved without hand-listing every remaining
+	// field of Config.
+	normalised := got
+	normalised.Name = base.Name
+	normalised.Version = base.Version
+	normalised.SystemPrompt = base.SystemPrompt
+	normalised.ParseRoutes = base.ParseRoutes
+	normalised.RepairBudget = base.RepairBudget
+	normalised.Verification.Forced = base.Verification.Forced
+
+	if !reflect.DeepEqual(base, normalised) {
+		t.Errorf("naiveV1Config(base) differs from base in more than Name, Version, SystemPrompt, "+
+			"ParseRoutes, RepairBudget and Verification.Forced; NaiveV1ConfigName's doc comment in "+
+			"harness.go claims exactly those axes changed\nbase: %+v\ngot:  %+v", base, normalised)
+	}
+}

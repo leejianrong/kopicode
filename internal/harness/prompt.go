@@ -53,6 +53,25 @@ import _ "embed"
 //go:embed prompt_default.md
 var DefaultSystemPrompt string
 
+// NaiveSystemPrompt is [NaiveV1ConfigName]'s system prompt (KAN-1013).
+//
+// It is a required consequence of that configuration's other two changes,
+// not an independent fourth one: the default prompt's "## Verification"
+// section describes forced-verification behaviour that is simply false once
+// [Verification.Forced] is off, and a prompt still claiming multi-route
+// tolerance the harness no longer honours (once [Config.ParseRoutes] is
+// narrowed to native calls only) would be the same problem in the other
+// direction. Every tool still gets a `### <tool>` section in [Config.ToolSet]
+// order with every argument shown as a JSON key — prompt_test.go holds every
+// registered configuration to that contract, this one included — but the
+// recovery-per-reason essay, the verification-cost paragraph and most of the
+// "Working" section's elaboration are cut. That cut is the actual "thinner
+// system prompt" lever KAN-1012 decided on: the same contract, far less
+// guidance prose.
+//
+//go:embed prompt_naive.md
+var NaiveSystemPrompt string
+
 // promptBudget is the largest the prompt may grow to, in bytes.
 //
 // Slice 1 assembles context as naive full history (docs/SLICE-1.md affordance
