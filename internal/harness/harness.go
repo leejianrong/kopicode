@@ -312,6 +312,23 @@ const DefaultConfigName = "default"
 // alone (ADR-0007 §Consequences).
 const MinimaxM2ConfigName = "minimax-m2-v1"
 
+// NaiveV1ConfigName is a deliberately naive baseline configuration (KAN-1012,
+// KAN-1013), registered so a paired A/B can hold the model and provider pin
+// fixed and vary the harness itself — the comparison none of this project's
+// prior A/Bs actually ran, since epic 117 and KAN-999 both varied the model
+// instead. Reachable only by naming it explicitly (`--harness naive-v1`); no
+// registry.go row defaults to it, per ADR-0007 decision 2's ordinary override
+// path.
+//
+// [naiveV1Config] differs from [defaultHarnessConfig] in exactly three
+// independent fields, plus a system prompt that is a required consequence of
+// two of them rather than a fourth independent choice — see that function's
+// doc comment for the full argument, field by field. Per ADR-0007 decision
+// 6/7, a paired result between [DefaultConfigName] and this configuration
+// attributes to that whole bundle, never to one field alone: say so in any
+// report built from it.
+const NaiveV1ConfigName = "naive-v1"
+
 // defaultHarnessConfig is the value registered under [DefaultConfigName].
 //
 // It is a named value and not just an entry inline in [configs] so that
@@ -545,6 +562,27 @@ func minimaxM2Config(base Config) Config {
 	return cfg
 }
 
+// naiveV1Config returns [NaiveV1ConfigName]'s configuration: a copy of base
+// with forced verification off, the repair budget zeroed, parse-route
+// tolerance narrowed to native calls only, and a new, shorter system prompt
+// that reflects those three changes honestly — see [NaiveV1ConfigName]'s doc
+// comment for the field-by-field argument (KAN-1012's design record).
+//
+// base is a parameter for the same reason [minimaxM2Config] takes one: it
+// lets a test drive this function against an arbitrary starting
+// configuration and check the diff is exactly the fields claimed, rather
+// than trusting two long literals compared by eye.
+func naiveV1Config(base Config) Config {
+	cfg := base
+	cfg.Name = NaiveV1ConfigName
+	cfg.Version = 1
+	cfg.SystemPrompt = NaiveSystemPrompt
+	cfg.ParseRoutes = []string{"native"}
+	cfg.RepairBudget = 0
+	cfg.Verification.Forced = false
+	return cfg
+}
+
 // configs is every harness configuration compiled into this binary, by name.
 //
 // A map is fine here and is not in tension with the no-map rule on [Config]:
@@ -553,4 +591,5 @@ func minimaxM2Config(base Config) Config {
 var configs = map[string]Config{
 	DefaultConfigName:   defaultHarnessConfig,
 	MinimaxM2ConfigName: minimaxM2Config(defaultHarnessConfig),
+	NaiveV1ConfigName:   naiveV1Config(defaultHarnessConfig),
 }
