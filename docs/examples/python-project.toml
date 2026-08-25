@@ -1,0 +1,7 @@
+# Python project. Verification discovery finds a uv project or a Makefile
+# `test` target — see docs/SLICE-1.md's discovery order.
+model = "qwen/qwen3-coder-next"
+
+# Uncomment to pin verification instead of relying on discovery. kopicode
+# records and replays argv, so this is an array, never a shell string.
+# verify = ["pytest"]

@@ -101,6 +101,9 @@ file, then the built-in default. There is no environment variable anywhere in th
 chain — `OPENROUTER_API_KEY` above is the one thing kopicode reads from the
 environment, and it's a credential, not a configuration choice.
 
+**Example configurations**: See [`docs/examples/`](docs/examples/) for ready-to-use
+config templates for Go, JavaScript/TypeScript, Python, and multi-language projects.
+
 ### 6. Scripting
 
 `kopicode run --print` is the headless, scriptable surface: it runs one prompt and

@@ -1,0 +1,6 @@
+# Multi-language project (e.g. a Go backend plus a JS frontend). Discovery
+# only ever finds one language's test command on its own, so pin an aggregate
+# command — typically a root Makefile `test` target that calls each in turn.
+model = "qwen/qwen3-coder-next"
+
+verify = ["make", "test"]
