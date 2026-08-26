@@ -147,6 +147,19 @@ func TestSystemPromptDocumentsEveryTool(t *testing.T) {
 func TestSystemPromptDocumentsEveryToolArgument(t *testing.T) {
 	args := catalogueArgs(t)
 	catalogued := slices.Sorted(maps.Keys(args))
+	// covered tracks, across every registered configuration, which catalogued
+	// tools some config actually offers — checked once, after the loop below.
+	// It replaces a per-config "offered == catalogued" equality that held
+	// only by coincidence until [NaiveToolsetConfigName] (KAN-1020): that
+	// configuration deliberately offers fewer tools than the catalogue
+	// carries argument structs for, and TestNaiveToolsetConfigOnlyDropsEditFile
+	// (hash_internal_test.go) is what proves that omission is exactly and
+	// only edit_file. What must still hold, globally rather than per-config,
+	// is that no catalogued tool's arguments go unchecked by every
+	// configuration — a struct nobody's config ever exercises is still as
+	// invisible to this test as one nobody documented, which is the concern
+	// the old equality check existed for.
+	covered := make(map[string]bool, len(catalogued))
 
 	for _, cfg := range everyConfig(t) {
 		t.Run(cfg.Name, func(t *testing.T) {
@@ -157,15 +170,18 @@ func TestSystemPromptDocumentsEveryToolArgument(t *testing.T) {
 				byName[s.name] = s
 			}
 
-			// Both directions, because a tool whose argument struct nobody
-			// wrote is as invisible to this test as one nobody documented.
+			// This direction always holds, for every configuration: a tool
+			// offered with no argument struct is one the engine cannot
+			// decode a call for, regardless of whether ToolSet is the full
+			// catalogue or a deliberate subset of it.
 			offered := slices.Sorted(slices.Values(cfg.ToolSet))
-			if !slices.Equal(catalogued, offered) {
-				t.Fatalf("internal/engine's catalogue carries argument structs for %v; harness "+
-					"configuration %q presents %v\nthe struct name is the tool name in lowerCamel plus "+
-					"`Args`, and a mismatch means either a tool the engine cannot decode a call for or "+
-					"one whose arguments this test is silently not checking",
-					catalogued, cfg.Name, offered)
+			for _, tool := range offered {
+				if _, ok := args[tool]; !ok {
+					t.Fatalf("harness configuration %q presents %q, which internal/engine's catalogue "+
+						"carries no argument struct for\nthe struct name is the tool name in lowerCamel "+
+						"plus `Args`; the engine cannot decode a call for a tool it has none for", cfg.Name, tool)
+				}
+				covered[tool] = true
 			}
 
 			checked := 0
@@ -205,6 +221,14 @@ func TestSystemPromptDocumentsEveryToolArgument(t *testing.T) {
 					checked, len(cfg.ToolSet))
 			}
 		})
+	}
+
+	for _, tool := range catalogued {
+		if !covered[tool] {
+			t.Errorf("no registered configuration offers %q, so internal/engine/catalogue.go's argument "+
+				"struct for it is never checked by this test — either give some configuration's ToolSet "+
+				"the tool back, or this coverage gap is the one this test exists to catch", tool)
+		}
 	}
 }
 

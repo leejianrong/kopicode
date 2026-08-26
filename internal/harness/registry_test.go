@@ -223,6 +223,16 @@ func TestRegistryPinMatchesShippedFixtures(t *testing.T) {
 // staying true, and a configuration with its own tool set deserves this
 // guard from the day it is registered rather than from whenever someone
 // notices the gap.
+//
+// [NaiveToolsetConfigName] is the one exception, and it is named rather than
+// silently allowed to differ: it deliberately drops "edit_file" from ToolSet
+// (KAN-1020), so its own set can never equal internal/tools' full declared
+// set by design, not by drift. What still holds for it is that every name it
+// does present is a real, declared tool — a typo or a stale name would still
+// fail here — and TestNaiveToolsetConfigOnlyDropsEditFile
+// (hash_internal_test.go) is what proves the one omission is exactly and only
+// edit_file, transitively anchored to this same declared set through the
+// `default` subtest below.
 func TestToolSetMatchesInternalTools(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
@@ -269,11 +279,29 @@ func TestToolSetMatchesInternalTools(t *testing.T) {
 	}
 
 	sort.Strings(declared)
+	declaredSet := make(map[string]bool, len(declared))
+	for _, name := range declared {
+		declaredSet[name] = true
+	}
 
 	for _, cfg := range everyConfig(t) {
 		t.Run(cfg.Name, func(t *testing.T) {
 			got := append([]string(nil), cfg.ToolSet...)
 			sort.Strings(got)
+
+			if cfg.Name == harness.NaiveToolsetConfigName {
+				// See this test's own doc comment: this configuration is the
+				// one deliberate exception, so it is checked as a subset
+				// rather than by equality.
+				for _, name := range got {
+					if !declaredSet[name] {
+						t.Errorf("harness configuration %q presents %q, which internal/tools does not "+
+							"declare — a typo or a stale name, not the deliberate edit_file omission this "+
+							"configuration is allowed", cfg.Name, name)
+					}
+				}
+				return
+			}
 
 			if !slices.Equal(got, declared) {
 				t.Errorf("harness configuration %q presents %v; internal/tools declares %v\n"+

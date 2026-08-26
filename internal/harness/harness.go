@@ -42,6 +42,7 @@ package harness
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/leejianrong/kopicode/internal/provider"
 )
@@ -353,6 +354,30 @@ const NaiveV1ConfigName = "naive-v1"
 // uses.
 const NaiveV2ConfigName = "naive-verify-only"
 
+// NaiveToolsetConfigName is a single-field probe against
+// [defaultHarnessConfig] on the tool-set axis (KAN-1020, KAN-1023),
+// deliberately deferred by [NaiveV1ConfigName]'s design (KAN-1012) to keep
+// that first run's axis count down. It offers [Config.ToolSet] with
+// "edit_file" removed — [Config.ToolCatalogue] loses the matching entry, held
+// to that by internal/engine's TestHarnessToolCatalogueMatchesEngineCatalogue
+// — leaving `edit_file_fuzzy` as the only edit tool. CLAUDE.md's boundary
+// still holds: no new, unsafe edit path is invented, since `edit_file_fuzzy`
+// already exists and every use already marks the session `unattributed` by
+// design (ADR-0006 §3).
+//
+// [naiveToolsetConfig] differs from [defaultHarnessConfig] in exactly one
+// independent axis — ToolSet/ToolCatalogue losing edit_file — plus the
+// system prompt that is its required consequence; see
+// [NaiveToolsetSystemPrompt]'s own doc comment for the field-by-field
+// argument. [Config.RepairBudget], [Config.ParseRoutes] and
+// [Verification.Forced] all stay at default's values, the same discipline
+// [naiveV2Config] uses to keep this probe on one axis rather than compounding
+// with the axes [NaiveV1ConfigName] and [NaiveV2ConfigName] already probe.
+//
+// Reachable only by naming it explicitly (`--harness naive-fuzzy-edit-only`);
+// no registry.go row defaults to it.
+const NaiveToolsetConfigName = "naive-fuzzy-edit-only"
+
 // defaultHarnessConfig is the value registered under [DefaultConfigName].
 //
 // It is a named value and not just an entry inline in [configs] so that
@@ -625,14 +650,39 @@ func naiveV2Config(base Config) Config {
 	return cfg
 }
 
+// naiveToolsetConfig returns [NaiveToolsetConfigName]'s configuration: a copy
+// of base with "edit_file" removed from ToolSet and ToolCatalogue, and the
+// prompt that is that removal's required consequence — see
+// [NaiveToolsetConfigName]'s own doc comment for the argument.
+//
+// base is a parameter for the same reason [naiveV1Config] and [naiveV2Config]
+// take one: it lets a test drive this function against an arbitrary starting
+// configuration and check the diff is exactly the fields claimed.
+func naiveToolsetConfig(base Config) Config {
+	cfg := base
+	cfg.Name = NaiveToolsetConfigName
+	cfg.Version = 1
+	cfg.SystemPrompt = NaiveToolsetSystemPrompt
+
+	cfg.ToolSet = slices.DeleteFunc(slices.Clone(base.ToolSet), func(name string) bool {
+		return name == "edit_file"
+	})
+	cfg.ToolCatalogue = slices.DeleteFunc(slices.Clone(base.ToolCatalogue), func(def provider.ToolDefinition) bool {
+		return def.Function.Name == "edit_file"
+	})
+
+	return cfg
+}
+
 // configs is every harness configuration compiled into this binary, by name.
 //
 // A map is fine here and is not in tension with the no-map rule on [Config]:
 // nothing iterates it to produce a hash. [ConfigNames] sorts what it lists, so
 // no output path depends on its order either.
 var configs = map[string]Config{
-	DefaultConfigName:   defaultHarnessConfig,
-	MinimaxM2ConfigName: minimaxM2Config(defaultHarnessConfig),
-	NaiveV1ConfigName:   naiveV1Config(defaultHarnessConfig),
-	NaiveV2ConfigName:   naiveV2Config(defaultHarnessConfig),
+	DefaultConfigName:      defaultHarnessConfig,
+	MinimaxM2ConfigName:    minimaxM2Config(defaultHarnessConfig),
+	NaiveV1ConfigName:      naiveV1Config(defaultHarnessConfig),
+	NaiveV2ConfigName:      naiveV2Config(defaultHarnessConfig),
+	NaiveToolsetConfigName: naiveToolsetConfig(defaultHarnessConfig),
 }
