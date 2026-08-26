@@ -2,6 +2,7 @@ package harness
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/leejianrong/kopicode/internal/anchor"
@@ -213,5 +214,85 @@ func TestNaiveV2ConfigOnlyChangesVerificationForced(t *testing.T) {
 		t.Errorf("naiveV2Config(base) differs from base in more than Name, Version, SystemPrompt and "+
 			"Verification.Forced; NaiveV2ConfigName's doc comment in harness.go claims exactly that one "+
 			"independent axis changed\nbase: %+v\ngot:  %+v", base, normalised)
+	}
+}
+
+// TestNaiveToolsetConfigOnlyDropsEditFile holds NaiveToolsetConfigName's own
+// doc comment in harness.go to the code it describes: unlike naiveV1Config
+// and naiveV2Config, which probe the verification/parse-repair and
+// verification-alone axes, this configuration differs from the default in
+// exactly one independent axis — ToolSet/ToolCatalogue losing "edit_file" —
+// plus the prompt that is its required consequence. RepairBudget, ParseRoutes
+// and Verification.Forced must stay at their default values, which is the
+// entire point of a tool-set-only probe.
+//
+// Same technique and reason as the other two naiveVN diff tests:
+// naiveToolsetConfig is unexported, and the diff is checked structurally
+// rather than by eye.
+func TestNaiveToolsetConfigOnlyDropsEditFile(t *testing.T) {
+	base := defaultHarnessConfig
+	got := naiveToolsetConfig(base)
+
+	if got.Name != NaiveToolsetConfigName {
+		t.Errorf("Name = %q, want %q", got.Name, NaiveToolsetConfigName)
+	}
+	if got.SystemPrompt != NaiveToolsetSystemPrompt {
+		t.Error("SystemPrompt is not NaiveToolsetSystemPrompt — the whole argument for a separate " +
+			"prompt is that it honestly reflects ToolSet losing edit_file and nothing else")
+	}
+	if got.SystemPrompt == "" {
+		t.Fatal("positive control failed: naiveToolsetConfig carries no system prompt at all")
+	}
+	if slices.Contains(got.ToolSet, "edit_file") {
+		t.Errorf("ToolSet = %v, still contains edit_file — this is the one axis this configuration "+
+			"exists to isolate", got.ToolSet)
+	}
+	for _, name := range base.ToolSet {
+		if name == "edit_file" {
+			continue
+		}
+		if !slices.Contains(got.ToolSet, name) {
+			t.Errorf("ToolSet dropped %q along with edit_file; only edit_file should be removed", name)
+		}
+	}
+	for _, def := range got.ToolCatalogue {
+		if def.Function.Name == "edit_file" {
+			t.Error("ToolCatalogue still carries an edit_file entry; TestHarnessToolCatalogueMatchesEngineCatalogue " +
+				"requires ToolCatalogue and ToolSet to name the same tools in the same order")
+		}
+	}
+	if len(got.ToolCatalogue) != len(got.ToolSet) {
+		t.Errorf("ToolCatalogue has %d entries but ToolSet lists %d tools; they must match",
+			len(got.ToolCatalogue), len(got.ToolSet))
+	}
+	if !reflect.DeepEqual(got.ParseRoutes, base.ParseRoutes) {
+		t.Errorf("ParseRoutes = %v, want the default's %v unchanged — a tool-set-only probe that also "+
+			"narrows parse routes is not isolating the tool-set axis alone", got.ParseRoutes, base.ParseRoutes)
+	}
+	if got.RepairBudget != base.RepairBudget {
+		t.Errorf("RepairBudget = %d, want the default's %d unchanged — a tool-set-only probe that also "+
+			"zeroes the repair budget is not isolating the tool-set axis alone", got.RepairBudget, base.RepairBudget)
+	}
+	if got.Verification.Forced != base.Verification.Forced {
+		t.Errorf("Verification.Forced = %v, want the default's %v unchanged — a tool-set-only probe that "+
+			"also disables forced verification is not isolating the tool-set axis alone",
+			got.Verification.Forced, base.Verification.Forced)
+	}
+
+	// Name, Version, SystemPrompt, ToolSet and ToolCatalogue are expected to
+	// differ. Normalise those, then require everything else to compare equal
+	// wholesale — proves nothing else moved without hand-listing every
+	// remaining field of Config.
+	normalised := got
+	normalised.Name = base.Name
+	normalised.Version = base.Version
+	normalised.SystemPrompt = base.SystemPrompt
+	normalised.ToolSet = base.ToolSet
+	normalised.ToolCatalogue = base.ToolCatalogue
+
+	if !reflect.DeepEqual(base, normalised) {
+		t.Errorf("naiveToolsetConfig(base) differs from base in more than Name, Version, SystemPrompt, "+
+			"ToolSet and ToolCatalogue; NaiveToolsetConfigName's doc comment in harness.go claims exactly "+
+			"that one independent axis changed\nbase: %+v\ngot:  %+v", base, normalised)
 	}
 }

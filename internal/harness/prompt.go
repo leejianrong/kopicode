@@ -96,6 +96,41 @@ var NaiveSystemPrompt string
 //go:embed prompt_naive_verify.md
 var NaiveVerifyOnlySystemPrompt string
 
+// NaiveToolsetSystemPrompt is [NaiveToolsetConfigName]'s system prompt
+// (KAN-1020, KAN-1023).
+//
+// It is [DefaultSystemPrompt] with the `### edit_file` tool section removed —
+// a required consequence of [NaiveToolsetConfigName]'s single independent
+// field ([Config.ToolSet] dropping "edit_file") — plus two smaller fixes the
+// removal forces: [DefaultSystemPrompt]'s `### write_file` section tells the
+// model to "use `edit_file`" for a partial change, and its `### edit_file_fuzzy`
+// section tells the model to "read it and use `edit_file`" once it can. Both
+// point at a tool this configuration does not offer; left unchanged, either
+// would send a call for a tool name the model was never given. Both now name
+// `edit_file_fuzzy` instead, since it is the only edit tool this configuration
+// has.
+//
+// What this prompt deliberately does NOT change, and why: the "## Anchors"
+// section's rejection-reason list still names anchor_malformed, anchor_drift,
+// ambiguous and anchor_order — all four are edit_file's own rejection
+// reasons, from a tool this configuration does not offer — and the anchor
+// version line is unchanged too. That is not an oversight: KAN-1020's design
+// record found TestSystemPromptAnswersEveryRejectReason and
+// TestSystemPromptStatesTheAnchorVersion require both, verbatim, in every
+// registered configuration's prompt, unconditionally — unlike
+// TestSystemPromptDocumentsEveryTool, neither test is scoped to what
+// [Config.ToolSet] actually offers. Removing that prose would fail the suite
+// without changing the test; keeping it is inert (nothing instructs the model
+// to expect those rejections from a tool it is using) rather than misleading
+// (nothing tells the model to call a tool that is not there, which is the
+// distinction the write_file/edit_file_fuzzy fix above draws the other way).
+// [Config.RepairBudget], [Config.ParseRoutes] and [Verification.Forced] are
+// all default's values, unchanged — this configuration probes the tool-set
+// axis alone.
+//
+//go:embed prompt_naive_toolset.md
+var NaiveToolsetSystemPrompt string
+
 // promptBudget is the largest the prompt may grow to, in bytes.
 //
 // Slice 1 assembles context as naive full history (docs/SLICE-1.md affordance
