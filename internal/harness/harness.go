@@ -329,6 +329,30 @@ const MinimaxM2ConfigName = "minimax-m2-v1"
 // report built from it.
 const NaiveV1ConfigName = "naive-v1"
 
+// NaiveV2ConfigName is a single-field probe against [defaultHarnessConfig]
+// (KAN-1019, KAN-1022), registered to answer a question [NaiveV1ConfigName]'s
+// three-field bundle cannot: which one of its changed fields actually drives
+// that arm's result. Per ADR-0007 decision 6/7, a three-way difference
+// attributes to the whole bundle, never to one field — this configuration
+// exists to isolate the field [NaiveV1ConfigName]'s own paired-A/B writeup
+// (docs/paired-ab-qwen-default-vs-naive-v1.md) traced most directly to its
+// one discordant task and its turn-cap-rate gap: [Verification.Forced].
+//
+// [naiveV2Config] differs from [defaultHarnessConfig] in exactly one
+// independent field — Verification.Forced — plus the system prompt, which is
+// a required honest consequence of that one field and not a second axis, for
+// the identical reason [naiveV1Config]'s own doc comment already gives.
+// [Config.RepairBudget] and [Config.ParseRoutes] stay at their default
+// values, deliberately: those are the other two fields naive-v1 changed, and
+// leaving them alone is what makes a result on this configuration
+// attributable to forced verification alone rather than to some new bundle of
+// two changes instead of three.
+//
+// Reachable only by naming it explicitly (`--harness naive-verify-only`); no
+// registry.go row defaults to it, the same override path [NaiveV1ConfigName]
+// uses.
+const NaiveV2ConfigName = "naive-verify-only"
+
 // defaultHarnessConfig is the value registered under [DefaultConfigName].
 //
 // It is a named value and not just an entry inline in [configs] so that
@@ -583,6 +607,24 @@ func naiveV1Config(base Config) Config {
 	return cfg
 }
 
+// naiveV2Config returns [NaiveV2ConfigName]'s configuration: a copy of base
+// with forced verification off and the prompt that is its required
+// consequence — see [NaiveV2ConfigName]'s own doc comment for why this is one
+// independent field, not [naiveV1Config]'s three.
+//
+// base is a parameter for the same reason [naiveV1Config] takes one: it lets
+// a test drive this function against an arbitrary starting configuration and
+// check the diff is exactly the field claimed, rather than trusting two long
+// literals compared by eye.
+func naiveV2Config(base Config) Config {
+	cfg := base
+	cfg.Name = NaiveV2ConfigName
+	cfg.Version = 1
+	cfg.SystemPrompt = NaiveVerifyOnlySystemPrompt
+	cfg.Verification.Forced = false
+	return cfg
+}
+
 // configs is every harness configuration compiled into this binary, by name.
 //
 // A map is fine here and is not in tension with the no-map rule on [Config]:
@@ -592,4 +634,5 @@ var configs = map[string]Config{
 	DefaultConfigName:   defaultHarnessConfig,
 	MinimaxM2ConfigName: minimaxM2Config(defaultHarnessConfig),
 	NaiveV1ConfigName:   naiveV1Config(defaultHarnessConfig),
+	NaiveV2ConfigName:   naiveV2Config(defaultHarnessConfig),
 }

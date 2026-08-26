@@ -159,3 +159,59 @@ func TestNaiveV1ConfigOnlyChangesItsClaimedFields(t *testing.T) {
 			"harness.go claims exactly those axes changed\nbase: %+v\ngot:  %+v", base, normalised)
 	}
 }
+
+// TestNaiveV2ConfigOnlyChangesVerificationForced holds NaiveV2ConfigName's own
+// doc comment in harness.go to the code it describes: unlike naiveV1Config's
+// three claimed fields, this configuration differs from the default in
+// exactly one independent field, Verification.Forced, plus the prompt that is
+// its required consequence — RepairBudget and ParseRoutes must stay at their
+// default values, which is the entire point of a single-field probe.
+//
+// Same technique and reason as TestMinimaxM2ConfigOnlyChangesSeedPolicy and
+// TestNaiveV1ConfigOnlyChangesItsClaimedFields: naiveV2Config is unexported,
+// and the diff is checked structurally rather than by eye.
+func TestNaiveV2ConfigOnlyChangesVerificationForced(t *testing.T) {
+	base := defaultHarnessConfig
+	got := naiveV2Config(base)
+
+	if got.Name != NaiveV2ConfigName {
+		t.Errorf("Name = %q, want %q", got.Name, NaiveV2ConfigName)
+	}
+	if got.SystemPrompt != NaiveVerifyOnlySystemPrompt {
+		t.Error("SystemPrompt is not NaiveVerifyOnlySystemPrompt — the whole argument for a separate " +
+			"prompt is that it honestly reflects Verification.Forced changing and nothing else")
+	}
+	if got.SystemPrompt == "" {
+		t.Fatal("positive control failed: naiveV2Config carries no system prompt at all")
+	}
+	if got.Verification.Forced {
+		t.Error("Verification.Forced = true, want false — this is the one field this configuration " +
+			"exists to isolate")
+	}
+	if !reflect.DeepEqual(got.ParseRoutes, base.ParseRoutes) {
+		t.Errorf("ParseRoutes = %v, want the default's %v unchanged — a single-field probe that also "+
+			"narrows parse routes is not isolating Verification.Forced any more than naive-v1 does",
+			got.ParseRoutes, base.ParseRoutes)
+	}
+	if got.RepairBudget != base.RepairBudget {
+		t.Errorf("RepairBudget = %d, want the default's %d unchanged — a single-field probe that also "+
+			"zeroes the repair budget is not isolating Verification.Forced any more than naive-v1 does",
+			got.RepairBudget, base.RepairBudget)
+	}
+
+	// Name, Version, SystemPrompt and Verification.Forced are expected to
+	// differ. Normalise those, then require everything else to compare equal
+	// wholesale — proves nothing else moved without hand-listing every
+	// remaining field of Config.
+	normalised := got
+	normalised.Name = base.Name
+	normalised.Version = base.Version
+	normalised.SystemPrompt = base.SystemPrompt
+	normalised.Verification.Forced = base.Verification.Forced
+
+	if !reflect.DeepEqual(base, normalised) {
+		t.Errorf("naiveV2Config(base) differs from base in more than Name, Version, SystemPrompt and "+
+			"Verification.Forced; NaiveV2ConfigName's doc comment in harness.go claims exactly that one "+
+			"independent axis changed\nbase: %+v\ngot:  %+v", base, normalised)
+	}
+}
