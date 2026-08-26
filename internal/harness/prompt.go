@@ -72,6 +72,30 @@ var DefaultSystemPrompt string
 //go:embed prompt_naive.md
 var NaiveSystemPrompt string
 
+// NaiveVerifyOnlySystemPrompt is [NaiveV2ConfigName]'s system prompt (KAN-1019,
+// KAN-1022).
+//
+// It is [DefaultSystemPrompt] with exactly one change, and that change is a
+// required consequence of [NaiveV2ConfigName]'s single independent field
+// ([Verification.Forced] off), not a second one: the default prompt's "##
+// Verification" section, and the "Working" section's item 3 ("rather than to
+// repeat the check that runs anyway"), both describe forced-verification
+// behaviour that is simply false once that field is off. The replacement
+// sentence for item 3 — "no check runs automatically... verify your own work"
+// — is [NaiveSystemPrompt]'s own "Working" section's wording, reused rather
+// than reworded, because it already says the true thing precisely and this
+// prompt is not trying to say it differently.
+//
+// Every other section — Calling a tool, Anchors, every `### <tool>` section in
+// [Config.ToolSet] order with every argument as a JSON key — is byte-identical
+// to [DefaultSystemPrompt]: [Config.RepairBudget] and [Config.ParseRoutes] are
+// unchanged from default in [naiveV2Config], so nothing here should read as if
+// they were. prompt_test.go holds this configuration to the same tool/argument
+// contract every other one is held to.
+//
+//go:embed prompt_naive_verify.md
+var NaiveVerifyOnlySystemPrompt string
+
 // promptBudget is the largest the prompt may grow to, in bytes.
 //
 // Slice 1 assembles context as naive full history (docs/SLICE-1.md affordance
