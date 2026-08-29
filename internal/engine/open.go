@@ -752,6 +752,17 @@ func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session,
 		return fail(err)
 	}
 
+	if fork == nil && !opts.Resume {
+		// A genuinely new session only: see loadProjectInstructions's own doc
+		// comment for why a resumed or forked session must not call this
+		// again. After Start, deliberately, for the same reason recordFork
+		// runs after it below — this session's own SessionStarted (seq 1)
+		// must land before anything this bootstrap adds.
+		if err := eng.loadProjectInstructions(ctx, abs); err != nil {
+			return fail(err)
+		}
+	}
+
 	if fork != nil {
 		// After Start, deliberately: this session's own SessionStarted (seq 1)
 		// must land before the SessionForked marker and the copied block that

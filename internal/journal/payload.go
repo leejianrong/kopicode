@@ -655,6 +655,40 @@ type SessionForked struct {
 
 func (SessionForked) Type() Type { return TypeSessionForked }
 
+// ProjectInstructionsLoaded records that a genuinely new session's bootstrap
+// found the repository's own AGENTS.md and fed it into the conversation
+// (KAN-1024, KAN-1025).
+//
+// It is written once, immediately after this session's own SessionStarted and
+// before the first turn's ProviderRequest — the same relative position
+// SessionForked's own duplicated block occupies — so a reader meets "the
+// repository said this about itself" before meeting anything the human or the
+// model said.
+//
+// One fact, one honestly-named event, the same register SessionForked's own
+// doc comment states: this is not a field smuggled onto SessionStarted, and it
+// is not the harness's own system prompt — the content came from the
+// repository being worked on, not from the harness configuration, so it does
+// not enter the harness configuration hash's preimage
+// (docs/adr/0007-model-selection-and-harness-config-shape.md decision 6). Two
+// sessions on the identical arm, run against two different repositories (or
+// the same repository before and after an AGENTS.md edit), are still the
+// identical arm.
+//
+// A resumed or forked session does not rediscover this from disk: replaying
+// the journal (internal/engine's replayHistory, and a fork's copied block)
+// feeds back the Content this event recorded, so a session's assembled
+// history never disagrees with what it was actually shown, even if the file
+// on disk has since changed.
+type ProjectInstructionsLoaded struct {
+	// Path is the AGENTS.md file that was read, absolute.
+	Path string `json:"path"`
+	// Content is the file's content, verbatim.
+	Content Text `json:"content"`
+}
+
+func (ProjectInstructionsLoaded) Type() Type { return TypeProjectInstructionsLoaded }
+
 // AskRequested records that the model paused the turn to ask the human a
 // question (docs/adr/0009-ask-tool-contract.md decision 3).
 //

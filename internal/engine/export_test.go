@@ -58,3 +58,11 @@ func AskForTest(ctx context.Context, c Consenter, req ConsentRequest) (string, e
 func ReplayHistoryForTest(asm *Assembler, events []journal.Event) error {
 	return replayHistory(asm, events)
 }
+
+// WrapProjectInstructionsForTest exposes the one framing string
+// [Engine]'s bootstrap call (instructions.go) and resume.go's replay case
+// both use, so a test can assert against the real wrapper rather than a
+// second, hand-copied literal that could silently drift from it (KAN-1025).
+func WrapProjectInstructionsForTest(content string) string {
+	return wrapProjectInstructions(content)
+}

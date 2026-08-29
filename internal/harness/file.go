@@ -53,38 +53,85 @@ type FileConfig struct {
 // A missing file is not an error. It is the ordinary case — most repositories
 // will never have one — and it resolves to the built-in default.
 func LoadFileConfig(dir string) (FileConfig, error) {
-	dir, err := filepath.Abs(dir)
+	path, data, ok, err := findUpward(dir, filepath.Join(ConfigDirName, ConfigFileName))
 	if err != nil {
-		return FileConfig{}, fmt.Errorf("harness: resolving %s: %w", dir, err)
+		return FileConfig{}, err
+	}
+	if !ok {
+		return FileConfig{}, nil
+	}
+	return parseFileConfig(path, string(data))
+}
+
+// AgentsFileName is the repository's own project-instructions file
+// (KAN-1024): AGENTS.md, at the repository root, read the same way
+// LoadFileConfig reads .kopicode/config.toml.
+const AgentsFileName = "AGENTS.md"
+
+// AgentsFile is a repository's own AGENTS.md, found by [LoadAgentsFile].
+type AgentsFile struct {
+	// Path is the file that was read.
+	Path string
+	// Content is the file's content, verbatim.
+	Content string
+}
+
+// LoadAgentsFile finds and reads the repository's AGENTS.md, starting at dir
+// and walking upwards — the identical boundary [LoadFileConfig] uses (the
+// first directory holding a .git entry, inclusive, or the filesystem root).
+//
+// ok is false when no file was found, which is the ordinary case: most
+// repositories will never have one. A file that exists and cannot be read is
+// not "absent" — the same rule LoadFileConfig enforces for the config file —
+// so that case is a non-nil error rather than a silent skip.
+func LoadAgentsFile(dir string) (AgentsFile, bool, error) {
+	path, data, ok, err := findUpward(dir, AgentsFileName)
+	if err != nil {
+		return AgentsFile{}, false, err
+	}
+	if !ok {
+		return AgentsFile{}, false, nil
+	}
+	return AgentsFile{Path: path, Content: string(data)}, true, nil
+}
+
+// findUpward looks for relPath in dir, then in each parent directory in turn,
+// stopping at the first directory holding a .git entry (that directory
+// included) or at the filesystem root — the boundary [LoadFileConfig] and
+// [LoadAgentsFile] share, extracted here so the walk itself exists exactly
+// once.
+//
+// ok is false when the walk reached a boundary with nothing to read. A file
+// that exists and cannot be read is reported as a non-nil error rather than
+// as absent, because the two callers of this function both attach that same
+// meaning to "exists but unreadable": treating it as absent would silently
+// fall back to a default the repository never asked for.
+func findUpward(dir, relPath string) (path string, content []byte, ok bool, err error) {
+	dir, err = filepath.Abs(dir)
+	if err != nil {
+		return "", nil, false, fmt.Errorf("harness: resolving %s: %w", dir, err)
 	}
 
 	for {
-		path := filepath.Join(dir, ConfigDirName, ConfigFileName)
-		data, readErr := os.ReadFile(path)
+		candidate := filepath.Join(dir, relPath)
+		data, readErr := os.ReadFile(candidate)
 		switch {
 		case readErr == nil:
-			cfg, parseErr := parseFileConfig(path, string(data))
-			if parseErr != nil {
-				return FileConfig{}, parseErr
-			}
-			return cfg, nil
+			return candidate, data, true, nil
 		case !os.IsNotExist(readErr):
-			// A file that exists and cannot be read is not "absent". Reporting
-			// it as absent would silently run the default model against a
-			// repository that asked for another one.
-			return FileConfig{}, fmt.Errorf("harness: reading %s: %w", path, readErr)
+			return "", nil, false, fmt.Errorf("harness: reading %s: %w", candidate, readErr)
 		}
 
 		// A repository boundary ends the walk, after this directory has been
 		// looked in. .git is a directory in a normal checkout and a file in a
 		// linked worktree, so this tests for existence rather than for a kind.
 		if _, statErr := os.Lstat(filepath.Join(dir, ".git")); statErr == nil {
-			return FileConfig{}, nil
+			return "", nil, false, nil
 		}
 
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return FileConfig{}, nil
+			return "", nil, false, nil
 		}
 		dir = parent
 	}

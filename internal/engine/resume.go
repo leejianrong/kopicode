@@ -19,6 +19,14 @@ import (
 // The mapping walks the journal forward, in seq order, and drives exactly the
 // [Assembler] methods [Engine.Run] itself would have called:
 //
+//   - [journal.ProjectInstructionsLoaded] -> [Assembler.AppendUser], wrapped
+//     by the identical wrapProjectInstructions helper the original session's
+//     bootstrap used (loadProjectInstructions in instructions.go), so a
+//     resumed or forked session's assembled history carries the same
+//     repository-supplied turn the interrupted process saw — replayed from
+//     the journal's own recorded Content, never re-read from disk, so a
+//     changed AGENTS.md between the original run and the resume changes
+//     nothing about what this replay reconstructs.
 //   - [journal.UserMessage] -> [Assembler.AppendUser].
 //   - [journal.ProviderResponse], together with the [journal.AssistantMessage]
 //     that follows it when the reply carried prose, and the
@@ -97,6 +105,12 @@ func replayHistory(asm *Assembler, events []journal.Event) error {
 
 	for _, ev := range events {
 		switch p := ev.Payload.(type) {
+		case journal.ProjectInstructionsLoaded:
+			if err := flush(); err != nil {
+				return err
+			}
+			asm.AppendUser(wrapProjectInstructions(p.Content.Inline))
+
 		case journal.UserMessage:
 			if err := flush(); err != nil {
 				return err
