@@ -110,16 +110,29 @@ type ForkSource struct {
 // readForkSource reads src.SessionID's own record — under root, the same
 // directory the forked session is about to open in; see [Options.Fork]'s doc
 // comment for why a fork does not name a separate directory for its source —
-// and returns the events belonging to turns 1 through src.Turn inclusive, in
-// seq order, together with the highest turn number src.SessionID's own record
-// actually reached.
+// and returns the events belonging to turns 1 through src.Turn inclusive,
+// together with any [journal.ProjectInstructionsLoaded] the source's own
+// bootstrap wrote (see below), in seq order, together with the highest turn
+// number src.SessionID's own record actually reached.
 //
-// The range excludes Turn 0 deliberately: that is where SessionID's own
-// SessionStarted (and, if it has since closed, its SessionEnded) live, and
-// duplicating either into the new session's record would misrepresent this
-// session's own start — see [journal.SessionForked]'s doc comment. Nothing
-// else in the journal's vocabulary carries Turn 0, so the exclusion reaches
-// exactly those two and nothing a caller might have wanted copied.
+// The range excludes Turn 0 otherwise, deliberately: that is where
+// SessionID's own SessionStarted (and, if it has since closed, its
+// SessionEnded) live, and duplicating either into the new session's record
+// would misrepresent this session's own start — see [journal.SessionForked]'s
+// doc comment.
+//
+// [journal.ProjectInstructionsLoaded] is the one exception, carved out of
+// that exclusion rather than folded into the Turn range: it also lives at
+// Turn 0 (openSession's bootstrap writes it immediately after
+// SessionStarted, before any turn runs — see instructions.go), but it is
+// source-tree content the model was actually shown, not a fact about how the
+// source session itself began. [Fork] never re-runs the discovery that
+// produced it — loadProjectInstructions is called only for a genuinely new
+// session, never a forked one — so if this exception did not exist, a fork's
+// history would silently omit the AGENTS.md turn the source session's own
+// history carries, the same gap the resume.go replay switch exists to close
+// for [Options.Resume]. Found by reading this function's own Turn-0
+// exclusion against KAN-1024's design, not assumed.
 //
 // It uses [journal.ReadSessionBlobs] rather than [journal.ReadSession]
 // because [recordFork] is about to duplicate these events' *content* — a
@@ -135,8 +148,13 @@ func readForkSource(ctx context.Context, root string, src ForkSource) (events []
 		if ev.Turn > sourceMaxTurn {
 			sourceMaxTurn = ev.Turn
 		}
-		if ev.Turn >= 1 && ev.Turn <= src.Turn {
+		switch {
+		case ev.Turn >= 1 && ev.Turn <= src.Turn:
 			events = append(events, ev)
+		case ev.Turn == 0:
+			if _, ok := ev.Payload.(journal.ProjectInstructionsLoaded); ok {
+				events = append(events, ev)
+			}
 		}
 	}
 	return events, sourceMaxTurn, nil

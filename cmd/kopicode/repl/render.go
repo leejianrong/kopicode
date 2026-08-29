@@ -130,6 +130,15 @@ func (l *Loop) Render(e engine.Event) {
 		// to, the same "already handled, would show twice" reasoning
 		// EventPermissionRequested's own case gives.
 
+	case engine.EventProjectInstructionsLoaded:
+		// A genuinely new session's bootstrap found the repository's own
+		// AGENTS.md and fed it into the conversation before the first real
+		// user turn (KAN-1025) — see journal.ProjectInstructionsLoaded's own
+		// doc comment. Rendered once, the same register EventSessionStarted's
+		// own line uses, so a user watching the session sees what it was
+		// shown without having to open the record.
+		l.tag("instructions", fmt.Sprintf("%s (%s)", e.Path, humanBytes(e.Size)))
+
 	case engine.EventAskAnswered:
 		if e.Reason == "refused" {
 			l.tag("ask", fmt.Sprintf("unanswered (%s): %s", e.Source, e.Text))

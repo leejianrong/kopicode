@@ -402,3 +402,47 @@ func TestAConfiguredVerifyCommandChangesTheArm(t *testing.T) {
 			otherSel.HarnessConfigHash, configured.HarnessConfigHash)
 	}
 }
+
+// TestAnAgentsFileDoesNotChangeTheArm holds KAN-1024's decision 3 to account:
+// a repository's own AGENTS.md is content the session's own bootstrap feeds
+// to the model (internal/engine's loadProjectInstructions), never a fact
+// [Resolve] reads or a value that enters [harness.Config.Hash]'s preimage.
+// Two repositories differing only in whether — or how — they name their own
+// project instructions are still the identical arm.
+func TestAnAgentsFileDoesNotChangeTheArm(t *testing.T) {
+	without, err := harness.Resolve(t.TempDir(), harness.Overrides{})
+	if err != nil {
+		t.Fatalf("Resolve with no AGENTS.md: %v", err)
+	}
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, harness.AgentsFileName), []byte("run make test first\n"), 0o644); err != nil {
+		t.Fatalf("writing %s: %v", harness.AgentsFileName, err)
+	}
+	with, err := harness.Resolve(dir, harness.Overrides{})
+	if err != nil {
+		t.Fatalf("Resolve with an AGENTS.md: %v", err)
+	}
+
+	if with.HarnessConfigHash != without.HarnessConfigHash {
+		t.Errorf("HarnessConfigHash differs with an AGENTS.md present (%s) versus absent (%s); "+
+			"AGENTS.md is repository content, not a harness configuration fact, and must not move the hash",
+			with.HarnessConfigHash, without.HarnessConfigHash)
+	}
+
+	// Different content, same arm: what is hashed is the harness configuration
+	// Resolve produced, not anything about the repository's own AGENTS.md.
+	other := t.TempDir()
+	if err := os.WriteFile(filepath.Join(other, harness.AgentsFileName), []byte("a completely different set of instructions\n"), 0o644); err != nil {
+		t.Fatalf("writing %s: %v", harness.AgentsFileName, err)
+	}
+	otherSel, err := harness.Resolve(other, harness.Overrides{})
+	if err != nil {
+		t.Fatalf("Resolve with a different AGENTS.md: %v", err)
+	}
+	if otherSel.HarnessConfigHash != with.HarnessConfigHash {
+		t.Errorf("two repositories with differently worded AGENTS.md files hash differently (%s vs %s); "+
+			"AGENTS.md content is not in the preimage and must not be",
+			otherSel.HarnessConfigHash, with.HarnessConfigHash)
+	}
+}

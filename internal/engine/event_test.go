@@ -83,6 +83,9 @@ func samplePayloads() []journal.Payload {
 		journal.AskAnswered{
 			CallID: "kc-1", Answer: journal.InlineText("config/retry.toml"), Source: "user",
 		},
+		journal.ProjectInstructionsLoaded{
+			Path: "/repo/AGENTS.md", Content: journal.InlineText("run make test first"),
+		},
 		journal.UnknownPayload{EventType: "SomethingNewer", Raw: json.RawMessage(`{"a":1}`)},
 	}
 }

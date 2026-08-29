@@ -49,6 +49,7 @@ const (
 	EventSessionForked
 	EventAskRequested
 	EventAskAnswered
+	EventProjectInstructionsLoaded
 
 	// EventUnknown is an event this build has no typed payload for, preserved
 	// by the journal's compatibility promise and passed through here rather
@@ -70,33 +71,34 @@ const (
 )
 
 var eventKindText = map[EventKind]string{
-	EventUnspecified:         "unspecified",
-	EventSessionStarted:      "session_started",
-	EventUserMessage:         "user_message",
-	EventAssistantMessage:    "assistant_message",
-	EventThinking:            "thinking",
-	EventProviderRequest:     "provider_request",
-	EventProviderRetried:     "provider_retried",
-	EventProviderResponse:    "provider_response",
-	EventToolCallRequested:   "tool_call_requested",
-	EventToolCallParsed:      "tool_call_parsed",
-	EventToolCallRepaired:    "tool_call_repaired",
-	EventToolCallFailed:      "tool_call_failed",
-	EventToolResult:          "tool_result",
-	EventEditApplied:         "edit_applied",
-	EventEditRejected:        "edit_rejected",
-	EventSyntaxGate:          "syntax_gate",
-	EventPermissionRequested: "permission_requested",
-	EventPermissionDecided:   "permission_decided",
-	EventTurnSnapshot:        "turn_snapshot",
-	EventVerification:        "verification",
-	EventTurnCancelled:       "turn_cancelled",
-	EventSessionEnded:        "session_ended",
-	EventSessionForked:       "session_forked",
-	EventAskRequested:        "ask_requested",
-	EventAskAnswered:         "ask_answered",
-	EventUnknown:             "unknown",
-	EventDelta:               "delta",
+	EventUnspecified:               "unspecified",
+	EventSessionStarted:            "session_started",
+	EventUserMessage:               "user_message",
+	EventAssistantMessage:          "assistant_message",
+	EventThinking:                  "thinking",
+	EventProviderRequest:           "provider_request",
+	EventProviderRetried:           "provider_retried",
+	EventProviderResponse:          "provider_response",
+	EventToolCallRequested:         "tool_call_requested",
+	EventToolCallParsed:            "tool_call_parsed",
+	EventToolCallRepaired:          "tool_call_repaired",
+	EventToolCallFailed:            "tool_call_failed",
+	EventToolResult:                "tool_result",
+	EventEditApplied:               "edit_applied",
+	EventEditRejected:              "edit_rejected",
+	EventSyntaxGate:                "syntax_gate",
+	EventPermissionRequested:       "permission_requested",
+	EventPermissionDecided:         "permission_decided",
+	EventTurnSnapshot:              "turn_snapshot",
+	EventVerification:              "verification",
+	EventTurnCancelled:             "turn_cancelled",
+	EventSessionEnded:              "session_ended",
+	EventSessionForked:             "session_forked",
+	EventAskRequested:              "ask_requested",
+	EventAskAnswered:               "ask_answered",
+	EventProjectInstructionsLoaded: "project_instructions_loaded",
+	EventUnknown:                   "unknown",
+	EventDelta:                     "delta",
 }
 
 // String returns the kind's name.
@@ -400,6 +402,11 @@ func eventOf(ev journal.Event) Event {
 		if p.Refused {
 			base.Reason = "refused"
 		}
+
+	case journal.ProjectInstructionsLoaded:
+		base.Kind = EventProjectInstructionsLoaded
+		base.Path = p.Path
+		base.Text, base.Size = text(p.Content)
 
 	case journal.UnknownPayload:
 		// The journal's compatibility promise, carried one layer further out. A
