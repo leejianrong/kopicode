@@ -1,15 +1,16 @@
 # ADR-0013: An agent-controlled resident session surface over stdio
 
-- **Status:** Proposed
-- **Date:** 2026-08-29
+- **Status:** Accepted
+- **Date:** 2026-08-29 (drafted); 2026-09-14 (accepted)
 - **Deciders:** Jian (leejianrong2@gmail.com)
 
 Drafted by an agent during a 2026-08-29 planning session, from a direct answer Jian
 gave when asked what's pulling him toward a next milestone: "I want kopicode to be
 able to be called/controlled/spun up/used by another agentic harness, such as
 cuttlefish (see abang-ai) or hermes/openclaw." Like [ADR-0008](0008-shell-isolation-accepted-risk.md)
-and [ADR-0009](0009-ask-tool-contract.md), this is a recommendation for Jian to accept,
-amend or reject, and Status stays **Proposed** until he does.
+and [ADR-0009](0009-ask-tool-contract.md), this was a recommendation for Jian to accept,
+amend or reject; he accepted all seven decisions as drafted on 2026-09-14, and
+EPIC-131's implementation cards (KAN-1028..1031) build against them.
 
 Builds directly on two pieces of work already on the board: KAN-950's scoping of a
 JSON-RPC surface (originally framed around an editor/IDE consumer) and KAN-1021's
