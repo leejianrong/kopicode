@@ -286,3 +286,24 @@ func TestThePipedTranscriptCarriesTheUsersOwnWords(t *testing.T) {
 		t.Errorf("the terminal echoed the user's message back at them:\n%q", out.String())
 	}
 }
+
+// TestTurnCapHint checks the guidance a capped session prints: it names the cap
+// that was hit, suggests a larger value, and names the knob (--harness-config
+// and the harness_config config key) so the user does not have to read source.
+func TestTurnCapHint(t *testing.T) {
+	hint := repl.TurnCapHint(20)
+	for _, want := range []string{"max_turns = 20", "max_turns = 40", "--harness-config", "harness_config"} {
+		if !strings.Contains(hint, want) {
+			t.Errorf("TurnCapHint(20) missing %q:\n%s", want, hint)
+		}
+	}
+
+	// An unknown cap still produces a usable hint rather than "max_turns = 0".
+	zero := repl.TurnCapHint(0)
+	if strings.Contains(zero, "= 0") {
+		t.Errorf("TurnCapHint(0) shows a nonsense cap:\n%s", zero)
+	}
+	if !strings.Contains(zero, "--harness-config") {
+		t.Errorf("TurnCapHint(0) does not name the knob:\n%s", zero)
+	}
+}

@@ -197,6 +197,9 @@ func TestTheTurnCapIsReportedAndTheSessionContinues(t *testing.T) {
 	if !strings.Contains(h.text(), "max_turns") {
 		t.Errorf("the turn cap was not reported:\n%s", h.text())
 	}
+	if !strings.Contains(h.text(), "--harness-config") {
+		t.Errorf("the turn cap was reported without telling the user how to raise it:\n%s", h.text())
+	}
 	if len(h.prompts) != 2 {
 		t.Errorf("the session did not survive the turn cap: %v", h.prompts)
 	}

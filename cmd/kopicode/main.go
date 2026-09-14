@@ -411,6 +411,7 @@ func openAndDriveSession(std streams, opts engine.Options, open func(context.Con
 		Interactive: std.terminal.IsInteractive(),
 		Terminal:    std.terminal,
 		Interrupts:  interrupts,
+		MaxTurns:    opts.Selection.Config.MaxTurns,
 		Turn: func(ctx context.Context, prompt string, _ repl.Surface) (engine.Result, error) {
 			return sess.Run(ctx, prompt)
 		},
