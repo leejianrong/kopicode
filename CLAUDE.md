@@ -92,10 +92,12 @@ not this list:
   turn that could have changed the tree. `NotRun` is the zero value, not `Passed`; only
   a command that ran and failed blocks a success report. Discovery **executes nothing**
   — a Makefile target, `go.mod`, `scripts.test`, a uv project, in that order.
-- **`internal/provider/fixture`** — provider traffic as data. Every fixture is
-  hand-authored and says so (`"origin": "hand_authored"`) — the recorder that would
-  scrub secrets from real traffic doesn't exist yet, so this is a deliberate, bounded
-  violation of the test-seam rule below, not an oversight.
+- **`internal/provider/fixture`** — provider traffic as data. Every *shipped* fixture is
+  hand-authored and says so (`"origin": "hand_authored"`). The recorder that turns real
+  traffic into fixture data, scrubbing secrets through a header allowlist, now exists
+  (KAN-774, `recorder.go`) — but it is a `RoundTripper` test/tool seam, not yet wired into
+  a command that regenerates the corpus, so the hand-authored fixtures remain a
+  deliberate, bounded violation of the test-seam rule below, not an oversight.
 - **`internal/repo`** — turn snapshots via git shadow refs
   (`refs/kopicode/<session>/<turn>`), written through a throwaway index so the user's
   real git state is never touched. `Restore` reads a tree back out via `git archive`
@@ -189,12 +191,14 @@ kopicode mechanism behaved as designed, and the classifier still bucketed it `ha
 per its deliberately conservative rule. This is the harness's first honest number, not
 a flattering one.
 
-**What doesn't exist yet:** the fixture recorder, so every provider fixture stays
-hand-authored; a second registered model, so the benchmark rig has never produced an
-A/B result; `slog` inside the engine (wired at the front-end level only); the
-`.kopicode/lock` advisory lock (nothing stops two sessions in one repository today).
-The CLI surface for `--resume`/`--fork` (listing sessions worth resuming from) doesn't
-exist either — the engine-level mechanism does.
+**What doesn't exist yet:** the recorder exists (KAN-774) but nothing yet drives it to
+regenerate the corpus, so every *shipped* provider fixture is still hand-authored. The
+other gaps this paragraph used to list have since closed — verify against the code, not
+this note: three models are registered (`internal/harness/registry.go`) and paired A/B
+numbers exist (`docs/paired-ab-*`); `slog` runs inside the engine
+(`internal/engine/open.go`); `.kopicode/lock` holds one session per working tree
+(`internal/lock`); and `kopicode sessions` (KAN-941) lists sessions to find a
+`--resume`/`--fork` id.
 
 Do not add a test count here — it goes stale on the next PR. `make test` prints the
 real number; a red suite, not a changed count, is the signal something is wrong.
@@ -428,8 +432,9 @@ captured stdout — never internal loop state.
 
 The mock provider **replays recorded traffic rather than synthesising it**, so it
 doesn't mask real breakage by drifting from actual provider behaviour. Today this
-comes with one open exception: the fixture recorder doesn't exist yet, so every shipped
-fixture is hand-authored rather than recorded from a real run.
+comes with one open exception: the recorder exists (KAN-774) but is not yet wired into a
+command that regenerates the corpus, so every shipped fixture is still hand-authored
+rather than recorded from a real run.
 
 ## Pointers
 
