@@ -201,9 +201,9 @@ real number; a red suite, not a changed count, is the signal something is wrong.
 
 ## Decisions of record — read before proposing anything
 
-Eleven ADRs exist; two reverse earlier plans that still appear in older project notes,
-and two are amendments layered on top of earlier ones. If a document contradicts an
-ADR, the ADR wins.
+Thirteen ADRs exist; two reverse earlier plans that still appear in older project
+notes, and two are amendments layered on top of earlier ones. If a document
+contradicts an ADR, the ADR wins.
 
 | | |
 |---|---|
@@ -218,6 +218,8 @@ ADR, the ADR wins.
 | [0009](docs/adr/0009-ask-tool-contract.md) *(Proposed)* | **The `ask` tool** is a sibling mechanism to consent, not an extension of `internal/permission` — free-text question/answer, never a `Verdict`. |
 | [0010](docs/adr/0010-declarative-harness-configs-and-self-tuning.md) | **Declarative harness configs + `kopitune`.** Amends 0007: a second, *declared* config class (TOML, base + overrides) alongside the built-in registry, for models with no hand-tuned entry. Local-only — never anchors a published benchmark number. |
 | [0011](docs/adr/0011-unattended-invocation-policy-gate.md) | **A policy gate for unattended invocation.** Amends 0008: a new opt-in `permission.Policy` (declared allowlist) for a caller like cuttlefish that spawns kopicode with no human present. Real containment is the caller's job, not kopicode's — kopicode gains no sandbox dependency from this. |
+| [0012](docs/adr/0012-context-compaction-strategy.md) | **Context compaction.** Decision 1 (a smaller verification-truthfulness fix) **Accepted**; decision 2 (a supersession-based compaction strategy) **Rejected** on review. |
+| [0013](docs/adr/0013-agent-controlled-resident-session-surface.md) | **`kopicode serve`, a resident session surface over stdio.** NDJSON JSON-RPC 2.0, N concurrent `engine.Open` sessions in one process, credentials via env only, reusing ADR-0011's policy flags and adding an opt-in `--ask-policy-file` (a sibling to consent, per ADR-0009). No engine-boundary change. EPIC-131. |
 
 Satay's natural consumer in this suite is **cuttlefish** (unattended, triggered,
 credential-holding, not started), not kopicode. Do not reintroduce it here.
