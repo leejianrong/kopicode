@@ -228,6 +228,11 @@ func serveCmd(args []string, stdout, stderr io.Writer) int {
 	askPolicyFile := fs.String("ask-policy-file", "", "load an ask-policy file (ADR-0013) whose note answers "+
 		"the model's ask calls for every session; unset means the fixed 'no human is present' refusal")
 	if err := fs.Parse(args); err != nil {
+		// flag has already printed the error and the usage. A help request is not
+		// an error: -h/--help exits 0, everything else is a usage error.
+		if errors.Is(err, flag.ErrHelp) {
+			return exitSuccess
+		}
 		return exitUsage
 	}
 	setupLogging(*debug, stderr)
