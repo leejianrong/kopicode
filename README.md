@@ -13,12 +13,25 @@ more current account of what exists — trust it over this file where the two di
 
 ## Quickstart
 
-Getting from nothing installed to a first turn in the interactive REPL. This assumes
-Go is already on your machine; if it isn't, install Go 1.26 or later first.
+Getting from nothing installed to a first turn in the interactive REPL. The pre-built
+binary needs nothing else; Go 1.26 or later is required only if you build from source.
 
-### 1. Build from source
+### 1. Install
 
-There is no pre-built binary yet — see the note at the end of this section.
+The fastest path is a pre-built binary from the latest [GitHub Release](https://github.com/leejianrong/kopicode/releases).
+The installer detects your OS and architecture and drops `kopicode` into `~/.local/bin`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/leejianrong/kopicode/main/scripts/install.sh | sh
+```
+
+Set `INSTALL_BIN=kopicode,kopibench` to grab the bench runner too, or `INSTALL_DIR`
+to install somewhere other than `~/.local/bin`. Prefer to download by hand? Each
+release ships `kopicode-<os>-<arch>` and `kopibench-<os>-<arch>` for linux and darwin
+(amd64/arm64) plus windows/amd64 — grab the one that matches, `chmod +x`, and put it
+on your `PATH`.
+
+**Or build from source** (needs Go 1.26+):
 
 ```bash
 git clone https://github.com/leejianrong/kopicode.git
@@ -39,6 +52,11 @@ refuses to open a session:
 ```bash
 export OPENROUTER_API_KEY="..."
 ```
+
+kopicode reads this from the process environment and nowhere else — it does **not**
+auto-load a `.env` file. If you keep the key in one, export it into your shell first
+(`export $(grep -v '^#' .env | xargs)`, or a loader like `direnv`) before running
+kopicode.
 
 ### 3. Pick a model
 
@@ -104,28 +122,32 @@ environment, and it's a credential, not a configuration choice.
 **Example configurations**: See [`docs/examples/`](docs/examples/) for ready-to-use
 config templates for Go, JavaScript/TypeScript, Python, and multi-language projects.
 
-### 6. Scripting
+### 6. Scripting and embedding
 
-`kopicode run --print` is the headless, scriptable surface: it runs one prompt and
-emits newline-delimited JSON events on stdout instead of driving a terminal. Out of
-scope for this quickstart — see `cmd/kopicode/print.go`'s doc comment for the schema.
+Two non-interactive surfaces sit over the same engine, both out of scope for this
+quickstart:
 
-### Pre-built binaries
+- `kopicode run --print` — the headless one-shot: it runs one prompt and emits
+  newline-delimited JSON events on stdout instead of driving a terminal. See
+  `cmd/kopicode/print.go`'s doc comment for the schema.
+- `kopicode serve` — a resident surface that holds a process open and drives sessions
+  over NDJSON JSON-RPC 2.0 on stdio, for an orchestrator that spawns kopicode as a
+  child and runs a sequence of tasks without paying startup cost each time
+  ([ADR-0013](docs/adr/0013-agent-controlled-resident-session-surface.md)). The wire
+  is documented in [`docs/kopicode-serve-protocol.md`](docs/kopicode-serve-protocol.md).
 
-There is no GitHub Release yet — no tag has been pushed, so building from source above
-is the only path today. Once one exists, `scripts/install.sh` (KAN-934) installs a
-pre-built binary for linux or darwin (amd64/arm64) from the latest release in one line:
+Both refuse shell and out-of-project writes by default, with nobody at a terminal to
+consent; a `--policy-file` ([ADR-0011](docs/adr/0011-unattended-invocation-policy-gate.md))
+is how an orchestrator declares, up front, what an unattended invocation may do.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/leejianrong/kopicode/main/install.sh | sh
-```
+### About the installer
 
-It detects your OS and architecture, downloads the matching `kopicode-<os>-<arch>`
-asset staged by `.github/workflows/release.yml` (KAN-931), and installs it to
-`~/.local/bin`. Run today, with no release yet to find, it fails with a clear
-"no GitHub release found" error rather than downloading nothing silently — that
-failure mode is the thing to expect until the first tag is pushed. Windows and any
-architecture outside the Makefile's `PLATFORMS` list stay on building from source.
+`scripts/install.sh` (KAN-934) is the one-liner in step 1 above. It detects your OS
+and architecture, downloads the matching `kopicode-<os>-<arch>` asset staged by
+`.github/workflows/release.yml` (KAN-931) from the latest release, and installs it to
+`~/.local/bin`. On an unsupported OS/arch, or before any release exists, it fails with
+a clear message rather than downloading nothing silently. Windows and any architecture
+outside the Makefile's `PLATFORMS` list stay on building from source.
 
 ## The thesis
 
@@ -227,6 +249,8 @@ being CGo; the resolution sketch is stdlib `go/ast` for Go plus an optional exte
 | The `ask` tool: a sibling to consent, not an extension of it | [0009](docs/adr/0009-ask-tool-contract.md) *(Proposed)* |
 | Declarative harness configs and a self-tuning search loop (`kopitune`) | [0010](docs/adr/0010-declarative-harness-configs-and-self-tuning.md) |
 | A policy gate for unattended invocation, containment left to the caller | [0011](docs/adr/0011-unattended-invocation-policy-gate.md) |
+| Context compaction: a verification-truthfulness fix accepted, supersession-based compaction rejected | [0012](docs/adr/0012-context-compaction-strategy.md) |
+| `kopicode serve`, a resident session surface over stdio (NDJSON JSON-RPC) | [0013](docs/adr/0013-agent-controlled-resident-session-surface.md) |
 
 Two of these reverse earlier plans in this repo, and two more amend earlier ones
 without reversing them. Worth being explicit about all four.
@@ -266,7 +290,7 @@ supplied by whoever calls kopicode unattended, not by kopicode itself.
 ## Layout
 
 ```
-cmd/kopicode/        REPL surface
+cmd/kopicode/        REPL, run --print, and serve surfaces
 cmd/kopibench/       headless bench runner
 internal/
   engine/            agent loop, turn state, context assembly
@@ -403,8 +427,11 @@ Apache-2.0, matching Satay and sibei-flow.
 
 ## Status
 
-Slice 1 is built: one engine, two front ends, one model measured end to end against a
-real repository and the frozen benchmark corpus. See the "Build status" section of
-`CLAUDE.md` for what exists today and the "Quickstart" section above to try it. See
-the [Abang page](https://leejianrong.github.io/abang-landing-page/) for where this
-sits among the rest.
+Slice 1 is built and later slices have landed on top of it: one engine now drives
+three session surfaces — the interactive REPL, headless `run --print`, and the resident
+`serve` (ADR-0013) — alongside the bench runner, measured end to end against a real
+repository and the frozen benchmark corpus. The "Build status" section of `CLAUDE.md`
+is the fuller, more current account of what exists today; the "Quickstart" section
+above is how to try it. See the
+[Abang page](https://leejianrong.github.io/abang-landing-page/) for where this sits
+among the rest.
