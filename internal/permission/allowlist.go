@@ -138,6 +138,12 @@ func (p *AllowlistPolicy) Decide(_ context.Context, req Request) (Decision, erro
 // argues for and ADR-0008 already gave the reason for: a prefix or "close
 // enough" grant is the version of this feature that quietly becomes "allow
 // everything."
+//
+// The argv it is handed for a run_shell request is
+// [github.com/leejianrong/kopicode/internal/tools.ShellArgv]'s wrapper,
+// `["/bin/sh", "-c", "<command-line>"]`, not the bare command — so a declared
+// entry that permits a shell command has to be written in that same shape. See
+// [AllowlistFile]'s doc comment for the worked example.
 func (p *AllowlistPolicy) commandAllowed(argv []string) bool {
 	for _, allowed := range p.allow {
 		if slices.Equal(allowed, argv) {

@@ -155,6 +155,46 @@ func TestAllowlistDecidesExactArgvAndDeclaredRoot(t *testing.T) {
 	}
 }
 
+// TestDeclaredShellExampleMatchesRunShellArgv pins the worked example in
+// [permission.AllowlistFile]'s doc comment (and docs/kopicode-serve-protocol.md)
+// to what the engine actually hands this policy. run_shell is dispatched as
+// internal/tools.ShellArgv(cmd) = ["/bin/sh", "-c", cmd], so only an allow entry
+// in that same shape can ever match; the bare ["go", "test", "./..."] the docs
+// used to show is dead. This test fails if either half of that claim rots, which
+// is what kept KAN-1367's example wrong for as long as it was.
+func TestDeclaredShellExampleMatchesRunShellArgv(t *testing.T) {
+	d := newDirs(t)
+	// The exact argv the engine builds for `run_shell "go test ./..."` —
+	// ShellArgv's wrapper, spelled out as a literal so this test needs no
+	// import of internal/tools and stands on the string a policy author writes.
+	dispatched := permission.Request{
+		Kind:   permission.KindRunShell,
+		Action: permission.Action{Command: []string{"/bin/sh", "-c", "go test ./..."}, Dir: d.root},
+	}
+
+	// The documented, working entry allows that request.
+	working := mustAllowlist(t, d.root, [][]string{{"/bin/sh", "-c", "go test ./..."}})
+	dec, err := working.Decide(t.Context(), dispatched)
+	if err != nil {
+		t.Fatalf("Decide (working entry): %v", err)
+	}
+	if dec.Verdict != permission.VerdictAllow {
+		t.Fatalf("the documented /bin/sh -c entry did not allow the run_shell argv it is meant to "+
+			"permit: verdict %s, reason %q", dec.Verdict, dec.Reason)
+	}
+
+	// The bare shape the docs must never show again denies the same request.
+	bare := mustAllowlist(t, d.root, [][]string{{"go", "test", "./..."}})
+	dec, err = bare.Decide(t.Context(), dispatched)
+	if err != nil {
+		t.Fatalf("Decide (bare entry): %v", err)
+	}
+	if dec.Verdict != permission.VerdictDeny {
+		t.Fatalf(`a bare ["go", "test", "./..."] entry appeared to match the /bin/sh -c argv; the ` +
+			"allowlist must match the dispatched wrapper exactly")
+	}
+}
+
 // TestAllowlistNeverGrantsForTheSession mirrors TestBenchNeverGrantsForTheSession:
 // there is no human here to have given standing consent to, so every check on
 // an approved command answers on its own merits.
