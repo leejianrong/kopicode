@@ -30,6 +30,13 @@ type FileConfig struct {
 	Model string
 	// Harness is the `harness` key, or "" when unset.
 	Harness string
+	// HarnessConfig is the `harness_config` key: a path to a declared
+	// harness-config file (ADR-0010), or "" when unset. It is the same harness
+	// axis Harness names, expressed a different way, so a file that sets both is
+	// a usage error — decided in [Resolve], not here, because this reader only
+	// reads keys and does not adjudicate the axis. A relative path resolves
+	// against this config file's own directory.
+	HarnessConfig string
 	// Verify is the `verify` key: the forced-verification command this
 	// repository names for itself (docs/SLICE-1.md §5). Nil when unset, which is
 	// what lets internal/verify's discovery answer instead.
@@ -204,7 +211,11 @@ func parseFileConfig(path, content string) (FileConfig, error) {
 			continue
 		}
 
-		target := map[string]*string{"model": &cfg.Model, "harness": &cfg.Harness}[key]
+		target := map[string]*string{
+			"model":          &cfg.Model,
+			"harness":        &cfg.Harness,
+			"harness_config": &cfg.HarnessConfig,
+		}[key]
 		if target == nil {
 			// A key belonging to somebody else. Its value is not this reader's
 			// business and is not parsed.
