@@ -6,9 +6,12 @@
 // startup rather than at the first provider request, and that refusal belongs
 // to the front end.
 //
-// There are two surfaces over one engine. The interactive one is the repl
-// sub-package; the headless one is `run --print` in print.go. This file is what
-// connects either to a session: resolve the arm, open the session with
+// There are three session-driving surfaces over one engine. The interactive one
+// is the repl sub-package; the headless one-shot is `run --print` in print.go;
+// the resident one is `kopicode serve` in serve.go (ADR-0013), which holds a
+// process open and drives sessions over a JSON-RPC stdio protocol for another
+// agentic harness. This file is what connects any of them to a session: resolve
+// the arm, open the session with
 // engine.Open (or, for the REPL's --fork flag, engine.Fork — see openAndDriveSession),
 // hand the surface the engine's event stream to render and its consent requests
 // to answer, and map the stop onto an exit code. `kopicode sessions`
@@ -54,6 +57,7 @@ func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 var commands = map[string]func(args []string, stdout, stderr io.Writer) int{
 	"repl":     interactive,
 	"run":      runPrint,
+	"serve":    serveCmd,
 	"sessions": sessionsCmd,
 	"version":  version,
 }
@@ -67,7 +71,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	name, rest := command(args)
 	cmd, ok := commands[name]
 	if !ok {
-		say(stderr, "kopicode: unknown command %q; try one of: repl, run, sessions, version\n", name)
+		say(stderr, "kopicode: unknown command %q; try one of: repl, run, serve, sessions, version\n", name)
 		return exitUsage
 	}
 	return cmd(rest, stdout, stderr)
