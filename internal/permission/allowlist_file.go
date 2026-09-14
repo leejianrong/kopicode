@@ -43,7 +43,7 @@ import (
 // # The grammar
 //
 //	root = "/abs/path/to/the/repository"
-//	allow = [["go", "test", "./..."], ["npm", "test"]]
+//	allow = [["/bin/sh", "-c", "go test ./..."]]
 //
 // Two required, flat, top-level keys and nothing else — no `[table]`, no
 // nesting beyond `allow`'s one declared level. `root` is a quoted string and
@@ -57,6 +57,28 @@ import (
 // shell string accepted here would need splitting by something that is not
 // the shell that eventually runs it, and the two disagree the moment a path
 // holds a space.
+//
+// # What an `allow` entry has to look like to permit a shell command
+//
+// The one thing this gate ever matches is a `run_shell` request, and `run_shell`
+// does not execute the model's command line directly — it executes
+// `/bin/sh -c <command-line>`, so the argv the engine asks this policy about is
+// always [github.com/leejianrong/kopicode/internal/tools.ShellArgv]'s shape:
+// `["/bin/sh", "-c", "<the exact command line>"]`. Matching is exact on that
+// whole argv (see [AllowlistPolicy.commandAllowed]) — no prefix, no
+// tokenising, no subcommand awareness — so an entry that permits a shell command
+// must itself be written in that shape, and the command line inside it is
+// matched byte-for-byte:
+//
+//	allow = [["/bin/sh", "-c", "go test ./..."]]   # permits exactly: go test ./...
+//	allow = [["go", "test", "./..."]]              # never matches: run_shell argv is /bin/sh -c ...
+//
+// This suits a caller that knows the exact commands its run will issue. It is
+// deliberately not a convenience layer: any variation the model emits — an added
+// flag, a `cd sub &&` prefix, a trailing space — is a different command line,
+// hence a different argv, and is denied. Loosening that (tokenising the command
+// line, prefix-matching) is exactly the "quietly becomes 'allow everything'"
+// step ADR-0008 and ADR-0011 decision 1 refuse, so it is not offered here.
 //
 // Unlike `verify`, an empty `allow = []` is accepted rather than refused: see
 // [NewAllowlist]'s own doc comment for why "no shell command is ever
@@ -262,8 +284,8 @@ func allowlistParseArgvArray(v string) ([][]string, error) {
 	}
 	if v[0] != '[' {
 		return nil, fmt.Errorf("%s is not an array; write allow as a list of argv lists, for example "+
-			`[["go", "test"], ["npm", "test"]] — kopicode records and replays argv and will not split a `+
-			"command line for you", v)
+			`[["/bin/sh", "-c", "go test ./..."]] — a run_shell command runs as /bin/sh -c <line>, and `+
+			"kopicode records and replays that argv and will not split a command line for you", v)
 	}
 	end := matchingBracket(v)
 	if end < 0 {

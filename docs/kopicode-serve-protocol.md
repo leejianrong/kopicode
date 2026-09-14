@@ -214,3 +214,17 @@ the process opens.
   no `--ask-policy-file`, it dead-ends `ask` — the same fail-closed defaults headless
   `run --print` uses. Real containment of model-authored shell is the orchestrator's job,
   not serve's (ADR-0008 / ADR-0011).
+
+A `--policy-file` has two keys, `root` (the absolute directory writes are confined to) and
+`allow` (a closed, exact-match set of permitted shell commands):
+
+```toml
+root = "/abs/path/to/the/repository"
+allow = [["/bin/sh", "-c", "go test ./..."]]
+```
+
+`run_shell` executes `/bin/sh -c <command-line>`, so an `allow` entry that permits a shell
+command is written in exactly that argv shape and the command line is matched byte-for-byte
+— `[["go", "test", "./..."]]` never matches. Matching is deliberately exact (no prefix, no
+tokenising), so list every command the run will issue; a variation the model emits (an added
+flag, a `cd sub &&` prefix) is a different command line and is refused.
