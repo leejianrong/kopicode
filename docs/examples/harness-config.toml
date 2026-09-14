@@ -1,0 +1,37 @@
+# Example declared harness configuration (ADR-0010).
+#
+# A declared config lets you tune kopicode's harness — raise the turn cap, widen
+# the token budget — without editing Go source and rebuilding. It names a built-in
+# configuration as its `base` and overrides only the fields you list; everything
+# else is inherited from the base.
+#
+# Use it with either:
+#   kopicode --harness-config path/to/this-file.toml "…your task…"
+# or, checked into a repository, in .kopicode/config.toml:
+#   harness_config = "harness-config.toml"   # resolved next to config.toml (.kopicode/)
+#
+# It is LOCAL-ONLY: a declared config's results can never anchor a published,
+# citable benchmark number (ADR-0010 decision 3). The resolved config is named
+# "declared:<base>" and hashed like any other, so a tuned run is a distinct arm
+# and never pools with a built-in.
+
+# Required. One of the built-in configurations. See the current set with
+# `kopicode --harness not-a-name` (the error lists them); today: default,
+# minimax-m2-v1, naive-v1, naive-verify-only, naive-fuzzy-edit-only.
+base = "default"
+
+# Optional overrides. Omit any you do not want to change.
+
+# The loop's turn cap. Must be greater than 0. This is the knob to raise when a
+# session stops with `max_turns` (exit 4).
+max_turns = 40
+
+# The whole session's prompt+completion token allowance. 0 means unbounded.
+token_budget = 4000000
+
+# How many repair round trips a malformed tool call gets. 0 is the no-repair arm.
+repair_budget = 3
+
+# The per-reply completion cap sent to the provider (not the session budget).
+# Must be greater than 0.
+max_tokens = 16384

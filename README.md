@@ -125,7 +125,33 @@ environment, and it's a credential, not a configuration choice.
 **Example configurations**: See [`docs/examples/`](docs/examples/) for ready-to-use
 config templates for Go, JavaScript/TypeScript, Python, and multi-language projects.
 
-### 6. Scripting and embedding
+### 6. Tuning the harness (raising the turn cap)
+
+The built-in harness bounds are fixed at build time. When you need one to be
+different — most often when a session stops with `max_turns` (exit 4) because a
+task needed more turns than the default 20 — write a **declared harness config**
+(ADR-0010): a small TOML file that starts from a built-in configuration and
+overrides just the fields you name.
+
+```toml
+# harness.toml
+base = "default"
+max_turns = 40
+```
+
+```bash
+bin/kopicode --harness-config harness.toml "…your task…"
+```
+
+You can also pin it per repository with `harness_config = "harness.toml"` in
+`.kopicode/config.toml` (resolved next to that file). The tunable fields are
+`max_turns`, `token_budget`, `repair_budget`, and `max_tokens`. A declared config
+is **local-only**: it never anchors a published benchmark number. Full details,
+the template, and the precedence rules are in
+[`docs/harness-tuning.md`](docs/harness-tuning.md) and
+[`docs/examples/harness-config.toml`](docs/examples/harness-config.toml).
+
+### 7. Scripting and embedding
 
 Two non-interactive surfaces sit over the same engine, both out of scope for this
 quickstart:

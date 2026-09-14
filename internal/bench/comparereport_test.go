@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/leejianrong/kopicode/internal/bench"
+	"github.com/leejianrong/kopicode/internal/harness"
 	"github.com/leejianrong/kopicode/internal/journal"
 )
 
@@ -129,6 +130,16 @@ func TestWriteCompareReportFlagsPoolabilityHazards(t *testing.T) {
 		report := renderCompare(t, a, b)
 		if !strings.Contains(report, "both runs replayed the mock provider") {
 			t.Errorf("report does not flag that both runs are mock:\n%s", report)
+		}
+	})
+
+	t.Run("declared config is flagged local-only", func(t *testing.T) {
+		a, b := twoRuns(t, passed, passed, "sha256:same")
+		a.Provider, b.Provider = bench.ProviderLive, bench.ProviderLive
+		a.Arm.HarnessConfigName = harness.DeclaredConfigNamePrefix + "default"
+		report := renderCompare(t, a, b)
+		if !strings.Contains(report, "must not anchor a published number") {
+			t.Errorf("report does not flag the declared config as local-only:\n%s", report)
 		}
 	})
 

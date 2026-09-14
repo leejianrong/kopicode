@@ -7,6 +7,16 @@
 Drafted by an agent during a 2026-08-23 portfolio-strategy session and accepted by
 Jian the same day.
 
+**Implementation status (2026-09-14):** decisions 1–3 are built — the declared
+configuration class, its opt-in selection (`--harness-config` and a
+`harness_config` config key at the flag/file rung), and the local-only guardrail
+(a resolved `declared:<base>` name in the hash preimage, so a declared arm never
+pools with a built-in; `kopibench` reports say so). The tunable fields today are
+`max_turns`, `token_budget`, `repair_budget`, and `max_tokens`. Decisions 4–8 —
+`kopitune`, its staged search, the caller-supplied/unofficial corpus, and the cost
+governor — are **not built yet**. See [`docs/harness-tuning.md`](../harness-tuning.md)
+and EPIC-203 (KAN-1373–1377).
+
 Amends [ADR-0007](0007-model-selection-and-harness-config-shape.md) decision 5's
 sentence "Users do not author one" — and only that sentence. Everything else in
 ADR-0007 (one binary, the registry, the hash preimage, what an arm is) stands

@@ -119,6 +119,12 @@ not this list:
   (`--model`/`--harness` > repo config > built-in default — **no environment variable
   anywhere in the chain**). `Config` holds no map anywhere in its type graph, because
   Go randomises map iteration and a replayed journal must be byte-identical.
+  ADR-0010's **declared** configs also live here (`declared.go`): a TOML file naming a
+  built-in `base` and overriding `max_turns`/`token_budget`/`repair_budget`/`max_tokens`,
+  resolved to a full `Config` named `declared:<base>` and named by `--harness-config` or
+  `harness_config =` at the same rung as `--harness`/`harness =`. It is local-only — the
+  `declared:` name is in the hash preimage, so a declared arm can never pool with a
+  built-in — and `kopitune`/unofficial-corpus (the rest of ADR-0010) are not built yet.
 - **The system prompt** is a harness *value*, not a loop detail — `go:embed`ed,
   in the hash preimage by digest, held to an 8 KiB budget, and tested to document
   every tool and every argument the harness config actually carries.
