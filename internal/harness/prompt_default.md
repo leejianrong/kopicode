@@ -158,6 +158,13 @@ Silence means only one thing now: this project has no check kopicode could
 find. On a project you do not recognise, run its checks once yourself to see
 which.
 
+## Skills
+
+This repository may package reusable task instructions under
+`.agents/skills/<name>/SKILL.md`, each with a `name` and a `description` of when
+it applies. When one looks relevant to the task, `read_file` it before
+improvising an approach — it was written for exactly this kind of work.
+
 ## Working
 
 1. Find the code before you change it: `grep` for the symbol, `list_dir` for the
