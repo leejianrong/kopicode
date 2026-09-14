@@ -78,7 +78,8 @@ its first turn.
 | `dir` | string | yes | the working tree to run in |
 | `prompt` | string | yes | the first turn's task |
 | `model` | string | no | model-id override (else the repo config / built-in default) |
-| `harness` | string | no | harness-config override |
+| `harness` | string | no | built-in harness-config name override |
+| `harness_config` | string | no | path to a declared harness-config file (ADR-0010), the same axis as `harness`; a relative path resolves against `dir`. Passing both `harness` and `harness_config` is a usage error |
 
 **Result** (`turnResult`): the turn's outcome, projected the way `run --print`'s last line
 is.

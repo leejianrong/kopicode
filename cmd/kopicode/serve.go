@@ -170,6 +170,10 @@ type startParams struct {
 	Prompt  string `json:"prompt"`
 	Model   string `json:"model"`
 	Harness string `json:"harness"`
+	// HarnessConfig is a path to a declared harness-config file (ADR-0010), the
+	// same axis Harness chooses; a relative path resolves against Dir. Naming
+	// both is a usage error, decided in engine.ResolveSelection.
+	HarnessConfig string `json:"harness_config"`
 }
 
 type submitParams struct {
@@ -420,7 +424,11 @@ func (s *server) dispatchStart(req rpcRequest) {
 		return
 	}
 
-	selection, err := engine.ResolveSelection(p.Dir, engine.SelectionOverrides{Model: p.Model, Harness: p.Harness})
+	selection, err := engine.ResolveSelection(p.Dir, engine.SelectionOverrides{
+		Model:         p.Model,
+		Harness:       p.Harness,
+		HarnessConfig: p.HarnessConfig,
+	})
 	if err != nil {
 		code := codeOpenFailed
 		if engine.IsSelectionUsageError(err) {
