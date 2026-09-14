@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/leejianrong/kopicode/cmd/kopicode/repl"
 	"github.com/leejianrong/kopicode/internal/engine"
 )
 
@@ -145,9 +146,13 @@ func runPrint(args []string, stdout, stderr io.Writer) int {
 	// not a flag it silently ignores: a caller who typed --fork here is
 	// told why, in time to use the REPL instead, rather than reading in
 	// silence that nothing happened.
+	// No back-quoted phrase in this usage string: the flag package would render
+	// the first one as the value placeholder, so the plain "-fork string" the
+	// other string flags show is what is wanted here. (An earlier version
+	// back-quoted "kopicode repl --fork", which showed up as the placeholder.)
 	fork := fs.String("fork", "", "not supported here; forking wipes the working tree and needs a "+
-		"human's typed confirmation, which this headless surface has nobody to ask for — use `kopicode "+
-		"repl --fork` instead")
+		"human's typed confirmation, which this headless surface has nobody to ask for — use "+
+		"kopicode repl --fork instead")
 	// --policy-file is ADR-0011's opt-in: with nothing passed, this surface's
 	// default is exactly what it was before this flag existed —
 	// denyHeadless's refuse-everything policy, wired below through
@@ -164,7 +169,11 @@ func runPrint(args []string, stdout, stderr io.Writer) int {
 		"it answer shell/write consent instead of refusing everything; unset means the existing default, "+
 		"refuse everything")
 	if err := fs.Parse(args); err != nil {
-		// flag has already printed the error and the usage.
+		// flag has already printed the error and the usage. A help request is not
+		// an error: -h/--help exits 0, everything else is a usage error.
+		if errors.Is(err, flag.ErrHelp) {
+			return exitSuccess
+		}
 		return exitUsage
 	}
 	setupLogging(*debug, stderr)
@@ -284,9 +293,19 @@ func headless(ctx context.Context, prompt string, stdout, stderr io.Writer, opts
 		out.orphaned()
 		if errors.Is(err, engine.ErrNoAPIKey) {
 			say(stderr, "kopicode: %s is not set, so there is no provider to talk to\n", engine.APIKeyEnv)
-		} else {
-			say(stderr, "kopicode: %v\n", err)
+			return exitHarness
 		}
+		// A --resume naming a session this repository has no record of is a
+		// command-line mistake, not a harness failure: exit 2, with a message
+		// that names the id and points at `kopicode sessions` rather than the
+		// engine's ErrConfig text (which mentions the internal Options.Resume
+		// field). Nothing was opened; the id simply did not resolve.
+		if opts.Resume && errors.Is(err, engine.ErrConfig) {
+			say(stderr, "kopicode: no session %q to resume in this repository; "+
+				"run `kopicode sessions` to see the ids you can resume from\n", opts.SessionID)
+			return exitUsage
+		}
+		say(stderr, "kopicode: %v\n", err)
 		return exitHarness
 	}
 	out.open(sess.Path())
@@ -317,6 +336,15 @@ func headless(ctx context.Context, prompt string, stdout, stderr io.Writer, opts
 		say(stderr, "kopicode: %v\n", out.err)
 		return exitHarness
 	}
+
+	// The turn cap is on the stream as session_ended's reason; the actionable
+	// half — how to raise it — goes to stderr, because --print owns stdout and a
+	// consumer parsing the NDJSON must not find prose in it. Same guidance the
+	// REPL prints, from the same function, so the two cannot drift.
+	if stop == engine.StopMaxTurns {
+		say(stderr, "kopicode: %s\n", repl.TurnCapHint(opts.Selection.Config.MaxTurns))
+	}
+
 	return stop.ExitCode()
 }
 

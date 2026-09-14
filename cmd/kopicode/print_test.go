@@ -500,6 +500,12 @@ func TestTheTurnCapIsAHarnessError(t *testing.T) {
 	if got := number(t, end, "exit_code"); got != code {
 		t.Errorf("the record says exit %d and the process returned %d", got, code)
 	}
+
+	// The actionable half — how to raise the cap — is on stderr, because --print
+	// owns stdout and a consumer parsing the NDJSON must not find prose in it.
+	if !strings.Contains(stderr, "--harness-config") {
+		t.Errorf("stderr does not tell the user how to raise the turn cap:\n%s", stderr)
+	}
 }
 
 // TestAMissingCredentialIsAHarnessErrorAndWritesNothing.

@@ -147,6 +147,12 @@ type Config struct {
 	// lineedit measures it in runes to place the cursor.
 	Prompt string
 
+	// MaxTurns is the resolved harness turn cap, named in the actionable hint a
+	// session gets when it stops at that cap (see [TurnCapHint]). The caller
+	// passes the resolved selection's value; zero reads as "unknown" and still
+	// yields a usable hint.
+	MaxTurns int
+
 	// Turn runs one exchange. Required.
 	Turn TurnFunc
 
@@ -167,10 +173,11 @@ type Loop struct {
 	out *out
 	ed  *lineedit.Editor
 
-	prompt  string
-	turn    TurnFunc
-	closeFn CloseFunc
-	sig     <-chan os.Signal
+	prompt   string
+	turn     TurnFunc
+	closeFn  CloseFunc
+	sig      <-chan os.Signal
+	maxTurns int
 
 	// promptEndsLine records whether the line editor finishes the line
 	// itself. Its raw-mode path always does and its plain path never does;
@@ -222,6 +229,7 @@ func New(cfg Config) (*Loop, error) {
 		turn:           cfg.Turn,
 		closeFn:        cfg.Close,
 		sig:            cfg.Interrupts,
+		maxTurns:       cfg.MaxTurns,
 		promptEndsLine: term.IsInteractive(),
 	}, nil
 }
@@ -403,6 +411,12 @@ func (l *Loop) renderOutcome(res engine.Result, err error) {
 		detail = err.Error()
 	}
 	l.Stopped(res.Stop, detail)
+
+	// The turn cap is the one stop a user can lift themselves. Say how, so the
+	// knob is not something they have to read source to find (ADR-0010).
+	if res.Stop == engine.StopMaxTurns {
+		l.Notice(TurnCapHint(l.maxTurns))
+	}
 }
 
 // command classifies a line the user typed.

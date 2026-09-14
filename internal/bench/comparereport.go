@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/leejianrong/kopicode/internal/harness"
 )
 
 // WriteCompareReport renders a paired [Result] alongside the two runs it
@@ -100,6 +102,20 @@ func poolabilityNotes(a, b *RunResult) []string {
 			a.Provider, b.Provider))
 	} else if a.Provider == ProviderMock {
 		notes = append(notes, "both runs replayed the mock provider — a real A/B needs --provider live")
+	}
+	// A declared harness config (ADR-0010) is local-only by decision 3: it may
+	// help a user tune their own binary, but it must never anchor a published,
+	// citable number. The resolved name carries the declared prefix, so the
+	// report can say so rather than letting a tuned arm pass as a publishable one.
+	for _, r := range []struct {
+		label string
+		run   *RunResult
+	}{{"A", a}, {"B", b}} {
+		if strings.HasPrefix(r.run.Arm.HarnessConfigName, harness.DeclaredConfigNamePrefix) {
+			notes = append(notes, fmt.Sprintf(
+				"run %s's harness %q is a declared config (ADR-0010 decision 3): local-only, it "+
+					"must not anchor a published number", r.label, r.run.Arm.HarnessConfigName))
+		}
 	}
 	return notes
 }
