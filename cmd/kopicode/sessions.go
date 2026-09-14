@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/leejianrong/kopicode/internal/engine"
 )
@@ -83,43 +84,65 @@ func writeSessionsJSON(stdout, stderr io.Writer, sessions []engine.SessionSummar
 	return exitSuccess
 }
 
-// writeSessionsTable renders the human-facing form: newest last, so the
-// session a person most likely wants to resume or fork from is the one
-// their eye lands on at the bottom of the terminal, the same reason a shell
-// history or a log tails that way.
+// sessionColumns names the fields [sessionFields] returns, in order. It is the
+// header row and the single source of truth for how many columns a row has, so
+// a column added to one without the other is a compile-time-obvious mismatch
+// rather than a silently ragged table.
+var sessionColumns = []string{"ID", "STARTED (UTC)", "MODEL", "TURNS", "STATUS", "FIRST MESSAGE"}
+
+// writeSessionsTable renders the human-facing form: a labelled, column-aligned
+// table, newest last — so the session a person most likely wants to resume or
+// fork from is the one their eye lands on at the bottom of the terminal, the
+// same reason a shell history or a log tails that way. Alignment is
+// text/tabwriter's job (stdlib, no dependency); every row carries the same
+// fixed set of columns [sessionColumns] names, which is why the optional
+// "forked from" annotation folds into STATUS rather than becoming a ragged
+// extra field.
 func writeSessionsTable(stdout io.Writer, dir string, sessions []engine.SessionSummary) {
 	if len(sessions) == 0 {
 		say(stdout, "no sessions recorded under %s\n", dir)
 		return
 	}
+	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+	// tabwriter buffers every write and only touches stdout on Flush, so a write
+	// error here is impossible and Flush is the one place a lost-stdout error
+	// could surface — the same case say() already swallows for this command, so
+	// there is nothing new to report.
+	_, _ = fmt.Fprintln(tw, strings.Join(sessionColumns, "\t"))
 	for _, s := range sessions {
-		say(stdout, "%s\n", formatSession(s))
+		_, _ = fmt.Fprintln(tw, strings.Join(sessionFields(s), "\t"))
 	}
+	_ = tw.Flush()
 }
 
-// formatSession renders one session as one line: id, when, model, how far
-// it got, and (space permitting) what the human first asked for — enough to
-// tell two sessions apart without opening either journal.
-func formatSession(s engine.SessionSummary) string {
+// sessionFields is one session's columns in [sessionColumns]'s order: id, when,
+// model, how far it got, its status, and (truncated) what the human first asked
+// for — enough to tell two sessions apart without opening either journal. It is
+// the one place a row's contents are decided, shared by the table writer and its
+// tests so the two cannot drift.
+func sessionFields(s engine.SessionSummary) []string {
 	status := "running"
 	if s.Ended {
 		status = "ended:" + s.EndReason
 	}
-	fields := []string{
+	// The fork provenance rides in STATUS so every row keeps the same column
+	// count; it is still the whole of "forked from <id>@<turn>" a reader needs
+	// to find the source session.
+	if s.Forked {
+		status += fmt.Sprintf(" (forked from %s@%d)", s.ForkedFrom, s.ForkedTurn)
+	}
+	message := "-"
+	if s.FirstMessage != "" {
+		message = strconv.Quote(truncate(s.FirstMessage, 60))
+	}
+	return []string{
 		s.ID,
 		s.StartedAt.UTC().Format("2006-01-02T15:04:05Z"),
 		orDash(s.ModelID),
-		"turns:" + strconv.Itoa(s.Turns),
+		strconv.Itoa(s.Turns),
 		status,
+		message,
 	}
-	if s.Forked {
-		fields = append(fields, fmt.Sprintf("forked from %s@%d", s.ForkedFrom, s.ForkedTurn))
-	}
-	line := strings.Join(fields, "  ")
-	if s.FirstMessage != "" {
-		line += "  " + strconv.Quote(truncate(s.FirstMessage, 60))
-	}
-	return line
 }
 
 // orDash renders an empty string as a placeholder a column-scanning eye
