@@ -241,6 +241,31 @@ func cancelSummary(e engine.Event) string {
 // Notice prints something the surface wants to say.
 func (l *Loop) Notice(text string) { l.tag("note", text) }
 
+// TurnCapHint is the guidance shown when a session stops at the turn cap: how to
+// raise it. The turn cap is the one stop a user can lift for themselves, and the
+// knob — a declared harness config (ADR-0010) — is not something they should have
+// to read source to find. It is a package-level function rather than a method so
+// the headless `run --print` surface can print the identical guidance on stderr;
+// one source of truth is what keeps the two surfaces' advice from drifting.
+// maxTurns is the cap that was hit; 0 reads as unknown.
+func TurnCapHint(maxTurns int) string {
+	suggested := maxTurns * 2
+	if suggested <= 0 {
+		suggested = 40
+	}
+	capClause := ""
+	if maxTurns > 0 {
+		capClause = fmt.Sprintf(" (max_turns = %d)", maxTurns)
+	}
+	return fmt.Sprintf("reached the turn cap%s. To raise it, write a declared harness config "+
+		"to a file:\n"+
+		"    base = \"default\"\n"+
+		"    max_turns = %d\n"+
+		"then pass --harness-config <file> (or set harness_config = \"<file>\" in "+
+		".kopicode/config.toml). It is local-only and never anchors a published number.",
+		capClause, suggested)
+}
+
 // Fail prints a failure of the surface, or one the session could not record.
 func (l *Loop) Fail(text string) { l.out.line(l.out.bold("[error] ") + text) }
 

@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/leejianrong/kopicode/cmd/kopicode/repl"
 	"github.com/leejianrong/kopicode/internal/engine"
 )
 
@@ -335,6 +336,15 @@ func headless(ctx context.Context, prompt string, stdout, stderr io.Writer, opts
 		say(stderr, "kopicode: %v\n", out.err)
 		return exitHarness
 	}
+
+	// The turn cap is on the stream as session_ended's reason; the actionable
+	// half — how to raise it — goes to stderr, because --print owns stdout and a
+	// consumer parsing the NDJSON must not find prose in it. Same guidance the
+	// REPL prints, from the same function, so the two cannot drift.
+	if stop == engine.StopMaxTurns {
+		say(stderr, "kopicode: %s\n", repl.TurnCapHint(opts.Selection.Config.MaxTurns))
+	}
+
 	return stop.ExitCode()
 }
 
