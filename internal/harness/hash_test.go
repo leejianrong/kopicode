@@ -92,8 +92,19 @@ func everyConfig(t *testing.T) []harness.Config {
 // system-prompt section. Both are configuration *value* changes — the tool
 // set and the prose describing it, not new preimage coverage — so
 // PreimageVersion stays at 2.
+//
+// It moved a sixth time on KAN-1034, when prompt_default.md gained a "## Skills"
+// section pointing at the .agents/skills/<name>/SKILL.md convention (ADR-0014).
+// A prompt *value* change, not new preimage coverage, so PreimageVersion stays
+// at 2. This move carries the caveat ADR-0014 decision 4 flagged, corrected for
+// the actual config lineage: minimax-m2-v1 moves with it (it inherits
+// DefaultSystemPrompt), but the three naive configs do *not* — naive-v1/v2/toolset
+// each override SystemPrompt with their own prompt file, so their hashes are
+// untouched and KAN-1015/1018's published harness-axis result (anchored to
+// naive-v1's hash) stays valid for the hash it was measured under, unaffected by
+// this change.
 func TestDefaultConfigHashIsStable(t *testing.T) {
-	const want = "e6d896ac8f3f82f87f4c29e357422ed0c02027d219a0a41d432fc8617376790f"
+	const want = "c6e1272bedb212bebcfe178131d9c85409354d48aa08ffbfa078be75359a3b61"
 
 	got := defaultConfig(t).Hash()
 	if got != want {
@@ -118,7 +129,7 @@ func TestDefaultConfigHashIsStable(t *testing.T) {
 // TestNoTwoConfigsShareAHash below is what checks that expectation rather
 // than this test silently passing if they happened to collide.
 func TestMinimaxM2ConfigHashIsStable(t *testing.T) {
-	const want = "8161544674d41757915fdde138fe0432960ce7b49f2f590d1e870456049cc972"
+	const want = "8dab56a48c792a5f82918634cfc56dffbc9b8ed89e056b098b09ae6d1bc7eff5"
 
 	got := configByName(t, harness.MinimaxM2ConfigName).Hash()
 	if got != want {

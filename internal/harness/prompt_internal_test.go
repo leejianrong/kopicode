@@ -52,6 +52,37 @@ func TestSystemPromptFitsItsBudget(t *testing.T) {
 	}
 }
 
+// TestDefaultPromptDocumentsTheSkillsConvention pins ADR-0014's skills
+// mechanism to the prose that is its whole implementation: shape (a) adds no
+// tool and no dispatch entry, so the one sentence pointing the model at
+// .agents/skills/<name>/SKILL.md is the feature. If it is ever dropped or the
+// convention path is retyped, the mechanism silently stops existing, which this
+// catches.
+//
+// It is scoped to DefaultSystemPrompt (which minimax-m2-v1 inherits), not every
+// configuration: the three naive configs are deliberately stripped-down A/B
+// baselines with their own prompt files, and adding a capability to them would
+// change what they measure — so this test also asserts they do *not* carry the
+// pointer, keeping that scoping decision honest rather than incidental.
+func TestDefaultPromptDocumentsTheSkillsConvention(t *testing.T) {
+	for _, want := range []string{".agents/skills/", "SKILL.md"} {
+		if !strings.Contains(DefaultSystemPrompt, want) {
+			t.Errorf("the default system prompt does not mention %q; ADR-0014's skills mechanism is that "+
+				"pointer sentence and nothing else, so losing it removes the feature", want)
+		}
+	}
+	for name, prompt := range map[string]string{
+		"naive-v1":      NaiveSystemPrompt,
+		"naive-v2":      NaiveVerifyOnlySystemPrompt,
+		"naive-toolset": NaiveToolsetSystemPrompt,
+	} {
+		if strings.Contains(prompt, ".agents/skills/") {
+			t.Errorf("the %q baseline prompt mentions the skills convention; the naive configs are "+
+				"deliberately minimal A/B baselines and must not gain a capability the default has", name)
+		}
+	}
+}
+
 // TestSystemPromptIsWhitespaceClean stops an invisible edit from opening a new
 // arm.
 //
