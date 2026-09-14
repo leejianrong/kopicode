@@ -65,13 +65,65 @@ var commands = map[string]func(args []string, stdout, stderr io.Writer) int{
 // defaultCommand is what a bare `kopicode` does.
 const defaultCommand = "repl"
 
+// commandHelp is the subcommand list [usage] prints, in display order and with a
+// one-line description each. It is the other half of what the [commands] map's
+// own comment promised — the map decides what runs, this decides how the set is
+// shown — and TestCommandHelpMatchesCommands holds the two to the same set so a
+// command added to one without the other fails a test rather than going
+// undiscoverable.
+var commandHelp = []struct{ name, desc string }{
+	{"repl", "start an interactive coding session (this is the default)"},
+	{"run", "run one task headless and print the record as JSON (needs --print)"},
+	{"serve", "hold a process open and drive sessions over JSON-RPC on stdio"},
+	{"sessions", "list this repository's past sessions (ids for --resume / --fork)"},
+	{"version", "print the build version and commit"},
+}
+
+// usage prints the top-level overview: what kopicode is, how it is invoked, and
+// the subcommands it offers. It is what `kopicode -h`, `kopicode --help` and
+// `kopicode help` print, and what an unknown command is shown alongside its
+// error. Each subcommand's own flags are one `kopicode <command> -h` away — this
+// view exists so a newcomer learns those commands are there at all.
+func usage(w io.Writer) {
+	say(w, "kopicode is a terminal coding agent.\n\n")
+	say(w, "Usage:\n")
+	say(w, "  kopicode [flags]              start the interactive REPL (--model, --harness, ...)\n")
+	say(w, "  kopicode <command> [flags]    run one of the commands below\n\n")
+	say(w, "Commands:\n")
+	for _, c := range commandHelp {
+		say(w, "  %-9s %s\n", c.name, c.desc)
+	}
+	say(w, "\nRun `kopicode <command> -h` for a command's own flags.\n")
+}
+
+// isHelpRequest reports whether arg is a bare, top-level request for the overview
+// — `help`, `-h`, `--help`, `-help`. It is checked before [command] splits a
+// subcommand off, so `kopicode -h` lists the subcommands rather than falling
+// through to the REPL's flag set (which lists no commands at all).
+func isHelpRequest(arg string) bool {
+	switch arg {
+	case "help", "-h", "--help", "-help":
+		return true
+	}
+	return false
+}
+
 // run is main with its streams and its exit code in the open, so the whole
 // binary is callable from a test.
 func run(args []string, stdout, stderr io.Writer) int {
+	// A top-level help request is not an error and is answered before a
+	// subcommand is split off, so `kopicode -h` lists the subcommands (the REPL
+	// flag set it would otherwise reach lists none). It goes to stdout and exits
+	// 0: help was asked for, so producing it is success.
+	if len(args) > 0 && isHelpRequest(args[0]) {
+		usage(stdout)
+		return exitSuccess
+	}
 	name, rest := command(args)
 	cmd, ok := commands[name]
 	if !ok {
-		say(stderr, "kopicode: unknown command %q; try one of: repl, run, serve, sessions, version\n", name)
+		say(stderr, "kopicode: unknown command %q\n\n", name)
+		usage(stderr)
 		return exitUsage
 	}
 	return cmd(rest, stdout, stderr)
@@ -135,11 +187,20 @@ func interactive(args []string, _, stderr io.Writer) int {
 	// --resume's own session-id string, because "which session, which
 	// turn" is a fact about the source and engine.Fork already refuses a
 	// caller who gets it wrong; this flag's only job is to carry it.
+	// The placeholder is deliberately back-quoted onto <session-id>:<turn>: the
+	// flag package renders the first back-quoted word in a usage string as the
+	// value placeholder, so this shows `-fork <session-id>:<turn>`. Back-quoting
+	// any other phrase (an earlier version quoted "kopicode sessions") would
+	// hijack the placeholder into that phrase instead.
 	fork := fs.String("fork", "", "branch a new session from an existing one's history at "+
-		"<session-id>:<turn>, replacing the working tree's contents with it (WARNING: destructive; "+
-		"see `kopicode sessions` to find a session id)")
+		"`<session-id>:<turn>`, replacing the working tree's contents with it (WARNING: destructive; "+
+		"see kopicode sessions to find a session id)")
 	if err := fs.Parse(args); err != nil {
-		// flag has already printed the error and the usage.
+		// flag has already printed the error and the usage. A help request is not
+		// an error: -h/--help exits 0, everything else is a usage error.
+		if errors.Is(err, flag.ErrHelp) {
+			return exitSuccess
+		}
 		return exitUsage
 	}
 	setupLogging(*debug, stderr)
@@ -383,6 +444,18 @@ func openAndDriveSession(std streams, opts engine.Options, open func(context.Con
 		if errors.Is(err, engine.ErrNoAPIKey) {
 			say(stderr, "kopicode: %s is not set, so there is no provider to talk to\n", engine.APIKeyEnv)
 			return exitHarness
+		}
+		// A --resume naming a session this repository has no record of is a
+		// command-line mistake, not a harness failure: exit 2, and a message
+		// that names the id and points at `kopicode sessions` rather than
+		// surfacing the engine's own ErrConfig text (which mentions the internal
+		// Options.Resume field a user has never heard of). Nothing was opened or
+		// locked — the id simply did not resolve — so this is exit.go's exit 2
+		// case exactly.
+		if opts.Resume && errors.Is(err, engine.ErrConfig) {
+			say(stderr, "kopicode: no session %q to resume in this repository; "+
+				"run `kopicode sessions` to see the ids you can resume from\n", opts.SessionID)
+			return exitUsage
 		}
 		// A working tree already running a session (docs/SLICE-1.md §8) lands
 		// on exit 4 by the same argument: the command line was right and the
