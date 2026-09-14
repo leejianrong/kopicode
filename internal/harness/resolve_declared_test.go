@@ -146,3 +146,81 @@ func TestResolveDeclaredConfigBadContents(t *testing.T) {
 		t.Errorf("a bad declared config is a usage error (exit 2): %v", err)
 	}
 }
+
+// TestFileConfigReadsHarnessConfigKey confirms the config-file reader owns the
+// `harness_config` key rather than skipping it as a neighbour's.
+func TestFileConfigReadsHarnessConfigKey(t *testing.T) {
+	dir := writeConfig(t, t.TempDir(), "harness_config = \"my.toml\"\n")
+	fc, err := harness.LoadFileConfig(dir)
+	if err != nil {
+		t.Fatalf("LoadFileConfig: %v", err)
+	}
+	if fc.HarnessConfig != "my.toml" {
+		t.Errorf("harness_config = %q, want %q", fc.HarnessConfig, "my.toml")
+	}
+}
+
+// TestResolveHarnessConfigFileKey resolves a declared config named by the
+// `harness_config` key at the file rung, with a relative path taken against the
+// config file's own directory (so the declared file lives beside config.toml).
+func TestResolveHarnessConfigFileKey(t *testing.T) {
+	dir := writeConfig(t, t.TempDir(), "harness_config = \"tuned.toml\"\n")
+	kdir := filepath.Join(dir, harness.ConfigDirName)
+	declaredPath := filepath.Join(kdir, "tuned.toml")
+	if err := os.WriteFile(declaredPath, []byte("base = \"default\"\nmax_turns = 60\n"), 0o600); err != nil {
+		t.Fatalf("writing declared config: %v", err)
+	}
+
+	sel, err := harness.Resolve(dir, harness.Overrides{})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if sel.Config.Name != harness.DeclaredConfigNamePrefix+"default" {
+		t.Errorf("harness name = %q, want a declared:default name", sel.Config.Name)
+	}
+	if sel.Config.MaxTurns != 60 {
+		t.Errorf("max_turns = %d, want 60", sel.Config.MaxTurns)
+	}
+	if sel.HarnessSource != harness.SourceFile {
+		t.Errorf("harness source = %q, want %q", sel.HarnessSource, harness.SourceFile)
+	}
+	if sel.HarnessConfigPath != declaredPath {
+		t.Errorf("harness config path = %q, want %q (relative to the config file's dir)",
+			sel.HarnessConfigPath, declaredPath)
+	}
+}
+
+// TestResolveHarnessConfigFileConflict refuses a config file that sets both
+// `harness` and `harness_config`: one axis, two names, no silent precedence.
+func TestResolveHarnessConfigFileConflict(t *testing.T) {
+	dir := writeConfig(t, t.TempDir(), "harness = \"naive-v1\"\nharness_config = \"x.toml\"\n")
+
+	_, err := harness.Resolve(dir, harness.Overrides{})
+	if err == nil {
+		t.Fatal("Resolve succeeded, want an error for both harness keys set")
+	}
+	if !strings.Contains(err.Error(), "both choose the harness") {
+		t.Fatalf("error = %v, want it to mention both harness keys", err)
+	}
+	if !harness.IsUsageError(err) {
+		t.Errorf("a config with both harness keys is a usage error (exit 2): %v", err)
+	}
+}
+
+// TestResolveFlagHarnessBeatsFileHarnessConfig confirms the flag rung beats the
+// file rung across spellings: --harness wins over a file `harness_config`, and
+// the losing declared file is not even read (it does not exist here).
+func TestResolveFlagHarnessBeatsFileHarnessConfig(t *testing.T) {
+	dir := writeConfig(t, t.TempDir(), "harness_config = \"does-not-exist.toml\"\n")
+
+	sel, err := harness.Resolve(dir, harness.Overrides{Harness: "naive-v1"})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if sel.Config.Name != "naive-v1" {
+		t.Errorf("harness name = %q, want the flag's built-in naive-v1", sel.Config.Name)
+	}
+	if sel.HarnessSource != harness.SourceFlag {
+		t.Errorf("harness source = %q, want %q", sel.HarnessSource, harness.SourceFlag)
+	}
+}
