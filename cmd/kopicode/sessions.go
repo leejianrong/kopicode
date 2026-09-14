@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -39,7 +40,11 @@ func sessionsCmd(args []string, stdout, stderr io.Writer) int {
 	// human eyeballs.
 	asJSON := fs.Bool("json", false, "emit one JSON object per session, for a script")
 	if err := fs.Parse(args); err != nil {
-		// flag has already printed the error and the usage.
+		// flag has already printed the error and the usage. A help request is not
+		// an error: -h/--help exits 0, everything else is a usage error.
+		if errors.Is(err, flag.ErrHelp) {
+			return exitSuccess
+		}
 		return exitUsage
 	}
 
