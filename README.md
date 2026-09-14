@@ -105,6 +105,9 @@ or a running shell command — without ending the session; you'll see a `[cancel
 line and get the prompt back. `Ctrl-C` at an empty prompt just discards whatever
 you'd typed.
 
+Want concrete first tasks — real repositories, exact prompts, and what to watch for?
+See [`docs/trying-kopicode.md`](docs/trying-kopicode.md).
+
 ### 5. `.kopicode/config.toml`
 
 A repository can pin its own model and harness, so that everyone who runs kopicode in
