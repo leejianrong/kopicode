@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -43,15 +44,16 @@ import (
 //	<-- {"jsonrpc":"2.0","method":"session.event","params":{"session":"s1","event":{...}}}
 //	<-- {"jsonrpc":"2.0","id":1,"result":{"session":"s1","record":"/repo/.kopicode/sessions/s1","stop":"completed","exit_code":0,"turns":1}}
 //
-// # The three methods (decision 3's lifecycle; its concurrency is KAN-1030)
+// # The three methods (decision 3)
 //
 //   - session.start — params {session, dir, prompt, model?, harness?}. Opens a
 //     session on the given working tree with engine.Open, keyed by the
 //     caller-supplied `session` id, and runs the first turn with `prompt`. The
 //     id is the caller's so it can cancel a turn whose start has not yet
 //     returned.
-//   - session.submit — params {session, prompt}. Runs the next turn on an
-//     already-open session.
+//   - session.submit — params {session, prompt}. Queues the next turn on an
+//     already-open session; it never fails because a turn is already running —
+//     the turn waits its place in the session's queue.
 //   - session.cancel — params {session}. Cancels that session's in-flight turn's
 //     context, the identical mechanism the REPL's Ctrl-C drives; it does not
 //     end the session, which stays open for further submits.
@@ -61,18 +63,28 @@ import (
 // is where every open session's SessionEnded is written. Adding an explicit
 // close is a later decision, not this card's.
 //
-// # Concurrency here is deliberately the simple one (KAN-1030 refines it)
+// # Concurrency: a per-session queue, sessions run concurrently (KAN-1030)
 //
-// This card serializes every turn through one global lock: at most one turn runs
-// at a time across all sessions, so two turns can never race
+// Each open session has one worker goroutine draining its own FIFO queue, so a
+// session's turns serialize — two turns of one session can never race
 // internal/engine/context.go's Assembler, which is documented as belonging to
-// one loop. session.cancel is handled on the read-loop goroutine and never waits
-// on a turn, so a turn is always cancellable while it runs. KAN-1030 replaces
-// the one global lock with a per-session queue — same-session turns still
-// serialize, different-session turns run truly concurrently (the model
-// internal/bench already proves at scale) — and turns the internal/lock
-// one-session-per-working-tree collision into a wire error rather than the
-// generic open failure it is here.
+// one loop — while different sessions' workers run truly concurrently, the model
+// internal/bench already proves at scale across worktrees. engine.Open, by
+// contrast, runs inline on the read loop: it is a fast local step (a
+// non-blocking flock, a journal and a tool root) that touches no Assembler, so
+// serialising the Opens costs nothing and the read loop stays free during the
+// turns, which is what keeps a turn cancellable while it runs.
+//
+// session.cancel targets the turn running *now* and only that turn: the worker
+// installs each turn's own cancel handle as it dequeues, so a cancel never lands
+// on a stale one, and a turn still queued behind the running one is untouched —
+// it runs in its place and returns its own result, cancellable once it reaches
+// the front. The wire carries only a session id, no turn id, so "the in-flight
+// turn" is the one coherent target, and it is the REPL's Ctrl-C exactly.
+//
+// A start whose working tree is already held by another live session is refused
+// with engine.ErrSessionLocked (internal/lock's one-session-per-working-tree
+// rule), surfaced as codeSessionLocked rather than the generic open failure.
 //
 // # Credentials: unchanged (decision 4)
 //
@@ -114,9 +126,11 @@ const (
 
 	codeUnknownSession = -32000 // session.submit/cancel named an id with no open session
 	codeSessionExists  = -32001 // session.start named an id already open in this process
-	codeOpenFailed     = -32002 // engine.Open refused: a bad model, a missing credential, a locked tree
+	codeOpenFailed     = -32002 // engine.Open refused: a bad model, a missing credential
 	codeUsageError     = -32003 // the arm could not be resolved (an unknown model or harness)
-	codeSessionBusy    = -32004 // session.submit while that session already has a turn in flight
+	// -32004 is retired: it was codeSessionBusy, a submit while a turn was in
+	// flight, which KAN-1030 replaced with a per-session queue that never rejects.
+	codeSessionLocked = -32005 // session.start's dir is already held by another live session (internal/lock)
 )
 
 // rpcRequest is one line from the client. Params stays raw so each method
@@ -283,31 +297,39 @@ type server struct {
 	enc   *json.Encoder
 	encMu sync.Mutex
 
-	// turnMu serializes turn execution across all sessions — this card's whole
-	// concurrency model, and the one lock KAN-1030 replaces with a per-session
-	// queue. Held across a turn (and, for start, across the Open that precedes
-	// it) so no two turns touch an Assembler at once.
-	turnMu sync.Mutex
-
-	// mu guards sessions and each session's current-turn cancel handle. wg
-	// tracks in-flight turn goroutines so shutdown waits for them before closing
-	// anything.
+	// mu guards the sessions map and every mutable field of a servedSession —
+	// its queue, its current-turn cancel handle and its closed flag — and backs
+	// each session's cond. wg tracks the per-session worker goroutines so
+	// shutdown waits for them before closing anything.
 	mu       sync.Mutex
 	sessions map[string]*servedSession
 	wg       sync.WaitGroup
 }
 
-// servedSession is one open engine session plus the handle that cancels its
-// current in-flight turn. cancel is replaced under server.mu at the start of
-// every turn, so a session.cancel always targets the turn running now. running
-// is true while a turn is in flight: this card runs at most one turn per session
-// and rejects a second as busy, deferring the queue that would hold it to
-// KAN-1030.
+// servedSession is one open engine session and its queue of turns to run. A
+// single worker goroutine drains the queue in order, so a session's turns
+// serialize; different sessions' workers run concurrently. Every field below the
+// two immutable ones is guarded by server.mu.
 type servedSession struct {
-	id      string
-	sess    *engine.Session
-	cancel  context.CancelFunc
-	running bool
+	id   string          // immutable
+	sess *engine.Session // immutable after the worker is spawned
+
+	// cond signals the worker when a turn is queued or when the session is
+	// closing. Its L is &server.mu, so the worker waits and the read loop
+	// enqueues under the one lock that also guards the fields below.
+	cond   *sync.Cond
+	queue  []turnJob          // turns waiting to run, oldest first
+	cancel context.CancelFunc // the running turn's cancel, or nil between turns
+	closed bool               // shutdown asked this worker to drain and exit
+}
+
+// turnJob is one queued turn: the request whose id its result answers, the
+// prompt to run, and whether it is the session's opening turn (which alone
+// carries the record path back, the way session.start's response does).
+type turnJob struct {
+	reqID   json.RawMessage
+	prompt  string
+	isStart bool
 }
 
 // run reads one JSON message per line until stdin closes, dispatching each, then
@@ -358,12 +380,12 @@ func (s *server) handleLine(line string) {
 	}
 }
 
-// dispatchStart validates start's params on the read-loop goroutine, registers
-// the session with its first turn's cancel handle, then runs the turn on its own
-// goroutine so the loop stays free to receive a cancel for the turn now
-// starting. The session is registered before the turn runs, so a cancel naming
-// the caller-supplied id — even one that arrives before this response does —
-// finds it and aborts the Open or the turn.
+// dispatchStart opens a session and queues its first turn, all on the read-loop
+// goroutine. engine.Open runs inline — it is a fast, Assembler-free local step —
+// so the working-tree lock and its collision (codeSessionLocked) are decided
+// here, before any worker exists. Only after Open succeeds is the session
+// registered and its worker spawned, so a failed Open leaves nothing behind and
+// its id stays free to retry.
 func (s *server) dispatchStart(req rpcRequest) {
 	var p startParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
@@ -382,6 +404,17 @@ func (s *server) dispatchStart(req rpcRequest) {
 		return
 	}
 
+	// The read loop is the only goroutine that registers, so this early check and
+	// the insert below cannot race: a duplicate id is refused before a needless
+	// Open, which the reused-id case (a live session, a second start) relies on.
+	s.mu.Lock()
+	_, exists := s.sessions[p.Session]
+	s.mu.Unlock()
+	if exists {
+		s.writeError(req.ID, codeSessionExists, fmt.Sprintf("session %q is already open in this process", p.Session))
+		return
+	}
+
 	selection, err := engine.ResolveSelection(p.Dir, engine.SelectionOverrides{Model: p.Model, Harness: p.Harness})
 	if err != nil {
 		code := codeOpenFailed
@@ -392,16 +425,6 @@ func (s *server) dispatchStart(req rpcRequest) {
 		return
 	}
 
-	turnCtx, cancel := context.WithCancel(s.ctx)
-	// Registered running: start's own first turn is that turn, so a submit or a
-	// second start that races it is rejected (busy / already-open) rather than
-	// overwriting its cancel handle.
-	if !s.register(&servedSession{id: p.Session, cancel: cancel, running: true}) {
-		cancel()
-		s.writeError(req.ID, codeSessionExists, fmt.Sprintf("session %q is already open in this process", p.Session))
-		return
-	}
-
 	opts := s.base
 	opts.Dir = p.Dir
 	opts.SessionID = p.Session
@@ -409,38 +432,31 @@ func (s *server) dispatchStart(req rpcRequest) {
 	opts.Events = s.notifier(p.Session)
 	s.applyUnattendedAnswerers(&opts)
 
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		defer cancel()
-
-		s.turnMu.Lock()
-		defer s.turnMu.Unlock()
-
-		sess, err := engine.Open(turnCtx, opts)
-		if err != nil {
-			s.unregister(p.Session)
-			s.writeError(req.ID, codeOpenFailed, err.Error())
-			return
+	sess, err := engine.Open(s.ctx, opts)
+	if err != nil {
+		code := codeOpenFailed
+		if errors.Is(err, engine.ErrSessionLocked) {
+			code = codeSessionLocked
 		}
-		s.setSession(p.Session, sess)
+		s.writeError(req.ID, code, err.Error())
+		return
+	}
 
-		res, _ := sess.Run(turnCtx, p.Prompt)
-		s.endTurn(p.Session)
-		s.writeResult(req.ID, turnResult{
-			Session:  p.Session,
-			Record:   sess.Path(),
-			Stop:     res.Stop.String(),
-			ExitCode: res.Stop.ExitCode(),
-			Turns:    res.Turns,
-		})
-	}()
+	ss := &servedSession{id: p.Session, sess: sess}
+	ss.cond = sync.NewCond(&s.mu)
+	ss.queue = []turnJob{{reqID: req.ID, prompt: p.Prompt, isStart: true}}
+	s.mu.Lock()
+	s.sessions[p.Session] = ss
+	s.mu.Unlock()
+
+	s.wg.Add(1)
+	go s.worker(ss)
 }
 
-// dispatchSubmit runs the next turn on an already-open session, off the read
-// loop for the same reason start does. It installs a fresh cancel handle for
-// this turn before spawning the goroutine, so a session.cancel that arrives
-// while the turn is still queued on turnMu targets this turn, not the last one.
+// dispatchSubmit queues the next turn on an already-open session. It never runs
+// the turn itself and never rejects a busy session: the session's worker runs
+// queued turns one at a time, in order, so a submit while a turn is in flight
+// waits its place rather than failing.
 func (s *server) dispatchSubmit(req rpcRequest) {
 	var p submitParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
@@ -456,45 +472,74 @@ func (s *server) dispatchSubmit(req rpcRequest) {
 		return
 	}
 
-	turnCtx, cancel := context.WithCancel(s.ctx)
-	ss, reason := s.beginTurn(p.Session, cancel)
+	s.mu.Lock()
+	ss := s.sessions[p.Session]
 	if ss == nil {
-		cancel()
-		switch reason {
-		case turnBusy:
-			s.writeError(req.ID, codeSessionBusy, fmt.Sprintf("session %q already has a turn in flight; "+
-				"wait for its result before submitting the next (queuing is KAN-1030)", p.Session))
-		default:
-			s.writeError(req.ID, codeUnknownSession, fmt.Sprintf("no open session %q; start one with "+
-				"session.start first", p.Session))
-		}
+		s.mu.Unlock()
+		s.writeError(req.ID, codeUnknownSession, fmt.Sprintf("no open session %q; start one with "+
+			"session.start first", p.Session))
 		return
 	}
+	ss.queue = append(ss.queue, turnJob{reqID: req.ID, prompt: p.Prompt})
+	ss.cond.Signal()
+	s.mu.Unlock()
+}
 
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		defer cancel()
+// worker drains one session's queue in order until the session is closed. Each
+// turn gets its own cancellable context, installed as the session's current-turn
+// cancel before it runs and cleared after, so a session.cancel always finds the
+// turn running now. Between turns the worker waits on the session's cond, woken
+// by an enqueue or by shutdown.
+func (s *server) worker(ss *servedSession) {
+	defer s.wg.Done()
+	for {
+		s.mu.Lock()
+		for len(ss.queue) == 0 && !ss.closed {
+			ss.cond.Wait()
+		}
+		if ss.closed {
+			// Shutdown: abandon any queued turns (their client's stdin has closed)
+			// and exit. A turn already running finished above before we got here.
+			ss.queue = nil
+			s.mu.Unlock()
+			return
+		}
+		job := ss.queue[0]
+		ss.queue = ss.queue[1:]
+		turnCtx, cancel := context.WithCancel(s.ctx)
+		ss.cancel = cancel
+		s.mu.Unlock()
 
-		s.turnMu.Lock()
-		defer s.turnMu.Unlock()
+		res, _ := ss.sess.Run(turnCtx, job.prompt)
+		cancel()
 
-		res, _ := ss.sess.Run(turnCtx, p.Prompt)
-		s.endTurn(p.Session)
-		s.writeResult(req.ID, turnResult{
-			Session:  p.Session,
+		s.mu.Lock()
+		ss.cancel = nil
+		s.mu.Unlock()
+
+		result := turnResult{
+			Session:  ss.id,
 			Stop:     res.Stop.String(),
 			ExitCode: res.Stop.ExitCode(),
 			Turns:    res.Turns,
-		})
-	}()
+		}
+		if job.isStart {
+			// Only the opening turn reports where the journal was opened, exactly
+			// as session.start's response does and session.submit's does not.
+			result.Record = ss.sess.Path()
+		}
+		s.writeResult(job.reqID, result)
+	}
 }
 
 // handleCancel cancels a session's in-flight turn. It runs inline on the read
-// loop — the whole point of running turns on their own goroutines — so a cancel
-// is delivered while the turn it targets is still running, never queued behind
-// it. A session still opening (its Open in flight) is cancellable too: its
-// cancel handle is registered before Open runs.
+// loop — the whole point of running turns on their own worker goroutines — so a
+// cancel reaches the turn it targets while that turn is still running, never
+// queued behind it. It cancels the turn running now and only that one: a turn
+// still queued keeps its place. A session with no turn in flight (idle between
+// turns) has a nil cancel and the signal is a no-op, but it is still
+// acknowledged — the ack says the signal was delivered to the session, the same
+// as it did before queuing.
 func (s *server) handleCancel(req rpcRequest) {
 	var p cancelParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
@@ -506,91 +551,22 @@ func (s *server) handleCancel(req rpcRequest) {
 		return
 	}
 
-	cancel := s.cancelOf(p.Session)
-	if cancel == nil {
+	s.mu.Lock()
+	ss := s.sessions[p.Session]
+	var cancel context.CancelFunc
+	if ss != nil {
+		cancel = ss.cancel
+	}
+	s.mu.Unlock()
+
+	if ss == nil {
 		s.writeError(req.ID, codeUnknownSession, fmt.Sprintf("no open session %q to cancel", p.Session))
 		return
 	}
-	cancel()
+	if cancel != nil {
+		cancel()
+	}
 	s.writeResult(req.ID, cancelResult{Session: p.Session, Cancelled: true})
-}
-
-// --- session registry -------------------------------------------------------
-
-// register adds a session if its id is free, reporting whether it took. It holds
-// the id and the first turn's cancel handle so a cancel can find the session
-// before its engine session finishes opening.
-func (s *server) register(ss *servedSession) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.sessions[ss.id]; ok {
-		return false
-	}
-	s.sessions[ss.id] = ss
-	return true
-}
-
-func (s *server) unregister(id string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.sessions, id)
-}
-
-func (s *server) setSession(id string, sess *engine.Session) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if ss, ok := s.sessions[id]; ok {
-		ss.sess = sess
-	}
-}
-
-// beginReason says why beginTurn refused, so submit can pick the right code.
-type beginReason uint8
-
-const (
-	turnUnknown beginReason = iota // no such open session
-	turnBusy                       // a turn is already in flight for it
-)
-
-// beginTurn claims the given session for a new turn: it installs cancel as the
-// session's current-turn cancel and marks it running, or returns nil with the
-// reason it could not — the session is not open (turnUnknown) or already has a
-// turn in flight (turnBusy). Installing cancel here, under the same lock that
-// checks running, is what makes a session.cancel target this turn and not a
-// stale one.
-func (s *server) beginTurn(id string, cancel context.CancelFunc) (*servedSession, beginReason) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	ss := s.sessions[id]
-	if ss == nil || ss.sess == nil {
-		return nil, turnUnknown
-	}
-	if ss.running {
-		return nil, turnBusy
-	}
-	ss.running = true
-	ss.cancel = cancel
-	return ss, turnUnknown
-}
-
-// endTurn marks a session's turn finished, so the next submit is accepted.
-func (s *server) endTurn(id string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if ss := s.sessions[id]; ss != nil {
-		ss.running = false
-	}
-}
-
-// cancelOf returns the current-turn cancel of any registered session — including
-// one still opening — or nil if none. handleCancel uses it inline.
-func (s *server) cancelOf(id string) context.CancelFunc {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if ss := s.sessions[id]; ss != nil {
-		return ss.cancel
-	}
-	return nil
 }
 
 // --- unattended answerers ---------------------------------------------------
@@ -664,14 +640,19 @@ func idOrNull(id json.RawMessage) json.RawMessage {
 
 // --- shutdown ---------------------------------------------------------------
 
-// shutdown ends every open session once the client's stdin has closed. It
-// cancels in-flight turns, waits for their goroutines, then closes each session
-// so its SessionEnded is written — the record's other bookend, owed even to a
-// session that was mid-turn when the client went away.
+// shutdown ends every open session once the client's stdin has closed. It marks
+// each session closed, cancels its in-flight turn and wakes its worker, waits
+// for the workers to drain and exit, then closes each session so its
+// SessionEnded is written — the record's other bookend, owed even to a session
+// that was mid-turn when the client went away.
 func (s *server) shutdown() {
 	s.mu.Lock()
 	for _, ss := range s.sessions {
-		ss.cancel()
+		ss.closed = true
+		if ss.cancel != nil {
+			ss.cancel()
+		}
+		ss.cond.Signal()
 	}
 	s.mu.Unlock()
 

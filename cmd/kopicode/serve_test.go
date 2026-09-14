@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -175,6 +176,70 @@ func gatedProvider(t *testing.T) (*httptest.Server, <-chan struct{}) {
 	}))
 	t.Cleanup(srv.Close)
 	return srv, reached
+}
+
+// concurrentProbeProvider signals entered as every request arrives — never
+// dropping a signal, unlike gatedProvider's buffered-1 reached — and blocks each
+// request until the client cancels its turn. It is how the concurrency test
+// proves how many turns sit in the provider at once: two sessions parked here
+// together is two turns running concurrently.
+func concurrentProbeProvider(t *testing.T) (*httptest.Server, <-chan struct{}) {
+	t.Helper()
+	entered := make(chan struct{}, 16)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		entered <- struct{}{}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		<-r.Context().Done() // the turn is cancelled; unblock and end the response
+	}))
+	t.Cleanup(srv.Close)
+	return srv, entered
+}
+
+// serializingProvider signals entered per request, then blocks it until the test
+// sends on proceed, after which it streams a clean completion so the turn ends
+// StopCompleted. It tracks the peak number of requests in flight at once, which
+// a single-worker-per-session queue holds at 1 for one session's turns however
+// many are submitted.
+func serializingProvider(t *testing.T) (srv *httptest.Server, entered <-chan struct{}, proceed chan<- struct{}, peak *int32) {
+	t.Helper()
+	enteredCh := make(chan struct{}, 16)
+	proceedCh := make(chan struct{})
+	var inflight, maxInflight int32
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&inflight, 1)
+		for {
+			old := atomic.LoadInt32(&maxInflight)
+			if n <= old || atomic.CompareAndSwapInt32(&maxInflight, old, n) {
+				break
+			}
+		}
+		enteredCh <- struct{}{}
+		select {
+		case <-proceedCh:
+		case <-r.Context().Done():
+		}
+		atomic.AddInt32(&inflight, -1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(sseBody("done")))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, enteredCh, proceedCh, &maxInflight
+}
+
+// awaitEntered receives one entered signal or fails the test — a turn that never
+// reached the provider is a hang, not a pass.
+func awaitEntered(t *testing.T, entered <-chan struct{}, what string) {
+	t.Helper()
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("%s never reached the provider", what)
+	}
 }
 
 // --- the tests --------------------------------------------------------------
@@ -399,4 +464,119 @@ func TestServeReportsAParseError(t *testing.T) {
 		t.Error("no parse-error response was emitted for the malformed line")
 	}
 	h.inW.Close()
+}
+
+// TestServeRunsDifferentSessionsConcurrently is KAN-1030's headline: two sessions
+// on two working trees run their turns at the same time. Both turns park in the
+// provider together — a state a single global turn lock could never reach, since
+// it would hold the second turn until the first returned — so receiving both
+// entered signals is the proof the per-session workers run concurrently.
+func TestServeRunsDifferentSessionsConcurrently(t *testing.T) {
+	t.Setenv(engine.APIKeyEnv, "kopicode-test-credential")
+	srv, entered := concurrentProbeProvider(t)
+	h := startServe(t, engine.Options{ProviderBaseURL: srv.URL})
+
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
+		"params": map[string]any{"session": "s1", "dir": t.TempDir(), "prompt": "one"}})
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": methodSessionStart,
+		"params": map[string]any{"session": "s2", "dir": t.TempDir(), "prompt": "two"}})
+
+	awaitEntered(t, entered, "the first session's turn")
+	awaitEntered(t, entered, "the second session's turn (a global turn lock would hold it behind the first)")
+
+	// Both are in flight; cancel them so their turns settle and shutdown is clean.
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 3, "method": methodSessionCancel,
+		"params": map[string]any{"session": "s1"}})
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 4, "method": methodSessionCancel,
+		"params": map[string]any{"session": "s2"}})
+	h.awaitResponse(3)
+	h.awaitResponse(4)
+
+	for _, id := range []int{1, 2} {
+		resp := h.awaitResponse(id)
+		result, _ := resp["result"].(map[string]any)
+		if result == nil {
+			t.Fatalf("start id %d returned no result after cancel: %v", id, resp)
+		}
+		if result["stop"] != "cancelled" {
+			t.Errorf("start id %d stop = %v, want cancelled", id, result["stop"])
+		}
+	}
+	h.close()
+}
+
+// TestServeSerializesSameSessionTurns proves the other half: turns of one session
+// never overlap. Two submits queue behind the in-flight start, and each reaches
+// the provider only once the one before it has completed, so the peak in-flight
+// count for the session stays 1 across all three turns. The queue is why the
+// submits are accepted at all rather than refused as busy.
+func TestServeSerializesSameSessionTurns(t *testing.T) {
+	t.Setenv(engine.APIKeyEnv, "kopicode-test-credential")
+	srv, entered, proceed, peak := serializingProvider(t)
+	h := startServe(t, engine.Options{ProviderBaseURL: srv.URL})
+
+	dir := t.TempDir()
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
+		"params": map[string]any{"session": "s1", "dir": dir, "prompt": "A"}})
+	awaitEntered(t, entered, "turn A")
+
+	// B and C queue behind A rather than being rejected. Neither can reach the
+	// provider while A holds the session's single worker.
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": methodSessionSubmit,
+		"params": map[string]any{"session": "s1", "prompt": "B"}})
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 3, "method": methodSessionSubmit,
+		"params": map[string]any{"session": "s1", "prompt": "C"}})
+
+	// Release the turns one at a time; each release lets exactly the next one in.
+	proceed <- struct{}{}
+	if r := h.awaitResponse(1); r["error"] != nil {
+		t.Fatalf("turn A errored: %v", r["error"])
+	}
+	awaitEntered(t, entered, "turn B (only after A completed)")
+	proceed <- struct{}{}
+	if r := h.awaitResponse(2); r["error"] != nil {
+		t.Fatalf("turn B errored: %v", r["error"])
+	}
+	awaitEntered(t, entered, "turn C (only after B completed)")
+	proceed <- struct{}{}
+	if r := h.awaitResponse(3); r["error"] != nil {
+		t.Fatalf("turn C errored: %v", r["error"])
+	}
+
+	if got := atomic.LoadInt32(peak); got != 1 {
+		t.Errorf("peak concurrent turns for one session = %d, want 1; same-session turns must serialize", got)
+	}
+	h.close()
+}
+
+// TestServeStartRefusesALockedWorkingTree turns internal/lock's
+// one-session-per-working-tree rule into a wire error. The first session holds
+// its tree's lock for its whole life, so a second session.start on the same dir
+// is refused with codeSessionLocked — the same refusal run --print exits 4 on,
+// carried over the wire rather than swallowed as a generic open failure.
+func TestServeStartRefusesALockedWorkingTree(t *testing.T) {
+	t.Setenv(engine.APIKeyEnv, "kopicode-test-credential")
+	srv := scriptedProvider(t, sseBody("done"))
+	h := startServe(t, engine.Options{ProviderBaseURL: srv.URL})
+
+	dir := t.TempDir()
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
+		"params": map[string]any{"session": "s1", "dir": dir, "prompt": "first"}})
+	if r := h.awaitResponse(1); r["error"] != nil {
+		t.Fatalf("the first session.start errored: %v", r["error"])
+	}
+
+	// s1 is still open and still holds dir's lock. A second session on the same
+	// tree is the collision internal/lock refuses.
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": methodSessionStart,
+		"params": map[string]any{"session": "s2", "dir": dir, "prompt": "second"}})
+	resp := h.awaitResponse(2)
+	rpcErr, _ := resp["error"].(map[string]any)
+	if rpcErr == nil {
+		t.Fatalf("a second session on a locked tree got no error: %v", resp)
+	}
+	if !numEq(rpcErr["code"], codeSessionLocked) {
+		t.Errorf("error code = %v, want %d (codeSessionLocked)", rpcErr["code"], codeSessionLocked)
+	}
+	h.close()
 }
