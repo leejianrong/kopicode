@@ -169,6 +169,18 @@ Both refuse shell and out-of-project writes by default, with nobody at a termina
 consent; a `--policy-file` ([ADR-0011](docs/adr/0011-unattended-invocation-policy-gate.md))
 is how an orchestrator declares, up front, what an unattended invocation may do.
 
+### 8. Skills
+
+A repository can package instructions for a recurring task under
+`.agents/skills/<name>/SKILL.md` — a file with a `name`/`description` frontmatter and
+Markdown body ([ADR-0014](docs/adr/0014-skills-mechanism.md)). No new tool and nothing
+to enable: the default system prompt tells the model to read a relevant skill before
+improvising, using the same `read_file` it uses for any other file. The path is the
+vendor-neutral convention Claude Code, Codex CLI, Cursor and Gemini CLI also read, so a
+skill written for one works under kopicode unchanged — the same interop reason kopicode
+reads `AGENTS.md`. A worked example and the format are in
+[`docs/examples/README.md`](docs/examples/README.md#skills-packaged-reusable-task-instructions).
+
 ### About the installer
 
 `scripts/install.sh` (KAN-934) is the one-liner in step 1 above. It detects your OS
