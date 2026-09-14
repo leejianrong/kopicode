@@ -440,6 +440,9 @@ fixture is hand-authored rather than recorded from a real run.
 - [`docs/adr/`](docs/adr/) — decisions of record, 0001–0011
 - [`docs/provider-pin.md`](docs/provider-pin.md) — which provider and quantization
   every benchmark request pins, and why
+- [`docs/kopicode-serve-protocol.md`](docs/kopicode-serve-protocol.md) — the
+  `kopicode serve` wire: NDJSON JSON-RPC 2.0, the three methods, the event
+  notification, the error codes, and the policy/ask flags
 - [`docs/token-growth.md`](docs/token-growth.md) — real per-turn context growth from
   two dogfood sessions (KAN-935/947); what it does and doesn't say about compaction
 - [`README.md`](README.md) — the thesis, where the harness gains are, the model table
