@@ -23,11 +23,49 @@ const (
 	TraitMultiFile = "multi_file"
 )
 
-// Composition floors for the corpus as a whole.
+// Composition floors for the corpus as a whole. These are the default values
+// [DefaultComposition] reads; [MinTasks] (in corpus.go) is the third. They are
+// kept as named constants so the rationale lives next to the number.
 const (
 	minRequiresRead = 2
 	minMultiFile    = 1
 )
+
+// CompositionPolicy is the set of corpus-level composition floors a load
+// enforces — properties of the corpus as a whole, not of any one task. They are
+// kopicode-corpus policy, not a claim about corpus validity in general: the
+// slice-1 corpus is built to always exercise a read-before-edit, multi-file fix
+// (ADR-0006), and these floors keep that true task after task. A different but
+// equally valid corpus — an Aider Go+Python subset (KAN-1406), whose exercises
+// are almost all single solution files — has a different composition and must be
+// allowed to declare its own floors rather than fail kopicode's. [Load] applies
+// [DefaultComposition]; [LoadWithPolicy] takes the floors explicitly.
+//
+// A floor of zero disables that one check. The policy is used exactly as given —
+// no field is silently replaced by a default — so a caller that wants kopicode's
+// floors starts from [DefaultComposition] and relaxes only what it means to.
+// Substituting a default for a zero would make CompositionPolicy{MinMultiFile: 0}
+// mean the opposite of what it says, which is the one thing this must not do.
+type CompositionPolicy struct {
+	// MinTasks is the smallest corpus the load accepts.
+	MinTasks int
+	// MinRequiresRead is the fewest requires_read tasks the corpus must hold.
+	MinRequiresRead int
+	// MinMultiFile is the fewest multi_file tasks the corpus must hold.
+	MinMultiFile int
+}
+
+// DefaultComposition is the floors kopicode's own slice-1 corpus is built to
+// meet, and the policy [Load] uses — so every existing caller enforces exactly
+// the three constants below and nothing changes for them. It reads the constants
+// rather than restating their numbers, so each value has one source.
+func DefaultComposition() CompositionPolicy {
+	return CompositionPolicy{
+		MinTasks:        MinTasks,
+		MinRequiresRead: minRequiresRead,
+		MinMultiFile:    minMultiFile,
+	}
+}
 
 // maxTurnsCap is the turn budget ceiling. ADR-0005 §6 defines a corpus task as
 // one that completes within 20 turns; a task that needs more is measuring
@@ -207,8 +245,9 @@ func validateRepoDir(t Task) []string {
 }
 
 // validateCorpus checks the properties that are about the corpus as a whole
-// rather than any one task.
-func validateCorpus(c *Corpus) error {
+// rather than any one task. The composition floors it enforces come from policy
+// (see [CompositionPolicy]); everything else is a fixed property of any corpus.
+func validateCorpus(c *Corpus, policy CompositionPolicy) error {
 	var problems []string
 	add := func(format string, args ...any) {
 		problems = append(problems, fmt.Sprintf(format, args...))
@@ -227,10 +266,10 @@ func validateCorpus(c *Corpus) error {
 		add("description is empty")
 	}
 
-	if len(c.Tasks) < MinTasks {
+	if len(c.Tasks) < policy.MinTasks {
 		add("%d tasks, want at least %d: a run over fewer tasks than the corpus is "+
 			"supposed to hold is a walk that went wrong, not a smaller experiment",
-			len(c.Tasks), MinTasks)
+			len(c.Tasks), policy.MinTasks)
 	}
 
 	reads, multi := 0, 0
@@ -242,13 +281,13 @@ func validateCorpus(c *Corpus) error {
 			multi++
 		}
 	}
-	if reads < minRequiresRead {
+	if reads < policy.MinRequiresRead {
 		add("%d tasks marked %s, want at least %d: without them nothing in the corpus "+
 			"forces a read before an edit, and anchored edit_file goes unexercised",
-			reads, TraitRequiresRead, minRequiresRead)
+			reads, TraitRequiresRead, policy.MinRequiresRead)
 	}
-	if multi < minMultiFile {
-		add("%d tasks marked %s, want at least %d", multi, TraitMultiFile, minMultiFile)
+	if multi < policy.MinMultiFile {
+		add("%d tasks marked %s, want at least %d", multi, TraitMultiFile, policy.MinMultiFile)
 	}
 
 	if len(problems) > 0 {
