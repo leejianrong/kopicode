@@ -1,5 +1,11 @@
 # SWE-bench-Verified anchor: scoping spike (KAN-998)
 
+> **Superseded by [`standardized-benchmark-scoping.md`](standardized-benchmark-scoping.md).**
+> That document widens this one from a single named benchmark to the actual
+> landscape, and corrects the claims below with live sources this spike didn't
+> have network access to check. This file is left in place as the original
+> record, not because it's still the live recommendation.
+
 - **Status:** Scoping only. No code change, no corpus change, no runner.
 - **Answers:** whether to pull in "a small SWE-bench-Verified subset run rarely as
   an anchor" now, deferred by [ADR-0005](adr/0005-benchmark-and-ab-methodology.md)
