@@ -88,7 +88,10 @@ file plus a hidden test suite per exercise, structurally interchangeable with a
 `internal/corpus`-shaped integration work (a manifest per exercise, possibly a
 sibling loader alongside the in-house corpus's), not `internal/bench`-isolation
 work. Materially smaller than what SWE-bench-Verified would need, but still real
-work, not a config flag.
+work, not a config flag. That integration work is scoped in detail — the manifest
+format, the corpus-loader fit, and the licensing check — in
+[`aider-polyglot-integration-scoping.md`](aider-polyglot-integration-scoping.md)
+(KAN-1037).
 
 ## 3. Cost analysis
 
