@@ -1,0 +1,16 @@
+{"kind":"stream","schema":1,"record":"/tmp/claude-1000/-home-jianlee-projects-abang-ai-kopicode/36712ace-9892-4771-936e-3aa278dc4605/scratchpad/greet/.kopicode/sessions/20260915T082920Z-a18aa465"}
+{"kind":"session_started","seq":1,"text":"qwen/qwen3-coder-next","detail":"20260915T082920Z-a18aa465","reason":"2eb2124667f4177be19211f5ecf5c95f90eb80576ca55dbd5c37cd48e5246635"}
+{"kind":"user_message","seq":2,"turn":1,"text":"Run exactly this shell command and nothing else: gh pr checks 150 --repo leejianrong/kopicode  — then tell me which CI checks passed and which failed.","size":152}
+{"kind":"provider_request","seq":3,"turn":1,"detail":"qwen/qwen3-coder-next","exit_code":1}
+{"kind":"provider_response","seq":4,"turn":1,"reason":"tool_calls","source":"Parasail","size":4077}
+{"kind":"tool_call_requested","seq":5,"turn":1,"text":"{\"index\":0,\"id\":\"chatcmpl-tool-ab6909fdeb9b6176\",\"name\":\"run_shell\",\"arguments\":\"{\\\"command\\\": \\\"gh pr checks 150 --repo leejianrong/kopicode\\\"}\"}","detail":"chatcmpl-tool-ab6909fdeb9b6176","size":146}
+{"kind":"tool_call_parsed","seq":6,"turn":1,"tool":"run_shell","detail":"{\"command\":\"gh pr checks 150 --repo leejianrong/kopicode\"}","reason":"native","size":58}
+{"kind":"permission_requested","seq":7,"turn":1,"tool":"run_shell","detail":"/bin/sh -c gh pr checks 150 --repo leejianrong/kopicode","reason":"model-authored shell commands always require consent","mode":"run_shell","size":55}
+{"kind":"permission_decided","seq":8,"turn":1,"reason":"command matches the declared allowlist exactly","decision":"allow","source":"policy"}
+{"kind":"tool_result","seq":9,"turn":1,"tool":"run_shell","exit_code":0,"size":905}
+{"kind":"turn_snapshot","seq":10,"turn":1,"detail":"4fef7ae6adb9e74f1072d4cbe8dba7b365b93a27","ref":"refs/kopicode/20260915T082920Z-a18aa465/1"}
+{"kind":"verification","seq":11,"turn":1,"text":"verification: `go test ./...` (discovered) passed\nnote: go.mod is in the repository root\n?   \tgreet\t[no test files]\n","command":["go","test","./..."],"source":"discovered","exit_code":0,"size":116}
+{"kind":"provider_request","seq":12,"turn":2,"detail":"qwen/qwen3-coder-next","exit_code":1}
+{"kind":"provider_response","seq":13,"turn":2,"reason":"stop","source":"Parasail","size":4577}
+{"kind":"assistant_message","seq":14,"turn":2,"text":"All CI checks passed:\n\n- Bench smoke (mock provider, zero tokens) — pass\n- Cross-compile — pass\n- Fast tests — pass\n- Full suite — pass\n- Secret scan — pass\n- Static gates — pass\n- Vulnerability scan — pass\n\nNo checks failed.","size":239}
+{"kind":"session_ended","seq":15,"reason":"completed","exit_code":0}

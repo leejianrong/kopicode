@@ -88,6 +88,9 @@ tune a harness.
   and asks; a bare Enter denies. See the [README](../README.md#4-first-run) for the exact
   prompt and what `y`/`a` do. (Forced verification — kopicode running the project's own
   test command — runs automatically and is not the same as a model-authored shell call.)
+  Any CLI already on your `PATH` and pre-authenticated — `gh`, `docker`, a cloud tool —
+  is usable this way with no extra setup: the model just runs it as a shell command and
+  you approve it at the prompt (kopicode inherits whatever `gh auth login` already set up).
 - **`[note] record: …`** — the path to this session's journal under `.kopicode/`. Every
   request, tool call, edit, and verdict is there as newline-delimited JSON if you want to
   see exactly what happened.

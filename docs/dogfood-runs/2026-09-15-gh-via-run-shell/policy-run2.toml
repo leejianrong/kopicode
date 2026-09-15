@@ -1,0 +1,2 @@
+root = "/tmp/claude-1000/-home-jianlee-projects-abang-ai-kopicode/36712ace-9892-4771-936e-3aa278dc4605/scratchpad/greet"
+allow = [["/bin/sh", "-c", "gh pr checks 150 --repo leejianrong/kopicode"]]
