@@ -171,13 +171,25 @@ type oracleFile struct {
 	TimeoutSeconds int               `json:"timeout_seconds"`
 }
 
-// Load reads and validates the corpus rooted at dir.
+// Load reads and validates the corpus rooted at dir, enforcing kopicode's own
+// composition floors ([DefaultComposition]).
 //
 // Every failure it can report is a reason the corpus would produce numbers
 // nobody should trust, so they are all fatal: a malformed manifest, a task
-// directory nobody listed, a listed task with no directory, a corpus smaller
-// than [MinTasks], or contents that no longer match the recorded digest.
+// directory nobody listed, a listed task with no directory, a corpus that does
+// not meet the composition floors, or contents that no longer match the recorded
+// digest. A corpus with a different but valid composition — an external subset
+// whose exercises are single-file (KAN-1406) — is loaded with [LoadWithPolicy].
 func Load(dir string) (*Corpus, error) {
+	return LoadWithPolicy(dir, DefaultComposition())
+}
+
+// LoadWithPolicy is [Load] with the corpus-level composition floors given
+// explicitly rather than defaulted (see [CompositionPolicy]). Everything else —
+// the manifest parse, the per-task validation, the listing cross-check, and the
+// digest freeze — is identical and single-sourced; the only thing that varies is
+// which composition a corpus is required to have.
+func LoadWithPolicy(dir string, policy CompositionPolicy) (*Corpus, error) {
 	root, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, fmt.Errorf("corpus: resolving %s: %w", dir, err)
@@ -215,7 +227,7 @@ func Load(dir string) (*Corpus, error) {
 		Root:          root,
 	}
 
-	if err := validateCorpus(c); err != nil {
+	if err := validateCorpus(c, policy); err != nil {
 		return nil, err
 	}
 

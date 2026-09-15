@@ -419,6 +419,75 @@ func TestLoadRejectsACorpusWithoutTheRequiredTraits(t *testing.T) {
 	}
 }
 
+// TestDefaultCompositionIsTheHistoricalFloors pins the numbers Load enforces, so
+// changing a composition default becomes a deliberate edit to this test rather
+// than a silent drift. It is the positive control for
+// TestLoadWithPolicyRelaxesTheMultiFileFloor: that test lowers one of these, and
+// this one proves the baseline it lowers from is the floor the package always
+// shipped. MinTasks is exported and cross-checked against itself; the other two
+// are unexported, so they are pinned to the literals the package shipped with.
+func TestDefaultCompositionIsTheHistoricalFloors(t *testing.T) {
+	p := corpus.DefaultComposition()
+	if p.MinTasks != corpus.MinTasks {
+		t.Errorf("DefaultComposition().MinTasks = %d, want corpus.MinTasks (%d)", p.MinTasks, corpus.MinTasks)
+	}
+	if p.MinRequiresRead != 2 {
+		t.Errorf("DefaultComposition().MinRequiresRead = %d, want 2 (the floor the package shipped with)", p.MinRequiresRead)
+	}
+	if p.MinMultiFile != 1 {
+		t.Errorf("DefaultComposition().MinMultiFile = %d, want 1 (the floor the package shipped with)", p.MinMultiFile)
+	}
+}
+
+// TestLoadWithPolicyRelaxesTheMultiFileFloor is KAN-1405's done-when: a corpus
+// with a valid-but-different composition — no multi_file task, which nearly
+// every Exercism Go/Python exercise is (KAN-1406) — is rejected by Load's
+// default floors and accepted when the caller lowers the one floor it means to,
+// and only that one.
+//
+// The fixture differs from the default one by a single trait: task-01 keeps
+// requires_read but drops multi_file, so requires_read stays at 2 (its floor is
+// met) and multi_file drops to 0 (its floor is not). That isolation is the
+// point — a pass under the relaxed policy has to be the multi_file floor being
+// lowered, not some other floor going unchecked.
+func TestLoadWithPolicyRelaxesTheMultiFileFloor(t *testing.T) {
+	dir := t.TempDir()
+	writeCorpus(t, dir, corpus.MinTasks, func(id string, m map[string]any) {
+		if id == "task-01" {
+			m["traits"] = []any{corpus.TraitRequiresRead}
+		}
+	})
+
+	// Default floors (via both Load and an explicit default policy) reject it,
+	// naming the multi_file floor and not the requires_read one.
+	for name, load := range map[string]func(string) (*corpus.Corpus, error){
+		"Load": corpus.Load,
+		"LoadWithPolicy(DefaultComposition())": func(d string) (*corpus.Corpus, error) {
+			return corpus.LoadWithPolicy(d, corpus.DefaultComposition())
+		},
+	} {
+		_, err := load(dir)
+		if err == nil {
+			t.Fatalf("%s accepted a corpus with no multi_file task under the default floors", name)
+		}
+		if !strings.Contains(err.Error(), corpus.TraitMultiFile) {
+			t.Errorf("%s error = %v, want it to name the %s floor", name, err, corpus.TraitMultiFile)
+		}
+		if strings.Contains(err.Error(), corpus.TraitRequiresRead) {
+			t.Errorf("%s error = %v, unexpectedly also fails the requires_read floor; the fixture was "+
+				"built to fail only multi_file", name, err)
+		}
+	}
+
+	// The same corpus loads once the caller lowers only the multi_file floor —
+	// the composition an external single-file corpus needs.
+	policy := corpus.DefaultComposition()
+	policy.MinMultiFile = 0
+	if _, err := corpus.LoadWithPolicy(dir, policy); err != nil {
+		t.Fatalf("LoadWithPolicy with MinMultiFile=0 rejected a corpus that meets every other floor: %v", err)
+	}
+}
+
 // --- fixture helpers ------------------------------------------------------
 
 // writeCorpus writes a synthetic corpus of n tasks that loads cleanly, and
