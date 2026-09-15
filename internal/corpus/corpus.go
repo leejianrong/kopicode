@@ -60,6 +60,16 @@ const TaskManifestName = "task.json"
 // agent may see.
 const RepoDirName = "repo"
 
+// PristineTestsDirName is an optional directory inside a task holding a pristine
+// copy of the task's test files, keyed by their repo-relative path. A grader
+// restores these over an agent-mutated tree before running the oracle, so a model
+// that edits the tests cannot make them pass trivially (see
+// docs/aider-polyglot-integration-scoping.md §4 and KAN-1407). It is out of
+// [RepoDirName], so the agent never sees it, and its leading underscore keeps the
+// Go toolchain from treating its orphan *_test.go files as a package in ./...;
+// [Digest] still covers it. Not every task has one.
+const PristineTestsDirName = "_pristine-tests"
+
 // Corpus is a loaded, validated corpus.
 type Corpus struct {
 	// SchemaVersion is the manifest schema the corpus was written against.
