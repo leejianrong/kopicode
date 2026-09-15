@@ -2,7 +2,7 @@
 # Install kopicode (and kopibench) from the latest GitHub Release.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/leejianrong/kopicode/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/leejianrong/kopicode/main/scripts/install.sh | sh
 #
 # Plain POSIX sh, not bash: the whole point of a curl-|-sh installer is that it
 # runs on whatever shell the user's system default `sh` happens to be, and

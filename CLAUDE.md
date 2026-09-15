@@ -92,10 +92,12 @@ not this list:
   turn that could have changed the tree. `NotRun` is the zero value, not `Passed`; only
   a command that ran and failed blocks a success report. Discovery **executes nothing**
   — a Makefile target, `go.mod`, `scripts.test`, a uv project, in that order.
-- **`internal/provider/fixture`** — provider traffic as data. Every fixture is
-  hand-authored and says so (`"origin": "hand_authored"`) — the recorder that would
-  scrub secrets from real traffic doesn't exist yet, so this is a deliberate, bounded
-  violation of the test-seam rule below, not an oversight.
+- **`internal/provider/fixture`** — provider traffic as data. Every *shipped* fixture is
+  hand-authored and says so (`"origin": "hand_authored"`). The recorder that turns real
+  traffic into fixture data, scrubbing secrets through a header allowlist, now exists
+  (KAN-774, `recorder.go`) — but it is a `RoundTripper` test/tool seam, not yet wired into
+  a command that regenerates the corpus, so the hand-authored fixtures remain a
+  deliberate, bounded violation of the test-seam rule below, not an oversight.
 - **`internal/repo`** — turn snapshots via git shadow refs
   (`refs/kopicode/<session>/<turn>`), written through a throwaway index so the user's
   real git state is never touched. `Restore` reads a tree back out via `git archive`
@@ -117,6 +119,12 @@ not this list:
   (`--model`/`--harness` > repo config > built-in default — **no environment variable
   anywhere in the chain**). `Config` holds no map anywhere in its type graph, because
   Go randomises map iteration and a replayed journal must be byte-identical.
+  ADR-0010's **declared** configs also live here (`declared.go`): a TOML file naming a
+  built-in `base` and overriding `max_turns`/`token_budget`/`repair_budget`/`max_tokens`,
+  resolved to a full `Config` named `declared:<base>` and named by `--harness-config` or
+  `harness_config =` at the same rung as `--harness`/`harness =`. It is local-only — the
+  `declared:` name is in the hash preimage, so a declared arm can never pool with a
+  built-in — and `kopitune`/unofficial-corpus (the rest of ADR-0010) are not built yet.
 - **The system prompt** is a harness *value*, not a loop detail — `go:embed`ed,
   in the hash preimage by digest, held to an 8 KiB budget, and tested to document
   every tool and every argument the harness config actually carries.
@@ -189,21 +197,23 @@ kopicode mechanism behaved as designed, and the classifier still bucketed it `ha
 per its deliberately conservative rule. This is the harness's first honest number, not
 a flattering one.
 
-**What doesn't exist yet:** the fixture recorder, so every provider fixture stays
-hand-authored; a second registered model, so the benchmark rig has never produced an
-A/B result; `slog` inside the engine (wired at the front-end level only); the
-`.kopicode/lock` advisory lock (nothing stops two sessions in one repository today).
-The CLI surface for `--resume`/`--fork` (listing sessions worth resuming from) doesn't
-exist either — the engine-level mechanism does.
+**What doesn't exist yet:** the recorder exists (KAN-774) but nothing yet drives it to
+regenerate the corpus, so every *shipped* provider fixture is still hand-authored. The
+other gaps this paragraph used to list have since closed — verify against the code, not
+this note: three models are registered (`internal/harness/registry.go`) and paired A/B
+numbers exist (`docs/paired-ab-*`); `slog` runs inside the engine
+(`internal/engine/open.go`); `.kopicode/lock` holds one session per working tree
+(`internal/lock`); and `kopicode sessions` (KAN-941) lists sessions to find a
+`--resume`/`--fork` id.
 
 Do not add a test count here — it goes stale on the next PR. `make test` prints the
 real number; a red suite, not a changed count, is the signal something is wrong.
 
 ## Decisions of record — read before proposing anything
 
-Eleven ADRs exist; two reverse earlier plans that still appear in older project notes,
-and two are amendments layered on top of earlier ones. If a document contradicts an
-ADR, the ADR wins.
+Thirteen ADRs exist; two reverse earlier plans that still appear in older project
+notes, and two are amendments layered on top of earlier ones. If a document
+contradicts an ADR, the ADR wins.
 
 | | |
 |---|---|
@@ -218,6 +228,8 @@ ADR, the ADR wins.
 | [0009](docs/adr/0009-ask-tool-contract.md) *(Proposed)* | **The `ask` tool** is a sibling mechanism to consent, not an extension of `internal/permission` — free-text question/answer, never a `Verdict`. |
 | [0010](docs/adr/0010-declarative-harness-configs-and-self-tuning.md) | **Declarative harness configs + `kopitune`.** Amends 0007: a second, *declared* config class (TOML, base + overrides) alongside the built-in registry, for models with no hand-tuned entry. Local-only — never anchors a published benchmark number. |
 | [0011](docs/adr/0011-unattended-invocation-policy-gate.md) | **A policy gate for unattended invocation.** Amends 0008: a new opt-in `permission.Policy` (declared allowlist) for a caller like cuttlefish that spawns kopicode with no human present. Real containment is the caller's job, not kopicode's — kopicode gains no sandbox dependency from this. |
+| [0012](docs/adr/0012-context-compaction-strategy.md) | **Context compaction.** Decision 1 (a smaller verification-truthfulness fix) **Accepted**; decision 2 (a supersession-based compaction strategy) **Rejected** on review. |
+| [0013](docs/adr/0013-agent-controlled-resident-session-surface.md) | **`kopicode serve`, a resident session surface over stdio.** NDJSON JSON-RPC 2.0, N concurrent `engine.Open` sessions in one process, credentials via env only, reusing ADR-0011's policy flags and adding an opt-in `--ask-policy-file` (a sibling to consent, per ADR-0009). No engine-boundary change. EPIC-131. |
 
 Satay's natural consumer in this suite is **cuttlefish** (unattended, triggered,
 credential-holding, not started), not kopicode. Do not reintroduce it here.
@@ -426,8 +438,9 @@ captured stdout — never internal loop state.
 
 The mock provider **replays recorded traffic rather than synthesising it**, so it
 doesn't mask real breakage by drifting from actual provider behaviour. Today this
-comes with one open exception: the fixture recorder doesn't exist yet, so every shipped
-fixture is hand-authored rather than recorded from a real run.
+comes with one open exception: the recorder exists (KAN-774) but is not yet wired into a
+command that regenerates the corpus, so every shipped fixture is still hand-authored
+rather than recorded from a real run.
 
 ## Pointers
 
@@ -438,6 +451,9 @@ fixture is hand-authored rather than recorded from a real run.
 - [`docs/adr/`](docs/adr/) — decisions of record, 0001–0011
 - [`docs/provider-pin.md`](docs/provider-pin.md) — which provider and quantization
   every benchmark request pins, and why
+- [`docs/kopicode-serve-protocol.md`](docs/kopicode-serve-protocol.md) — the
+  `kopicode serve` wire: NDJSON JSON-RPC 2.0, the three methods, the event
+  notification, the error codes, and the policy/ask flags
 - [`docs/token-growth.md`](docs/token-growth.md) — real per-turn context growth from
   two dogfood sessions (KAN-935/947); what it does and doesn't say about compaction
 - [`README.md`](README.md) — the thesis, where the harness gains are, the model table

@@ -200,6 +200,20 @@ type Options struct {
 	// same way its Consent sets ConsentMode.
 	AskMode AskMode
 
+	// AskPolicy, when non-nil, is ADR-0013 decision 6's declared ask policy:
+	// the orchestrator's standing instruction for what the model should do when
+	// it calls ask and nobody can answer. It resolves to [Ask]/[AskMode] the
+	// same way [Policy] resolves to the permission gate — [mustAnswerer] turns
+	// it into an [Answerer] attributed to the policy, and [AskMode] is then
+	// irrelevant, exactly as [ConsentMode] is once [Policy] is set. It is the
+	// sibling to [Policy] that ADR-0013 keeps out of internal/permission (see
+	// [AskPolicyFile]); `kopicode serve --ask-policy-file` is its consumer.
+	//
+	// Setting AskPolicy together with a non-nil [Ask] is a caller mistake [Open]
+	// refuses: two different answerers for the same question, which this package
+	// will not guess between, the same rule [Policy] holds against [Consent].
+	AskPolicy *AskPolicyFile
+
 	// Policy, when non-nil, is ADR-0011's declared allowlist: the caller
 	// states, up front, the closed set of shell argv this session may run and
 	// the root writes outside the repo root are confined to, and [Open] builds
@@ -496,6 +510,12 @@ func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session,
 			"not guess which one a caller meant — leave Consent nil when using Options.Policy "+
 			"(docs/adr/0011-unattended-invocation-policy-gate.md)", ErrConfig)
 	}
+	if opts.AskPolicy != nil && opts.Ask != nil {
+		return nil, fmt.Errorf("%w: Options.AskPolicy is set together with Options.Ask; these are two "+
+			"different answerers for the same question (what the model asked) and this package will not "+
+			"guess which one a caller meant — leave Ask nil when using Options.AskPolicy "+
+			"(docs/adr/0013-agent-controlled-resident-session-surface.md)", ErrConfig)
+	}
 
 	dir := opts.Dir
 	if dir == "" {
@@ -719,7 +739,7 @@ func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session,
 		return fail(err)
 	}
 
-	askFn, askSource := mustAnswerer(opts.Ask, opts.AskMode)
+	askFn, askSource := mustAnswerer(opts.Ask, opts.AskMode, opts.AskPolicy)
 
 	eng, err := New(Config{
 		SessionID: id,
@@ -840,16 +860,24 @@ func mustAskPolicy(c Consenter, mode ConsentMode) permission.Policy {
 	return p
 }
 
-// mustAnswerer resolves Options.Ask/Options.AskMode into what Config.Ask and
-// Config.AskSource need, mirroring mustAskPolicy's shape for the identical
-// reason (docs/adr/0009-ask-tool-contract.md decision 2): the source is
-// derived purely from mode, independent of whether a is nil, the same way
-// mustAskPolicy's source never depends on whether c is nil. A nil a is never
-// left nil for Engine.runAsk to call and panic on — noAnswerer takes its
-// place — and [New] would default it again anyway if this function's
-// caller were ever bypassed, but Open always calls it, so that fallback is
-// belt and suspenders rather than the only guard.
-func mustAnswerer(a Answerer, mode AskMode) (Answerer, string) {
+// mustAnswerer resolves Options.Ask/Options.AskMode/Options.AskPolicy into what
+// Config.Ask and Config.AskSource need, mirroring mustAskPolicy's shape for the
+// identical reason (docs/adr/0009-ask-tool-contract.md decision 2): the source is
+// derived purely from mode (or forced to policy by a declared AskPolicy),
+// independent of whether a is nil, the same way mustAskPolicy's source never
+// depends on whether c is nil. A nil a is never left nil for Engine.runAsk to
+// call and panic on — noAnswerer takes its place — and [New] would default it
+// again anyway if this function's caller were ever bypassed, but Open always
+// calls it, so that fallback is belt and suspenders rather than the only guard.
+//
+// A non-nil policy wins outright and is attributed to the policy, exactly as
+// gatePolicy's declared allowlist wins over the Consent path (ADR-0013 decision
+// 6). Open has already refused a caller that set both policy and a live a, so
+// the two are mutually exclusive by the time this runs.
+func mustAnswerer(a Answerer, mode AskMode, policy *AskPolicyFile) (Answerer, string) {
+	if policy != nil {
+		return policy.answerer(), askSourcePolicy
+	}
 	source := askSourceUser
 	if mode == AskUnattended {
 		source = askSourcePolicy

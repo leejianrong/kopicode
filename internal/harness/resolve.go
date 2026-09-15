@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strings"
 
 	"github.com/leejianrong/kopicode/internal/provider"
@@ -20,6 +21,9 @@ import (
 const (
 	FlagModel   = "model"
 	FlagHarness = "harness"
+	// FlagHarnessConfig names a declared harness-config file (ADR-0010). It sits
+	// at the same precedence tier as [FlagHarness] — see [Overrides.HarnessConfig].
+	FlagHarnessConfig = "harness-config"
 )
 
 // Overrides are the per-invocation values from the command line. An empty
@@ -28,10 +32,17 @@ const (
 type Overrides struct {
 	Model   string
 	Harness string
+	// HarnessConfig is a path to a declared harness-config file (ADR-0010): a
+	// TOML document naming a built-in configuration as its base and overriding
+	// specific fields, resolved into one concrete [Config]. It is the same
+	// harness axis [Harness] chooses, expressed a different way, so naming both
+	// on one invocation is a usage error rather than a silent precedence
+	// (see [Resolve]).
+	HarnessConfig string
 }
 
-// Bind registers --model and --harness on fs and returns where their values
-// will land. Call fs.Parse afterwards.
+// Bind registers --model, --harness and --harness-config on fs and returns
+// where their values will land. Call fs.Parse afterwards.
 //
 // The flag package accepts both -model and --model, so ADR-0007's spelling
 // works as written.
@@ -39,6 +50,8 @@ func Bind(fs *flag.FlagSet) *Overrides {
 	var o Overrides
 	fs.StringVar(&o.Model, FlagModel, "", "model id to run this session (default "+DefaultModelID+")")
 	fs.StringVar(&o.Harness, FlagHarness, "", "harness configuration name (default: whatever the model maps to)")
+	fs.StringVar(&o.HarnessConfig, FlagHarnessConfig, "",
+		"path to a declared harness-config file (ADR-0010; overrides --harness, local-only)")
 	return &o
 }
 
@@ -94,6 +107,11 @@ type Selection struct {
 	// ConfigFilePath is the config file the resolution read, or "" when there
 	// was none. Diagnostics only.
 	ConfigFilePath string
+	// HarnessConfigPath is the declared harness-config file the resolution read
+	// (ADR-0010), or "" when the harness came from a built-in configuration.
+	// Diagnostics only; the resolved [Config] and its hash are what identify the
+	// arm, and [Config.Name] already carries the [DeclaredConfigNamePrefix].
+	HarnessConfigPath string
 	// ModelSource and HarnessSource say which rung of the precedence chain
 	// supplied each value. Diagnostics only — see [Source].
 	ModelSource   Source
@@ -105,7 +123,7 @@ type Selection struct {
 // Grouped and explicit rather than reflected, so a field added to [Selection]
 // does not silently start appearing in a log line. There is nothing
 // credential-shaped here and there is nowhere to put one: this type holds a
-// model id, a pin, a configuration and two provenance labels.
+// model id, a pin, a configuration and a few provenance labels.
 func (s Selection) LogValue() slog.Value {
 	return slog.GroupValue(
 		slog.String("model_id", s.ModelID),
@@ -115,6 +133,7 @@ func (s Selection) LogValue() slog.Value {
 		slog.String("harness_config_hash", s.HarnessConfigHash),
 		slog.String("pin", s.Pin.String()),
 		slog.String("config_file", s.ConfigFilePath),
+		slog.String("harness_config_file", s.HarnessConfigPath),
 	)
 }
 
@@ -176,11 +195,9 @@ func Resolve(dir string, o Overrides) (Selection, error) {
 		return Selection{}, unknownModel(modelID, modelSource, file.Path)
 	}
 
-	harnessName, harnessSource := pick(o.Harness, file.Harness, entry.HarnessConfig, SourceRegistry)
-
-	cfg, ok := ConfigByName(harnessName)
-	if !ok {
-		return Selection{}, unknownHarness(harnessName, harnessSource, file.Path)
+	cfg, harnessSource, declaredPath, err := resolveHarness(dir, o, file, entry)
+	if err != nil {
+		return Selection{}, err
 	}
 
 	// The registered configuration says the command is discovered, because that
@@ -203,9 +220,77 @@ func Resolve(dir string, o Overrides) (Selection, error) {
 		HarnessConfigHash: cfg.Hash(),
 		Verify:            file.Verify,
 		ConfigFilePath:    file.Path,
+		HarnessConfigPath: declaredPath,
 		ModelSource:       modelSource,
 		HarnessSource:     harnessSource,
 	}, nil
+}
+
+// resolveHarness resolves the harness axis: which configuration this arm runs,
+// where the choice came from, and — when the choice is a declared config
+// (ADR-0010) — the file it was read from.
+//
+// The axis has two spellings at each of two rungs: a built-in name (--harness,
+// or `harness =`) and a declared-config path (--harness-config, or
+// `harness_config =`). The two are the same axis, so naming both at one rung is
+// a usage error rather than a silent precedence. Between rungs the flag beats
+// the file (ADR-0007 decision 2), and the built-in registry default answers when
+// neither rung speaks. A declared path is resolved relative to the directory of
+// whatever named it — the session dir for the flag, the config file's own
+// directory for the file key — so `harness_config = "x.toml"` means "next to
+// this config file".
+func resolveHarness(dir string, o Overrides, file FileConfig, entry Entry) (Config, Source, string, error) {
+	// Flag rung: exactly one of --harness / --harness-config.
+	if o.Harness != "" && o.HarnessConfig != "" {
+		return Config{}, "", "", usagef("--%s and --%s both choose the harness, and they are two "+
+			"ways to name it rather than a precedence; pass one, not both", FlagHarness, FlagHarnessConfig)
+	}
+	if o.HarnessConfig != "" {
+		return loadDeclaredAt(dir, o.HarnessConfig, SourceFlag)
+	}
+	if o.Harness != "" {
+		return builtinByName(o.Harness, SourceFlag, file.Path)
+	}
+
+	// File rung: exactly one of harness / harness_config.
+	if file.Harness != "" && file.HarnessConfig != "" {
+		return Config{}, "", "", usagef("%s: `harness` and `harness_config` both choose the harness, "+
+			"and they are two ways to name it rather than a precedence; set one, not both", file.Path)
+	}
+	if file.HarnessConfig != "" {
+		// A relative path is resolved against the config file's own directory, so
+		// a declared config named there lives beside the config file that names it.
+		return loadDeclaredAt(filepath.Dir(file.Path), file.HarnessConfig, SourceFile)
+	}
+	if file.Harness != "" {
+		return builtinByName(file.Harness, SourceFile, file.Path)
+	}
+
+	// Neither rung speaks: the model's registry row supplies the default.
+	return builtinByName(entry.HarnessConfig, SourceRegistry, file.Path)
+}
+
+// loadDeclaredAt reads a declared harness config at path, resolving a relative
+// path against base, and reports it as coming from source.
+func loadDeclaredAt(base, path string, source Source) (Config, Source, string, error) {
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(base, path)
+	}
+	cfg, err := LoadDeclaredConfig(path)
+	if err != nil {
+		return Config{}, "", "", err
+	}
+	return cfg, source, path, nil
+}
+
+// builtinByName looks up a built-in configuration by name, turning a miss into
+// the same refusal the whole selection chain uses.
+func builtinByName(name string, source Source, configPath string) (Config, Source, string, error) {
+	cfg, ok := ConfigByName(name)
+	if !ok {
+		return Config{}, "", "", unknownHarness(name, source, configPath)
+	}
+	return cfg, source, "", nil
 }
 
 // pick applies the precedence chain to one axis and reports which rung answered.
