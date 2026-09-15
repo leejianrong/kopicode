@@ -103,8 +103,22 @@ func everyConfig(t *testing.T) []harness.Config {
 // untouched and KAN-1015/1018's published harness-axis result (anchored to
 // naive-v1's hash) stays valid for the hash it was measured under, unaffected by
 // this change.
+//
+// It moved a seventh time on KAN-1385, when prompt_default.md's "## Skills"
+// section was rewritten from a passive "read_file it when it looks relevant"
+// pointer into an imperative to `list_dir` `.agents/skills` before the first
+// move, so discovery no longer depends on the model happening to list the repo
+// root (the KAN-1384 dogfood found it fired on a list-first task and missed a
+// grep-first one). A prompt *value* change, not new preimage coverage, so
+// PreimageVersion stays at 2, and the same lineage caveat as KAN-1034 holds:
+// minimax-m2-v1 moves with it (it inherits DefaultSystemPrompt) while the three
+// naive configs override SystemPrompt and are untouched, so KAN-1015/1018's
+// naive-v1-anchored harness-axis result stays valid. The only activity under the
+// prior hash was the KAN-1384 discovery dogfood — a diagnostic `run --print`
+// session documented on its own under docs/dogfood-runs/, not a hash-anchored
+// bench arm — so nothing pools incorrectly across this move either.
 func TestDefaultConfigHashIsStable(t *testing.T) {
-	const want = "c6e1272bedb212bebcfe178131d9c85409354d48aa08ffbfa078be75359a3b61"
+	const want = "2eb2124667f4177be19211f5ecf5c95f90eb80576ca55dbd5c37cd48e5246635"
 
 	got := defaultConfig(t).Hash()
 	if got != want {
@@ -129,7 +143,7 @@ func TestDefaultConfigHashIsStable(t *testing.T) {
 // TestNoTwoConfigsShareAHash below is what checks that expectation rather
 // than this test silently passing if they happened to collide.
 func TestMinimaxM2ConfigHashIsStable(t *testing.T) {
-	const want = "8dab56a48c792a5f82918634cfc56dffbc9b8ed89e056b098b09ae6d1bc7eff5"
+	const want = "8240e0a82efe56ba20919e8ff4560daf532328947e86d2f90659d2e377a41045"
 
 	got := configByName(t, harness.MinimaxM2ConfigName).Hash()
 	if got != want {

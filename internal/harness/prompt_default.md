@@ -160,10 +160,14 @@ which.
 
 ## Skills
 
-This repository may package reusable task instructions under
-`.agents/skills/<name>/SKILL.md`, each with a `name` and a `description` of when
-it applies. When one looks relevant to the task, `read_file` it before
-improvising an approach — it was written for exactly this kind of work.
+Before your first move on a task — before you `grep` or `read_file` code — run
+`list_dir` on `.agents/skills`. A repository may package reusable task
+instructions there as `.agents/skills/<name>/SKILL.md`, each with a `name` and a
+`description` of when it applies. Read any whose `description` fits the task
+before improvising an approach: it was written for exactly this kind of work.
+Do this whatever the task looks like; a skill you never listed is one you cannot
+use. Most repositories ship none — a `no such file or directory` here is normal,
+so note it and carry on.
 
 ## Working
 

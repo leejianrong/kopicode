@@ -83,6 +83,71 @@ func TestDefaultPromptDocumentsTheSkillsConvention(t *testing.T) {
 	}
 }
 
+// TestDefaultPromptTriggersSkillDiscovery pins KAN-1385: the skills mechanism
+// must be discoverable regardless of the model's first move.
+//
+// The KAN-1384 dogfood found discovery was incidental — the model found a
+// relevant skill only when its opening move happened to be a `list_dir` of the
+// repo root (which surfaces `.agents/`), and missed an equally relevant skill on
+// a task whose natural first move was `grep`, because it never listed the root.
+// The fix keeps ADR-0014 shape (a) — no new tool, no auto-injected skill bodies
+// — and lives entirely in this prose: the `## Skills` section now tells the
+// model to `list_dir` the skills directory up front, so a grep-first task shape
+// no longer hides it.
+//
+// This asserts that imperative. A passive "read_file it when it looks relevant"
+// sentence cannot fire until the model already knows the skill exists, so it
+// does not name `list_dir` and fails here — which is the state this card found
+// and the regression it must not slide back into. Scoped to DefaultSystemPrompt
+// for the same reason TestDefaultPromptDocumentsTheSkillsConvention is: the
+// naive baselines deliberately carry no skills capability at all.
+func TestDefaultPromptTriggersSkillDiscovery(t *testing.T) {
+	section, ok := markdownSection(DefaultSystemPrompt, "## Skills")
+	if !ok {
+		t.Fatal("the default system prompt has no `## Skills` section; ADR-0014's mechanism is that " +
+			"section and nothing else, so its absence removes the feature")
+	}
+	if !strings.Contains(section, "list_dir") {
+		t.Errorf("the `## Skills` section does not tell the model to `list_dir` the skills directory:\n%s\n"+
+			"KAN-1384 showed that discovery which waits for the model to judge a skill \"relevant\" only "+
+			"fires when its first move happens to list the root; the trigger must be an imperative to "+
+			"`list_dir` `.agents/skills` up front so discovery is independent of task shape (KAN-1385)",
+			section)
+	}
+}
+
+// markdownSection returns the body of the `## <title>` section of a prompt —
+// the lines from just after the heading to the next second-level heading, or
+// the end of the prompt — and whether the heading was found.
+//
+// It lets a test assert about one section's prose without a substring match
+// leaking in from the rest of the prompt: `list_dir` appears in several other
+// places (the `### list_dir` tool section, the `## Working` steps), so a bare
+// strings.Contains over the whole prompt would pass even if the `## Skills`
+// section never mentioned it.
+func markdownSection(prompt, heading string) (string, bool) {
+	lines := strings.Split(prompt, "\n")
+	start := -1
+	for i, line := range lines {
+		if line == heading {
+			start = i
+			break
+		}
+	}
+	if start == -1 {
+		return "", false
+	}
+	var b strings.Builder
+	for _, line := range lines[start+1:] {
+		if strings.HasPrefix(line, "## ") {
+			break
+		}
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	return b.String(), true
+}
+
 // TestSystemPromptIsWhitespaceClean stops an invisible edit from opening a new
 // arm.
 //
