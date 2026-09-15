@@ -455,6 +455,26 @@ func (r *Runner) runTask(ctx context.Context, env taskEnv, task corpus.Task) (re
 	// tree the agent was interrupted half way through, and running the suite
 	// would spend a minute of a cancellation the user asked to be immediate.
 	if ctx.Err() == nil {
+		// Restore the pristine tests over whatever the session did before the
+		// oracle reads them, so a model that edited a test file to pass trivially
+		// is still graded against the real suite (KAN-1407). A failure to restore
+		// means the tree cannot be graded honestly, so it is recorded as an oracle
+		// error — which the classifier attributes to the harness — rather than
+		// grading an unprotected tree as if it were sound. Tasks that ship no
+		// pristine copy (every hand-authored task today) restore nothing.
+		if err := restorePristineTests(dir); err != nil {
+			log.Error("pristine test restore failed; not grading", "error", err)
+			res.Oracle = OracleResult{
+				Argv:     append([]string(nil), frozen.Oracle.Argv...),
+				ExitCode: -1,
+				Err:      err,
+			}
+			if writeErr := writeOracleLog(taskOut, res.Oracle); writeErr != nil {
+				log.Error("oracle output not saved", "error", writeErr)
+			}
+			log.Debug("task finished", "passed", res.Passed, "stop", res.Stop)
+			return res
+		}
 		res.Oracle = runOracle(ctx, frozen, dir, home, r.caches, now)
 		res.Passed = res.Oracle.Passed
 		// Written before the worktree is reclaimed, and written whole. The
