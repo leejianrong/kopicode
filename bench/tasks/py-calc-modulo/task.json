@@ -14,5 +14,6 @@
   },
   "traits": ["multi_file", "requires_read"],
   "max_turns": 20,
+  "test_files": ["test_calc.py"],
   "notes": "Needs python3 with the standard library only. The second coordinated multi-file task, and the one that spans a language boundary from the first: the token kind is in tokens.py, the character the lexer recognises is in lexer.py, and precedence plus the arithmetic are in evaluator.py. Missing any one of the three leaves the suite red — an import error, an unknown-character error, or a not-a-product-operator error respectively, which makes it easy to see how far a run got."
 }

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "corpus_version": "2.0.0",
-  "digest": "sha256:6f8010f0c0605145af975a0860f9946ee917bbcab231f991cfb0d7977203553a",
+  "corpus_version": "2.1.0",
+  "digest": "sha256:58d11c635af4fc9ef01b77bd8db2f1bdcd15ddf9afcbecf913c5ca8d38b5f0a6",
   "description": "kopicode slice-1 benchmark corpus: ten small deterministic repair-and-extend tasks, Go and Python, oracle-graded by each task's own test suite.",
   "tasks": [
     "go-unicode-reverse",

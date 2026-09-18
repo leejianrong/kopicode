@@ -15,5 +15,6 @@
   },
   "traits": ["multi_file", "requires_read"],
   "max_turns": 20,
+  "test_files": ["shipping_test.go"],
   "notes": "Needs the Go toolchain only. Carrier is satisfied by three types spread across separate files (ground.go, air.go, freight.go) and reachable only through NewCarrier's registry (registry.go) -- grepping for 'Carrier' or the interface's Quote method eventually turns up all three, but grepping for the actual missing behavior, the fuel surcharge, turns up only its declaration in types.go, since none of the three apply it yet. The statement's own anecdote is an international air shipment, which is the trap: a fix that patches only airCarrier.Quote compiles cleanly -- Carrier's method set is unchanged, so Go never notices the other two implementers didn't grow the same arithmetic -- and even makes the anecdote true, but TestGroundQuoteIncludesSurcharge and the two TestFreightQuoteIncludesSurcharge cases, exercising the carriers the statement never names, still fail. Written to catch a fix aimed at the one carrier a user happened to complain about rather than the shared behavior the interface promises every implementer keeps."
 }

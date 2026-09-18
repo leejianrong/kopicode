@@ -15,5 +15,6 @@
   },
   "traits": ["requires_read"],
   "max_turns": 20,
+  "test_files": ["strutil_test.go"],
   "notes": "Needs the Go toolchain and nothing else: the module has no requirements, and GOPROXY=off makes that structural rather than incidental. Discriminates on whether the model edits the existing loop instead of rewriting the file — strutil.go also holds Initials and Truncate, both covered by the suite, so a blind write_file of the whole file fails the oracle."
 }

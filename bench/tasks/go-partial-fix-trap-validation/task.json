@@ -15,5 +15,6 @@
   },
   "traits": ["requires_read"],
   "max_turns": 20,
+  "test_files": ["validate_test.go"],
   "notes": "Needs the Go toolchain only. ValidateDisplayName's allowed character set already includes a plain space, so that compound names like 'Anna Maria' are accepted, and the function never checks for blankness at all -- an empty string sails through on a zero-iteration loop, and a name that is nothing but spaces or tabs sails through the same loop because every character in it is already on the allowed list. The bug report only describes the empty-string case, because that is the one a support ticket actually catches: someone submits a form with the field left empty, nobody happens to submit three spaces instead. A minimal fix that adds a literal name == \"\" check matches the ticket exactly and makes TestRejectsEmptyName pass, but TestRejectsWhitespaceOnlyName is still red, since a string of spaces is never equal to the empty string by that comparison. The real fix has to reject on strings.TrimSpace(name) == \"\", which means noticing -- from validate_test.go, not from the ticket -- that blank and whitespace-only are the same underlying defect rather than two different bugs. Written to catch a fix that pattern-matches the statement's literal wording instead of the validation function's actual contract."
 }

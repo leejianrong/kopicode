@@ -116,6 +116,16 @@ type Task struct {
 	// Notes explain why the task discriminates and what it depends on. For
 	// humans reading the corpus; never sent to the model.
 	Notes string
+	// TestFiles are the repo-relative paths of the files that decide the
+	// oracle's verdict — the task's authoritative declaration of what "the
+	// test" is, hand-specified rather than discovered by a filename glob (a
+	// glob misses a shared file a test compiles against but that isn't itself
+	// named *_test.*). A task that declares TestFiles must ship a matching
+	// [PristineTestsDirName] holding exactly these files, byte-equal to the
+	// current repo/ copies: [validateTask] checks both directions, so the list
+	// and the frozen copies cannot drift apart silently. Optional — not every
+	// task declares it.
+	TestFiles []string
 	// Dir is the absolute path of the task directory.
 	Dir string
 }
@@ -173,6 +183,7 @@ type taskFile struct {
 	Traits        []string   `json:"traits"`
 	MaxTurns      int        `json:"max_turns"`
 	Notes         string     `json:"notes"`
+	TestFiles     []string   `json:"test_files,omitempty"`
 }
 
 type oracleFile struct {
@@ -305,10 +316,11 @@ func readTask(root, id string) (Task, error) {
 			Env:            f.Oracle.Env,
 			TimeoutSeconds: f.Oracle.TimeoutSeconds,
 		},
-		Traits:   f.Traits,
-		MaxTurns: f.MaxTurns,
-		Notes:    f.Notes,
-		Dir:      dir,
+		Traits:    f.Traits,
+		MaxTurns:  f.MaxTurns,
+		Notes:     f.Notes,
+		TestFiles: f.TestFiles,
+		Dir:       dir,
 	}
 
 	if err := validateTask(task, id); err != nil {

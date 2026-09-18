@@ -359,6 +359,44 @@ func TestLoadRejects(t *testing.T) {
 			},
 			wantErr: "corpus_version is empty",
 		},
+		{
+			name: "test_files path escapes the repo",
+			mutate: func(t *testing.T, dir string) {
+				editTask(t, dir, "task-01", func(m map[string]any) { m["test_files"] = []any{"../outside.go"} })
+			},
+			wantErr: "no traversal",
+		},
+		{
+			name: "test_files lists a file missing from repo/",
+			mutate: func(t *testing.T, dir string) {
+				editTask(t, dir, "task-02", func(m map[string]any) { m["test_files"] = []any{"missing_test.go"} })
+			},
+			wantErr: `test_files "missing_test.go"`,
+		},
+		{
+			name: "test_files declared with no pristine copy",
+			mutate: func(t *testing.T, dir string) {
+				editTask(t, dir, "task-03", func(m map[string]any) { m["test_files"] = []any{"main.txt"} })
+			},
+			wantErr: corpus.PristineTestsDirName + " does not exist",
+		},
+		{
+			name: "pristine copy has drifted from the starting tree",
+			mutate: func(t *testing.T, dir string) {
+				editTask(t, dir, "task-04", func(m map[string]any) { m["test_files"] = []any{"main.txt"} })
+				writeFile(t, filepath.Join(dir, "task-04", corpus.PristineTestsDirName, "main.txt"), "drifted\n")
+			},
+			wantErr: "has drifted from the starting tree",
+		},
+		{
+			name: "pristine copy has a file test_files does not declare",
+			mutate: func(t *testing.T, dir string) {
+				editTask(t, dir, "task-05", func(m map[string]any) { m["test_files"] = []any{"main.txt"} })
+				writeFile(t, filepath.Join(dir, "task-05", corpus.PristineTestsDirName, "main.txt"), "start\n")
+				writeFile(t, filepath.Join(dir, "task-05", corpus.PristineTestsDirName, "extra_test.go"), "extra\n")
+			},
+			wantErr: "is not listed in test_files",
+		},
 	}
 
 	for _, tc := range cases {
@@ -381,6 +419,40 @@ func TestLoadRejects(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestLoadAcceptsATaskWithMatchingPristineTestFiles is the positive case
+// TestLoadRejects's cases are testing against: a task that declares test_files
+// and ships a byte-identical pristine copy of exactly those files loads
+// cleanly, and the loaded Task carries the declaration through.
+func TestLoadAcceptsATaskWithMatchingPristineTestFiles(t *testing.T) {
+	dir := t.TempDir()
+	ids := make([]string, 0, corpus.MinTasks)
+	for i := 0; i < corpus.MinTasks; i++ {
+		ids = append(ids, fmt.Sprintf("task-%02d", i))
+	}
+	writeCorpus(t, dir, corpus.MinTasks, func(id string, m map[string]any) {
+		if id == "task-06" {
+			m["test_files"] = []any{"main.txt"}
+		}
+	})
+	writeFile(t, filepath.Join(dir, "task-06", corpus.PristineTestsDirName, "main.txt"), "start\n")
+	writeManifest(t, dir, ids)
+
+	c, err := corpus.Load(dir)
+	if err != nil {
+		t.Fatalf("Load rejected a task with a matching pristine copy: %v", err)
+	}
+
+	for _, task := range c.Tasks {
+		if task.ID == "task-06" {
+			if len(task.TestFiles) != 1 || task.TestFiles[0] != "main.txt" {
+				t.Errorf("task-06 TestFiles = %v, want [\"main.txt\"]", task.TestFiles)
+			}
+			return
+		}
+	}
+	t.Fatal("task-06 not found in the loaded corpus")
 }
 
 // TestLoadRejectsAShortCorpus is separate because it needs a different
