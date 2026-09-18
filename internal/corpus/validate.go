@@ -1,8 +1,10 @@
 package corpus
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -148,6 +150,7 @@ func validateTask(t Task, dirName string) error {
 	problems = append(problems, validateOracle(t)...)
 	problems = append(problems, validateTraits(t)...)
 	problems = append(problems, validateRepoDir(t)...)
+	problems = append(problems, validateTestFiles(t)...)
 
 	if len(problems) > 0 {
 		return fmt.Errorf("corpus: task %s: %s", dirName, strings.Join(problems, "; "))
@@ -242,6 +245,116 @@ func validateRepoDir(t Task) []string {
 		return []string{fmt.Sprintf("%s/ is empty: there is no starting tree to work on", RepoDirName)}
 	}
 	return nil
+}
+
+// validateTestFiles checks a task's optional TestFiles declaration: each
+// listed path is a repo-relative path with no traversal, no duplicates, and
+// actually exists under repo/. A task that declares no TestFiles is untouched
+// — the declaration is optional, matching [PristineTestsDirName]'s own "not
+// every task has one".
+func validateTestFiles(t Task) []string {
+	if len(t.TestFiles) == 0 {
+		return nil
+	}
+
+	var problems []string
+	seen := make(map[string]bool, len(t.TestFiles))
+	for _, rel := range t.TestFiles {
+		if rel == "" {
+			problems = append(problems, "test_files holds an empty path")
+			continue
+		}
+		if seen[rel] {
+			problems = append(problems, fmt.Sprintf("test_files lists %q twice", rel))
+			continue
+		}
+		seen[rel] = true
+
+		clean := filepath.ToSlash(filepath.Clean(rel))
+		if filepath.IsAbs(rel) || clean == ".." || strings.HasPrefix(clean, "../") {
+			problems = append(problems, fmt.Sprintf(
+				"test_files %q must be a repo-relative path with no traversal", rel))
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(t.RepoDir(), filepath.FromSlash(rel))); err != nil {
+			problems = append(problems, fmt.Sprintf("test_files %q: %v", rel, err))
+		}
+	}
+
+	problems = append(problems, validatePristineTests(t, seen)...)
+	return problems
+}
+
+// validatePristineTests checks the other half of the TestFiles promise: a task
+// that declares TestFiles must ship a [PristineTestsDirName] holding exactly
+// those files, byte-equal to their current repo/ copies. Both directions are
+// checked — a declared file with no frozen copy would leave the restore
+// silently unprotected, and a frozen copy nobody declared is dead weight
+// nobody is checking — and the content comparison is what catches a repo/ test
+// edited without refreezing its pristine copy, which is exactly the drift
+// [restorePristineTests] would otherwise trust.
+func validatePristineTests(t Task, declared map[string]bool) []string {
+	pristineDir := filepath.Join(t.Dir, PristineTestsDirName)
+
+	info, err := os.Stat(pristineDir)
+	if err != nil {
+		return []string{fmt.Sprintf(
+			"test_files is declared but %s does not exist: %v", PristineTestsDirName, err)}
+	}
+	if !info.IsDir() {
+		return []string{fmt.Sprintf("%s exists but is not a directory", PristineTestsDirName)}
+	}
+
+	found := map[string]bool{}
+	walkErr := filepath.WalkDir(pristineDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(pristineDir, path)
+		if err != nil {
+			return err
+		}
+		found[filepath.ToSlash(rel)] = true
+		return nil
+	})
+	if walkErr != nil {
+		return []string{fmt.Sprintf("walking %s: %v", PristineTestsDirName, walkErr)}
+	}
+
+	var problems []string
+	for rel := range declared {
+		if !found[rel] {
+			problems = append(problems, fmt.Sprintf(
+				"test_files lists %q but %s/%s does not exist", rel, PristineTestsDirName, rel))
+			continue
+		}
+		pristineContent, err := os.ReadFile(filepath.Join(pristineDir, filepath.FromSlash(rel)))
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("reading %s/%s: %v", PristineTestsDirName, rel, err))
+			continue
+		}
+		repoContent, err := os.ReadFile(filepath.Join(t.RepoDir(), filepath.FromSlash(rel)))
+		if err != nil {
+			continue // already reported by validateTestFiles
+		}
+		if !bytes.Equal(pristineContent, repoContent) {
+			problems = append(problems, fmt.Sprintf(
+				"%s/%s does not match %s/%s: the pristine copy has drifted from the starting tree",
+				PristineTestsDirName, rel, RepoDirName, rel))
+		}
+	}
+	for rel := range found {
+		if !declared[rel] {
+			problems = append(problems, fmt.Sprintf(
+				"%s/%s exists but is not listed in test_files", PristineTestsDirName, rel))
+		}
+	}
+
+	sort.Strings(problems)
+	return problems
 }
 
 // validateCorpus checks the properties that are about the corpus as a whole

@@ -15,5 +15,6 @@
   },
   "traits": ["requires_read"],
   "max_turns": 20,
+  "test_files": ["wrap_test.go"],
   "notes": "Needs the Go toolchain only. An off-by-one the statement describes by symptom only: the separating space is not counted when deciding whether the next word fits. The failing property test sweeps widths 5 to 20, so a fix that special-cases one width does not pass, and Indent and Longest are covered so a rewrite of the file has to keep them."
 }

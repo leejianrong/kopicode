@@ -14,5 +14,6 @@
   },
   "traits": ["multi_file", "requires_read"],
   "max_turns": 20,
+  "test_files": ["test_dashboard.py"],
   "notes": "Needs python3 with the standard library only. Four modules: sources.py holds the (correct) defaults and per-environment overrides, cache.py is a small generic memoization helper with no opinion about what should vary a key, resolver.py merges a resolved environment's settings and memoizes the result, and report.py renders per-environment and aggregate dashboard text. The statement describes only the dashboard's user-visible behaviour and names no file. The bug is not where the symptom is printed: resolver.py memoizes the merged settings under a fixed key that ignores which environment was asked for, so the second environment resolved in a process silently gets the first one's settings back — and report.py's own dashboard() does the exact same thing independently, memoizing the joined text under a fixed key that ignores which environments were requested. Fixing only one leaves the other test failing, so the fix has to touch both resolver.py and report.py; finding both means reading cache.py's contract first (it hands back whatever was stored for a key and does not care what should vary it) and then checking every call site that uses it, not just the one nearest the symptom."
 }

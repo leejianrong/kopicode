@@ -15,5 +15,6 @@
   },
   "traits": [],
   "max_turns": 20,
+  "test_files": ["flagset_test.go"],
   "notes": "Needs the Go toolchain only. The largest edit in the corpus that is still a single hunk: a new branch inserted into a loop whose surrounding cases must be left alone. The terminator and lookahead tests catch a fix that reorders the loop's existing conditions."
 }

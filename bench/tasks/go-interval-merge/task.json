@@ -15,5 +15,6 @@
   },
   "traits": ["requires_read"],
   "max_turns": 20,
+  "test_files": ["intervals_test.go"],
   "notes": "Needs the Go toolchain only. The statement names no file and no function, so the model has to locate the comparison itself — the one-character fix is in a sort-then-scan loop that also has to keep its copy-the-input and gap-preserving behaviour, both covered by the suite."
 }

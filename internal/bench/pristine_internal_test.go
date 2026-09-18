@@ -76,8 +76,9 @@ func TestRestorePristineTestsOverwritesMutatedTest(t *testing.T) {
 	}
 }
 
-// TestRestorePristineTestsNoopWhenAbsent proves the change is inert for a corpus
-// that does not ship pristine copies — every hand-authored task today.
+// TestRestorePristineTestsNoopWhenAbsent proves the change is inert for a task
+// that ships no pristine copy — an opt-out this synthetic fixture exercises
+// directly, even though no task in the real corpora takes it (KAN-1434).
 func TestRestorePristineTestsNoopWhenAbsent(t *testing.T) {
 	repoDir := writeTaskTree(t,
 		map[string]string{"x_test.go": "package x\n// left alone\n"},

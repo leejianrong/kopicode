@@ -15,5 +15,6 @@
   },
   "traits": ["requires_read"],
   "max_turns": 20,
+  "test_files": ["lru_test.go"],
   "notes": "Needs the Go toolchain only. The fix is one call to an unexported helper that already exists, so the model has to read the file to find it rather than reimplement recency tracking; a from-scratch rewrite tends to drop Keys() or the capacity floor, both covered."
 }
