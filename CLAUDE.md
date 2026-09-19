@@ -211,8 +211,9 @@ real number; a red suite, not a changed count, is the signal something is wrong.
 
 ## Decisions of record — read before proposing anything
 
-Fourteen ADRs exist; two reverse earlier plans that still appear in older project
-notes, and two are amendments layered on top of earlier ones. If a document
+Sixteen ADRs exist; two reverse earlier plans that still appear in older project
+notes, and three are amendments layered on top of earlier ones (one of which amends
+two prior ADRs at once). If a document
 contradicts an ADR, the ADR wins.
 
 | | |
@@ -231,6 +232,8 @@ contradicts an ADR, the ADR wins.
 | [0012](docs/adr/0012-context-compaction-strategy.md) | **Context compaction.** Decision 1 (a smaller verification-truthfulness fix) **Accepted**; decision 2 (a supersession-based compaction strategy) **Rejected** on review. |
 | [0013](docs/adr/0013-agent-controlled-resident-session-surface.md) | **`kopicode serve`, a resident session surface over stdio.** NDJSON JSON-RPC 2.0, N concurrent `engine.Open` sessions in one process, credentials via env only, reusing ADR-0011's policy flags and adding an opt-in `--ask-policy-file` (a sibling to consent, per ADR-0009). No engine-boundary change. EPIC-131. |
 | [0014](docs/adr/0014-skills-mechanism.md) *(Proposed)* | **A skills mechanism — a documented directory, no new tool.** Reusable task instructions under `.agents/skills/<name>/SKILL.md` (a multi-vendor convention), discovered and read with the existing `read_file`/`list_dir`/`grep`; one system-prompt sentence points the model there. No engine loader, no dispatch or catalogue change. EPIC-132. |
+| [0015](docs/adr/0015-mcp-server-front-end.md) *(Proposed)* | **An MCP server front end.** A fourth `cmd/kopicode` subcommand (`mcp`), reusing `serve`'s session core over a new `cmd/kopicode/session` package, so any MCP-capable agent orchestrator can drive kopicode with zero bespoke client code. Additive — `serve`'s wire is unchanged. |
+| [0016](docs/adr/0016-live-remote-consent-for-agent-orchestrated-sessions.md) *(Proposed)* | **Live remote consent.** Amends 0009/0011: a new `RemoteConsenter` bubbles permission decisions live over the wire instead of a pre-declared allowlist, plus an explicit `consent_mode` a caller must declare (`remote_interactive` vs. `unattended_policy` with a required containment acknowledgment). Does not loosen ADR-0011's exact-match allowlist. |
 
 Satay's natural consumer in this suite is **cuttlefish** (unattended, triggered,
 credential-holding, not started), not kopicode. Do not reintroduce it here.
@@ -287,7 +290,8 @@ Notes worth knowing before they cost you time:
 - **Branch per slice:** `git switch -c feat/<slice>` off `origin/main`; open a PR.
 - Run `make ci` locally before pushing — the pre-push hook is a cheaper subset, so
   passing it is not evidence CI will pass.
-- Commit trailer: `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`.
+- **No AI-authorship trailer.** Commits and PRs are authored by Jian alone — no
+  `Co-Authored-By`, no "Generated with" footer, regardless of which agent did the work.
 - **At most two subagents work in this repository at once.**
 - **Strict branch protection serialises landings.** Every merge puts other open PRs out
   of date, so each needs `gh pr update-branch <n>` and a full re-run before it can
