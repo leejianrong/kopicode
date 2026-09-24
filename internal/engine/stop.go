@@ -32,6 +32,11 @@ import (
 // more turn is not a model failure — but the classifier is KAN-797's and
 // inventing a fourth bucket here would be worse. What this package owes is that
 // the reason is on the record and distinct from every other, which it is.
+//
+// This table is a headless consumer's stable contract, not an internal detail:
+// docs/run-print-protocol.md publishes it in full for a caller (`run --print`'s
+// stdout, or `kopicode serve`'s identical projection) that never reads this Go
+// source. If this table changes shape, that file has to change with it.
 type Stop uint8
 
 const (
