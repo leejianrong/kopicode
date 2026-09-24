@@ -62,6 +62,28 @@ notification this surface emits is `session.event` (below).
 { "jsonrpc": "2.0", "method": "session.event", "params": { ... } }
 ```
 
+**Request, server → client** (ADR-0016). The one message shape this surface did not
+originally need: the server itself mints an id, sends a request, and blocks the turn
+until a matching reply arrives on stdin or a bounded timeout elapses. `consent.request`
+(below) is the only method sent this way today.
+
+```json
+{ "jsonrpc": "2.0", "id": "c-1", "method": "consent.request", "params": { ... } }
+```
+
+The client answers it exactly as it would any request it received, on stdin, echoing
+the id verbatim:
+
+```json
+{ "jsonrpc": "2.0", "id": "c-1", "result": { "answer": "allow" } }
+```
+
+A reply carries no `method` — the same shape any JSON-RPC response has — which is how
+the read loop tells a reply apart from a malformed client-to-server request: a
+method-less line carrying a `result` or an `error` is read as a reply and routed to
+whatever is waiting on that id; one carrying neither is the ordinary "request has no
+method" refusal.
+
 ## The three methods
 
 The set is fixed at ADR-0013 decision 3's three: there is no `session.close` (a session
@@ -80,6 +102,8 @@ its first turn.
 | `model` | string | no | model-id override (else the repo config / built-in default) |
 | `harness` | string | no | built-in harness-config name override |
 | `harness_config` | string | no | path to a declared harness-config file (ADR-0010), the same axis as `harness`; a relative path resolves against `dir`. Passing both `harness` and `harness_config` is a usage error |
+| `consent_mode` | string | **yes** | `"remote_interactive"` or `"unattended_policy"` (ADR-0016) — see [Consent modes](#consent-modes). There is no default; omitting it is a usage error |
+| `containment_provided` | boolean | iff `consent_mode` is `"unattended_policy"` | the caller's explicit acknowledgment that it supplies real process/container containment for this session (ADR-0011 decision 4). Required and must be `true` for that mode; ignored for `"remote_interactive"` |
 
 **Result** (`turnResult`): the turn's outcome, projected the way `run --print`'s last line
 is.
@@ -122,6 +146,41 @@ still acknowledged.
 **Result** (`cancelResult`): `{ "session": "...", "cancelled": true }`. This says the
 signal was delivered; the cancelled turn reports its own `stop: "cancelled"` through its
 own `session.start`/`session.submit` response.
+
+## `consent.request` (server → client, ADR-0016)
+
+Sent only for a session whose `consent_mode` is `"remote_interactive"`. Every
+permission-requiring decision the engine would otherwise need a declared policy to
+answer instead bubbles live to the client, one request per action, with nothing
+declared ahead of time.
+
+```json
+--> { "jsonrpc": "2.0", "id": "c-1", "method": "consent.request",
+      "params": { "session": "s1", "kind": "run_shell", "tool": "run_shell",
+                  "detail": "uv run pytest -v", "reason": "", "resolved": "" } }
+<-- { "jsonrpc": "2.0", "id": "c-1", "result": { "answer": "allow" } }
+```
+
+| param | type | meaning |
+|---|---|---|
+| `session` | string | which session is asking |
+| `kind` | string | `run_shell` or `write_outside_root` |
+| `tool` | string | the tool name as the model called it |
+| `detail` | string | the command line, or the path, being consented to |
+| `reason` | string | why the gate is asking, when the policy layer has one to give |
+| `resolved` | string | for a write, the path after symlink resolution, when it differs from `detail` |
+
+`result.answer` is one of `"allow"`, `"allow_session"`, `"deny"` —
+`engine.ConsentAnswer`'s three values spelled out as text, the same way this protocol
+already renders `decision`, `source` and `stop`. A reply with no matching id (a race
+against a timeout, or a stray line) is dropped silently rather than reported as an
+error: the message was well-formed, it simply arrived for a question that had already
+settled one way or another.
+
+**A request that goes unanswered denies, after 60 seconds**, and is never treated as
+though granted (ADR-0016 decision 5). This is not yet configurable; see the ADR for why
+a flag was deferred rather than guessed at. A denial this way is attributed exactly like
+an explicit `"deny"` reply — see [Consent modes](#consent-modes) on `Source`.
 
 ## The `session.event` notification
 
@@ -176,7 +235,7 @@ The first four are JSON-RPC's reserved values; the server-defined ones sit in th
 | -32000 | unknown session | `session.submit`/`session.cancel` named an id with no open session |
 | -32001 | session exists | `session.start` named an id already open in this process |
 | -32002 | open failed | `engine.Open` refused: a bad model, a missing credential |
-| -32003 | usage error | the arm could not be resolved (an unknown model or harness) |
+| -32003 | usage error | the arm could not be resolved (an unknown model or harness); or `session.start`'s `consent_mode` is missing/unrecognised, or `"unattended_policy"` is requested without `containment_provided: true` (ADR-0016) |
 | -32005 | session locked | `session.start`'s `dir` is already held by another live session |
 
 `-32004` is retired: it was `session busy`, a `session.submit` while a turn was in flight,
@@ -195,25 +254,39 @@ serialize — they can never race the engine's context assembler, which belongs 
 the read loop (a fast, assembler-free local step), which keeps the read loop free during
 the turns themselves and is what makes a turn cancellable while it runs.
 
-## Flags, credentials, and consent
+## Flags and credentials
 
 `serve` takes no positional arguments — a task arrives over the wire as `session.start`'s
-prompt, never on the command line. All flags are process-level and apply to every session
-the process opens.
+prompt, never on the command line.
 
 | flag | meaning |
 |---|---|
-| `--policy-file <path>` | an ADR-0011 declared-allowlist policy governing shell/write consent; unset means refuse everything |
-| `--ask-policy-file <path>` | an ADR-0013/KAN-1028 ask-policy file whose note answers the model's `ask` calls; unset means the fixed "no human is present" refusal |
+| `--policy-file <path>` | an ADR-0011 declared-allowlist policy; content for any session that declares `consent_mode: "unattended_policy"` (below). Unset means refuse every shell command and write outside `dir` under that mode |
+| `--ask-policy-file <path>` | an ADR-0013/KAN-1028 ask-policy file whose note answers the model's `ask` calls, for every session regardless of `consent_mode`. Unset means the fixed "no human is present" refusal |
 | `--debug` | engine diagnostics on stderr (off by default) |
 
-- **Credentials** are read once from the process's environment (`OPENROUTER_API_KEY`), by
-  `engine.Open` exactly as every other surface reads it. The wire carries no credential
-  and no per-session override.
-- **Consent** is unattended: with no `--policy-file`, serve refuses shell and writes; with
-  no `--ask-policy-file`, it dead-ends `ask` — the same fail-closed defaults headless
-  `run --print` uses. Real containment of model-authored shell is the orchestrator's job,
-  not serve's (ADR-0008 / ADR-0011).
+**Credentials** are read once from the process's environment (`OPENROUTER_API_KEY`), by
+`engine.Open` exactly as every other surface reads it. The wire carries no credential and
+no per-session override.
+
+`ask` is untouched by ADR-0016: it stays process-level and identical under both consent
+modes below. Only the permission gate — `run_shell` and a write outside `dir` — is what
+`consent_mode` decides between.
+
+## Consent modes
+
+Every `session.start` must declare `consent_mode`. There is no default that grants
+capability (the same posture ADR-0011 decision 3 already held this surface to): an
+unconfigured invocation refuses everything, and a caller has to say explicitly which of
+the two mechanisms below it wants.
+
+### `"unattended_policy"` (ADR-0011)
+
+The process's `--policy-file` answers every permission check for this session, exactly
+as before ADR-0016 existed. The session.start call must also carry
+`containment_provided: true` — an explicit acknowledgment that the caller is supplying
+real process/container containment; kopicode never does this itself (ADR-0011 decision
+4). Omitting the acknowledgment is a usage error, not a silent proceed.
 
 A `--policy-file` has two keys, `root` (the absolute directory writes are confined to) and
 `allow` (a closed, exact-match set of permitted shell commands):
@@ -227,4 +300,21 @@ allow = [["/bin/sh", "-c", "go test ./..."]]
 command is written in exactly that argv shape and the command line is matched byte-for-byte
 — `[["go", "test", "./..."]]` never matches. Matching is deliberately exact (no prefix, no
 tokenising), so list every command the run will issue; a variation the model emits (an added
-flag, a `cd sub &&` prefix) is a different command line and is refused.
+flag, a `cd sub &&` prefix) is a different command line and is refused. This is by design,
+not an oversight to loosen: see
+[ADR-0016](adr/0016-live-remote-consent-for-agent-orchestrated-sessions.md)'s Context
+section for why the project has rejected loosening this match three times, and reaches
+for `"remote_interactive"` instead when a fixed allowlist is the wrong shape for the task.
+
+Every resulting `permission_decided` event is attributed `source: "policy"`.
+
+### `"remote_interactive"` (ADR-0016)
+
+Nothing is declared ahead of time. Every permission-requiring decision bubbles live to
+this client, per action, as a `consent.request` (above), and the client answers each one
+as it arrives. This is the mode for open-ended work, where an orchestrator cannot know
+in advance every command a model will phrase.
+
+Every resulting `permission_decided` event is attributed `source: "remote"` — never
+`"user"` or `"policy"`, because kopicode cannot verify whether a human or another model
+answered on the far end of the channel.

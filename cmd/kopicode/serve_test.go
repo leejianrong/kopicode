@@ -116,6 +116,30 @@ func (h *serveHarness) close() int {
 	}
 }
 
+// awaitRequest polls the collected messages until a server-initiated request
+// for method arrives — one carrying that method and an id, which is what tells
+// it apart from a notification (session.event carries a method but no id).
+// Returns the whole message so a caller can read its params and echo its id
+// back in a reply (ADR-0016's consent.request is this surface's first and, for
+// now, only such request).
+func (h *serveHarness) awaitRequest(method string) map[string]any {
+	h.t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		h.mu.Lock()
+		for _, m := range h.all {
+			if m["method"] == method && m["id"] != nil {
+				h.mu.Unlock()
+				return m
+			}
+		}
+		h.mu.Unlock()
+		time.Sleep(5 * time.Millisecond)
+	}
+	h.t.Fatalf("timed out waiting for a %s request", method)
+	return nil
+}
+
 // notificationsFor returns every session.event notification tagged with session.
 func (h *serveHarness) notificationsFor(session string) []map[string]any {
 	h.mu.Lock()
@@ -131,6 +155,26 @@ func (h *serveHarness) notificationsFor(session string) []map[string]any {
 		}
 	}
 	return out
+}
+
+// startPayload builds session.start's params with ADR-0016's now-required
+// consent_mode. "unattended_policy" plus containment_provided is every
+// existing test's actual behaviour from before that field existed — Consent
+// stays nil, ConsentMode is engine.ConsentUnattended, and base's Policy/
+// AskPolicy (or the fixed unattended-deny default) governs exactly as before —
+// so this is the default every test but the remote_interactive-specific ones
+// below should use. Extra params (model, harness, ...) merge in on top.
+func startPayload(session, dir, prompt string, extra ...map[string]any) map[string]any {
+	p := map[string]any{
+		"session": session, "dir": dir, "prompt": prompt,
+		"consent_mode": consentModeUnattendedPolicy, "containment_provided": true,
+	}
+	for _, e := range extra {
+		for k, v := range e {
+			p[k] = v
+		}
+	}
+	return p
 }
 
 func numEq(v any, want int) bool {
@@ -255,7 +299,7 @@ func TestServeStartRunsATurnAndTeesEvents(t *testing.T) {
 
 	h.send(map[string]any{
 		"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
-		"params": map[string]any{"session": "s1", "dir": t.TempDir(), "prompt": "why does it fail?"},
+		"params": startPayload("s1", t.TempDir(), "why does it fail?"),
 	})
 	resp := h.awaitResponse(1)
 
@@ -306,7 +350,7 @@ func TestServeSubmitContinuesAnOpenSession(t *testing.T) {
 
 	dir := t.TempDir()
 	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
-		"params": map[string]any{"session": "s1", "dir": dir, "prompt": "first"}})
+		"params": startPayload("s1", dir, "first")})
 	start := h.awaitResponse(1)
 	if start["error"] != nil {
 		t.Fatalf("session.start errored: %v", start["error"])
@@ -344,7 +388,7 @@ func TestServeCancelInterruptsAnInFlightTurn(t *testing.T) {
 	h := startServe(t, engine.Options{ProviderBaseURL: srv.URL})
 
 	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
-		"params": map[string]any{"session": "s1", "dir": t.TempDir(), "prompt": "loop forever"}})
+		"params": startPayload("s1", t.TempDir(), "loop forever")})
 
 	select {
 	case <-reached:
@@ -416,11 +460,11 @@ func TestServeRejectsAReusedSessionId(t *testing.T) {
 	h := startServe(t, engine.Options{ProviderBaseURL: srv.URL})
 
 	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
-		"params": map[string]any{"session": "s1", "dir": t.TempDir(), "prompt": "run"}})
+		"params": startPayload("s1", t.TempDir(), "run")})
 	<-reached // s1 is registered and its turn is in flight
 
 	h.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": methodSessionStart,
-		"params": map[string]any{"session": "s1", "dir": t.TempDir(), "prompt": "again"}})
+		"params": startPayload("s1", t.TempDir(), "again")})
 	resp := h.awaitResponse(2)
 	rpcErr, _ := resp["error"].(map[string]any)
 	if rpcErr == nil {
@@ -477,9 +521,9 @@ func TestServeRunsDifferentSessionsConcurrently(t *testing.T) {
 	h := startServe(t, engine.Options{ProviderBaseURL: srv.URL})
 
 	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
-		"params": map[string]any{"session": "s1", "dir": t.TempDir(), "prompt": "one"}})
+		"params": startPayload("s1", t.TempDir(), "one")})
 	h.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": methodSessionStart,
-		"params": map[string]any{"session": "s2", "dir": t.TempDir(), "prompt": "two"}})
+		"params": startPayload("s2", t.TempDir(), "two")})
 
 	awaitEntered(t, entered, "the first session's turn")
 	awaitEntered(t, entered, "the second session's turn (a global turn lock would hold it behind the first)")
@@ -517,7 +561,7 @@ func TestServeSerializesSameSessionTurns(t *testing.T) {
 
 	dir := t.TempDir()
 	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
-		"params": map[string]any{"session": "s1", "dir": dir, "prompt": "A"}})
+		"params": startPayload("s1", dir, "A")})
 	awaitEntered(t, entered, "turn A")
 
 	// B and C queue behind A rather than being rejected. Neither can reach the
@@ -561,7 +605,7 @@ func TestServeStartRefusesALockedWorkingTree(t *testing.T) {
 
 	dir := t.TempDir()
 	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
-		"params": map[string]any{"session": "s1", "dir": dir, "prompt": "first"}})
+		"params": startPayload("s1", dir, "first")})
 	if r := h.awaitResponse(1); r["error"] != nil {
 		t.Fatalf("the first session.start errored: %v", r["error"])
 	}
@@ -569,7 +613,7 @@ func TestServeStartRefusesALockedWorkingTree(t *testing.T) {
 	// s1 is still open and still holds dir's lock. A second session on the same
 	// tree is the collision internal/lock refuses.
 	h.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": methodSessionStart,
-		"params": map[string]any{"session": "s2", "dir": dir, "prompt": "second"}})
+		"params": startPayload("s2", dir, "second")})
 	resp := h.awaitResponse(2)
 	rpcErr, _ := resp["error"].(map[string]any)
 	if rpcErr == nil {
@@ -578,5 +622,121 @@ func TestServeStartRefusesALockedWorkingTree(t *testing.T) {
 	if !numEq(rpcErr["code"], codeSessionLocked) {
 		t.Errorf("error code = %v, want %d (codeSessionLocked)", rpcErr["code"], codeSessionLocked)
 	}
+	h.close()
+}
+
+// --- ADR-0016: consent_mode -------------------------------------------------
+
+// TestServeSessionStartRequiresAConsentMode: decision 3's "no default that
+// grants capability" — an omitted consent_mode is a usage error, refused
+// before engine.Open ever runs, not a silent fallback to either mode.
+func TestServeSessionStartRequiresAConsentMode(t *testing.T) {
+	h := startServe(t, engine.Options{})
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
+		"params": map[string]any{"session": "s1", "dir": t.TempDir(), "prompt": "hi"}})
+	resp := h.awaitResponse(1)
+	rpcErr, _ := resp["error"].(map[string]any)
+	if rpcErr == nil {
+		t.Fatalf("session.start with no consent_mode got no error: %v", resp)
+	}
+	if !numEq(rpcErr["code"], codeUsageError) {
+		t.Errorf("error code = %v, want %d (codeUsageError)", rpcErr["code"], codeUsageError)
+	}
+	h.close()
+}
+
+// TestServeSessionStartRejectsAnUnrecognisedConsentMode: neither of the two
+// declared values is not the same failure as omitting the field entirely (both
+// are refused, but a caller who mistyped the value gets told what it typed),
+// so this is proven as its own case rather than assumed to fall out of the
+// missing-field test.
+func TestServeSessionStartRejectsAnUnrecognisedConsentMode(t *testing.T) {
+	h := startServe(t, engine.Options{})
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
+		"params": map[string]any{
+			"session": "s1", "dir": t.TempDir(), "prompt": "hi", "consent_mode": "yolo",
+		}})
+	resp := h.awaitResponse(1)
+	rpcErr, _ := resp["error"].(map[string]any)
+	if rpcErr == nil {
+		t.Fatalf("session.start with consent_mode \"yolo\" got no error: %v", resp)
+	}
+	if !numEq(rpcErr["code"], codeUsageError) {
+		t.Errorf("error code = %v, want %d (codeUsageError)", rpcErr["code"], codeUsageError)
+	}
+	h.close()
+}
+
+// TestServeUnattendedPolicyRequiresContainmentAcknowledgment: ADR-0011
+// decision 4's containment requirement, made a wire-level usage error rather
+// than a trust-the-caller assumption — requesting unattended_policy without
+// containment_provided: true is refused exactly like a missing consent_mode.
+func TestServeUnattendedPolicyRequiresContainmentAcknowledgment(t *testing.T) {
+	h := startServe(t, engine.Options{})
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
+		"params": map[string]any{
+			"session": "s1", "dir": t.TempDir(), "prompt": "hi",
+			"consent_mode": consentModeUnattendedPolicy,
+		}})
+	resp := h.awaitResponse(1)
+	rpcErr, _ := resp["error"].(map[string]any)
+	if rpcErr == nil {
+		t.Fatalf("unattended_policy with no containment_provided got no error: %v", resp)
+	}
+	if !numEq(rpcErr["code"], codeUsageError) {
+		t.Errorf("error code = %v, want %d (codeUsageError)", rpcErr["code"], codeUsageError)
+	}
+	h.close()
+}
+
+// TestServeRemoteInteractiveAsksTheClientForConsent is the end-to-end proof of
+// ADR-0016's actual wire: a session declaring consent_mode: remote_interactive
+// runs a turn whose model reply calls run_shell, and instead of the usual
+// declared-allowlist/deny path, the server sends a consent.request naming the
+// session, the kind and the command, blocks the turn on it, and — once the
+// client replies allow — the shell actually runs and the turn completes,
+// proving the answer reached the permission gate rather than being ignored.
+func TestServeRemoteInteractiveAsksTheClientForConsent(t *testing.T) {
+	t.Setenv(engine.APIKeyEnv, "kopicode-test-credential")
+	srv := scriptedProvider(t,
+		sseToolCall("call-1", "run_shell", `{"command":"echo hi"}`),
+		sseBody("done"),
+	)
+	h := startServe(t, engine.Options{ProviderBaseURL: srv.URL})
+
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
+		"params": map[string]any{
+			"session": "s1", "dir": t.TempDir(), "prompt": "run a command",
+			"consent_mode": consentModeRemoteInteractive,
+		}})
+
+	req := h.awaitRequest(methodConsentRequest)
+	params, _ := req["params"].(map[string]any)
+	if params["session"] != "s1" {
+		t.Errorf("consent.request params.session = %v, want s1", params["session"])
+	}
+	if params["kind"] != "run_shell" {
+		t.Errorf("consent.request params.kind = %v, want run_shell", params["kind"])
+	}
+
+	h.send(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{"answer": "allow"}})
+
+	resp := h.awaitResponse(1)
+	if resp["error"] != nil {
+		t.Fatalf("session.start errored: %v", resp["error"])
+	}
+	result, _ := resp["result"].(map[string]any)
+	if result["stop"] != "completed" {
+		t.Errorf("stop = %v, want completed: %v", result["stop"], resp)
+	}
+
+	kinds := eventKinds(h.notificationsFor("s1"))
+	if !hasKind(kinds, "permission_decided") {
+		t.Errorf("no permission_decided event; the allowed shell command's decision is not on the record: %v", kinds)
+	}
+	if !hasKind(kinds, "tool_result") {
+		t.Errorf("no tool_result event; the allowed shell command never ran: %v", kinds)
+	}
+
 	h.close()
 }

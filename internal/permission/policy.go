@@ -39,12 +39,15 @@ type Asker interface {
 // AskPolicy forwards every request to an [Asker] and attributes the answer to
 // the [Source] it was built with.
 //
-// The same shape serves two surfaces that are not the same thing: a human at a
-// REPL, whose answers are [SourceUser], and `kopicode run --print`, which has
-// no human at all and answers its own questions (denying every one of them,
+// The same shape serves surfaces that are not the same thing: a human at a
+// REPL, whose answers are [SourceUser]; `kopicode run --print`, which has no
+// human at all and answers its own questions (denying every one of them,
 // today) through the identical [Consenter]-shaped path — its answers are
-// [SourcePolicy]. The asker does not know which one it is; the source is what
-// the caller of [NewAsk] tells this policy to stamp, so a headless answer is
+// [SourcePolicy]; and `kopicode serve`'s live remote consenter (ADR-0016),
+// which asks whatever is driving the session over the wire and stamps
+// [SourceRemote], because kopicode cannot verify a human answered on the far
+// end. The asker does not know which one it is; the source is what the caller
+// of [NewAsk] tells this policy to stamp, so a headless or remote answer is
 // never recorded as though a person gave it (KAN-885). That is the mirror of
 // the concern journal.PermissionDecided's own doc comment raises about
 // auto-approval: an unattributed "yes" is not a yes anyone can be held to, and
@@ -57,18 +60,19 @@ type AskPolicy struct {
 
 // NewAsk builds a policy over asker that attributes every answer to source.
 //
-// source must be [SourceUser] or [SourcePolicy] — the only two callers this
-// package knows how to build, a human surface or a headless one answering its
-// own question. Anything else, including the zero [SourceUnspecified], is
-// refused: a policy that could not say who it speaks for would produce
+// source must be [SourceUser], [SourcePolicy], or [SourceRemote] — the three
+// callers this package knows how to build: a human surface, a headless one
+// answering its own question, or a live peer answering over a bidirectional
+// channel (ADR-0016). Anything else, including the zero [SourceUnspecified],
+// is refused: a policy that could not say who it speaks for would produce
 // decisions the gate cannot attribute, which is exactly the failure
 // [Gate.Check] already refuses at the point it reads [Decision.Source].
 func NewAsk(asker Asker, source Source) (*AskPolicy, error) {
 	if asker == nil {
 		return nil, errors.New("permission: asker is required")
 	}
-	if source != SourceUser && source != SourcePolicy {
-		return nil, fmt.Errorf("permission: NewAsk source must be SourceUser or SourcePolicy, got %s", source)
+	if source != SourceUser && source != SourcePolicy && source != SourceRemote {
+		return nil, fmt.Errorf("permission: NewAsk source must be SourceUser, SourcePolicy, or SourceRemote, got %s", source)
 	}
 	return &AskPolicy{asker: asker, source: source}, nil
 }

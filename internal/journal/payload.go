@@ -466,8 +466,11 @@ type PermissionDecided struct {
 	RequestID string `json:"request_id"`
 	// Decision is "allow", "deny" or "allow_session".
 	Decision string `json:"decision"`
-	// Source is "user" or "policy" — a bench run's auto-approval must not be
-	// indistinguishable from a human saying yes.
+	// Source is "user", "policy", or "remote" (ADR-0016: a live answer relayed
+	// over a bidirectional channel, e.g. kopicode serve's remote consenter) —
+	// a bench run's auto-approval must not be indistinguishable from a human
+	// saying yes, and a live remote answer must not be indistinguishable from
+	// either.
 	Source string `json:"source"`
 	Reason string `json:"reason,omitempty"`
 }
