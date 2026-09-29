@@ -209,6 +209,16 @@ numbers exist (`docs/paired-ab-*`); `slog` runs inside the engine
 Do not add a test count here — it goes stale on the next PR. `make test` prints the
 real number; a red suite, not a changed count, is the signal something is wrong.
 
+## Direction: a tagged release and a downloadable binary
+
+The goal is that a user downloads one binary and uses kopicode — no Go toolchain, no
+`go install`. That means a tagged semver release, per-platform binaries with checksums
+published by a release workflow, and install instructions in the README. `make xbuild`
+already cross-compiles every target; what is missing is the tag, the publishing, and a
+versioning policy (`internal/build` currently falls back to a pseudo-version).
+Tracked as KAN-1796. Prefer choices that move toward this, and don't add an install
+step that assumes a compiler.
+
 ## Decisions of record — read before proposing anything
 
 Sixteen ADRs exist; two reverse earlier plans that still appear in older project
