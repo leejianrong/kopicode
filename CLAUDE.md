@@ -459,6 +459,10 @@ rather than recorded from a real run.
 - [`docs/kopicode-serve-protocol.md`](docs/kopicode-serve-protocol.md) — the
   `kopicode serve` wire: NDJSON JSON-RPC 2.0, the three methods, the event
   notification, the error codes, and the policy/ask flags
+- [`docs/run-print-protocol.md`](docs/run-print-protocol.md) — the `run --print` wire
+  for a headless consumer: the NDJSON schema, the full stable `exit_code`/`reason`
+  vocabulary, and where the underlying failure detail (a provider's HTTP status and
+  body, a harness error's own message) actually lands on the stream
 - [`docs/token-growth.md`](docs/token-growth.md) — real per-turn context growth from
   two dogfood sessions (KAN-935/947); what it does and doesn't say about compaction
 - [`README.md`](README.md) — the thesis, where the harness gains are, the model table

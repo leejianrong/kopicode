@@ -90,6 +90,16 @@ import (
 // an unknown model, a missing credential — where stdout is empty by design and
 // the reason is on stderr.
 //
+// **`session_ended`'s `text` field is the diagnostic, not just `reason`.**
+// Whenever the stop is not a plain `completed`, `text` carries the failure as the
+// loop saw it — a provider's HTTP status and body, a rejected verification
+// command, a harness error's own message — verbatim, the same string `run
+// --print` also writes to stderr as its one-line summary. A consumer does not
+// need `--debug` and a separate stderr capture to tell an expired credential
+// apart from a provider outage apart from a model tool failure: it is already on
+// this line. See docs/run-print-protocol.md for the full, stable
+// `exit_code`/`reason` vocabulary and a worked example.
+//
 // # Compatibility
 //
 // The schema is versioned from its first commit because a headless surface is a
