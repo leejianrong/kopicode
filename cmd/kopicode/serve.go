@@ -94,24 +94,67 @@ import (
 // request would reopen ADR-0007 decision 6's hash-preimage discipline and the
 // API-key redaction discipline for a brand-new path, with no caller needing it.
 //
-// # Permissions and ask: ADR-0011's flags, reused (decision 5)
+// # Permissions: a required per-session consent_mode (ADR-0016)
 //
-// `--policy-file` works exactly as under `run --print` — the same
-// AllowlistFile grammar and fail-closed default — and `--ask-policy-file`
-// (KAN-1028) supplies the declared ask answer. Both are process-level and apply
-// to every session this process opens; with neither passed, serve refuses shell
-// and writes and dead-ends ask, the same unattended default headless already
-// uses.
+// Every session.start must declare consent_mode, one of two values, with no
+// default that grants capability (mirroring ADR-0011 decision 3's own "an
+// unconfigured invocation is exactly as safe as before" posture):
+//
+//   - "remote_interactive" — every permission-requiring decision bubbles live
+//     to this client, per action, over a new server-to-client consent.request
+//     (below). Nothing is declared ahead of time; the client answers each one
+//     as it arrives.
+//   - "unattended_policy" — ADR-0011's existing declared allowlist
+//     (--policy-file) answers instead, exactly as before this ADR, but the
+//     session.start call must also carry containment_provided: true — an
+//     explicit acknowledgment that the caller is supplying real
+//     process/container containment (ADR-0011 decision 4 is unchanged: this
+//     package never does that itself). Omitting consent_mode entirely, or
+//     requesting "unattended_policy" without the acknowledgment, is a startup
+//     usage error, refused before engine.Open runs.
+//
+// --ask-policy-file (KAN-1028) is untouched by this and stays process-level:
+// ADR-0016 only reopens the Consenter/permission half of consent, not the ask
+// tool's.
+//
+// # consent.request: the one server-initiated request on this wire
+//
+// Every other message from server to client is a notification (session.event)
+// or a response to something the client asked. consent.request is the
+// exception: the server mints its own id, sends a request, and blocks the
+// turn until a matching reply arrives or a bounded timeout elapses (ADR-0016
+// decision 5), denying on either a timeout or a malformed/refused reply —
+// never treated as though granted.
+//
+//	--> {"jsonrpc":"2.0","id":"c-1","method":"consent.request","params":{"session":"s1","kind":"run_shell","tool":"run_shell","detail":"uv run pytest -v","reason":"remote_interactive","resolved":""}}
+//	<-- {"jsonrpc":"2.0","id":"c-1","result":{"answer":"allow"}}
+//
+// result.answer is one of "allow", "allow_session", "deny" —
+// engine.ConsentAnswer's three values, spelled out the way every other enum on
+// this wire is (decision, source, stop). Every resulting
+// journal.PermissionDecided is stamped permission.SourceRemote, never
+// SourceUser or SourcePolicy: kopicode cannot verify who or what answered on
+// the far end of the channel.
 
 // jsonrpcVersion is the only "jsonrpc" value this surface accepts or emits.
 const jsonrpcVersion = "2.0"
 
-// The methods a client calls, and the one notification the server sends back.
+// The methods a client calls, the one notification the server sends back, and
+// the one request the server itself initiates (ADR-0016).
 const (
-	methodSessionStart  = "session.start"
-	methodSessionSubmit = "session.submit"
-	methodSessionCancel = "session.cancel"
-	methodSessionEvent  = "session.event" // server → client notification
+	methodSessionStart   = "session.start"
+	methodSessionSubmit  = "session.submit"
+	methodSessionCancel  = "session.cancel"
+	methodSessionEvent   = "session.event"   // server → client notification
+	methodConsentRequest = "consent.request" // server → client request
+)
+
+// The two consent_mode values session.start accepts (ADR-0016 decision 3).
+// There is no third "default" value: consent_mode is required, and a missing
+// or unrecognised one is a usage error, not a fallback.
+const (
+	consentModeRemoteInteractive = "remote_interactive"
+	consentModeUnattendedPolicy  = "unattended_policy"
 )
 
 // JSON-RPC error codes. The first four are the spec's reserved values; the
@@ -133,13 +176,28 @@ const (
 	codeSessionLocked = -32005 // session.start's dir is already held by another live session (internal/lock)
 )
 
-// rpcRequest is one line from the client. Params stays raw so each method
+// rpcRequest is one client-to-server line. Params stays raw so each method
 // decodes its own shape and a params error is that method's to report.
 type rpcRequest struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id,omitempty"`
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params,omitempty"`
+}
+
+// rpcLine is every field an inbound line might carry, decoded once so
+// handleLine can tell which of two shapes it is before committing to either: a
+// client-to-server request (Method set, Result/Error absent) or a client's
+// reply to a server-initiated consent.request (Result or Error set, Method
+// absent — ADR-0016). Every rpcRequest field name and tag matches this
+// struct's, so a request line converts to one with a plain field copy.
+type rpcLine struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id,omitempty"`
+	Method  string          `json:"method,omitempty"`
+	Params  json.RawMessage `json:"params,omitempty"`
+	Result  json.RawMessage `json:"result,omitempty"`
+	Error   *rpcError       `json:"error,omitempty"`
 }
 
 // rpcResponse answers one request. Exactly one of Result and Error is set; the
@@ -163,6 +221,18 @@ type rpcNotification struct {
 	Params  any    `json:"params"`
 }
 
+// rpcRequestOut is a server → client request: the mirror of rpcRequest, for
+// the one shape a notification (no id, no reply expected) cannot carry.
+// consent.request (ADR-0016) is the only user of this today. The id is minted
+// by the server rather than echoed, which is why this is a distinct type
+// rather than rpcRequest reused.
+type rpcRequestOut struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      json.RawMessage `json:"id"`
+	Method  string          `json:"method"`
+	Params  any             `json:"params"`
+}
+
 // startParams, submitParams and cancelParams are the three methods' inputs.
 type startParams struct {
 	Session string `json:"session"`
@@ -174,6 +244,20 @@ type startParams struct {
 	// same axis Harness chooses; a relative path resolves against Dir. Naming
 	// both is a usage error, decided in engine.ResolveSelection.
 	HarnessConfig string `json:"harness_config"`
+
+	// ConsentMode is ADR-0016 decision 3's required declaration:
+	// consentModeRemoteInteractive or consentModeUnattendedPolicy. There is no
+	// default — omitting it, or naming anything else, is a startup usage error
+	// (codeUsageError), refused before engine.Open runs. See buildConsentOptions.
+	ConsentMode string `json:"consent_mode"`
+
+	// ContainmentProvided is required, and must be true, when ConsentMode is
+	// consentModeUnattendedPolicy: the caller's explicit acknowledgment that it
+	// is supplying real process/container containment for this session
+	// (ADR-0011 decision 4 — this package never does that itself). Ignored
+	// when ConsentMode is consentModeRemoteInteractive, which carries no
+	// equivalent requirement.
+	ContainmentProvided bool `json:"containment_provided"`
 }
 
 type submitParams struct {
@@ -313,6 +397,15 @@ type server struct {
 	mu       sync.Mutex
 	sessions map[string]*servedSession
 	wg       sync.WaitGroup
+
+	// consentMu, consentSeq and pending back every remoteConsenter's blocking
+	// round trip (ADR-0016, see serve_consent.go). Deliberately a separate lock
+	// from mu: a consent wait has nothing to do with session bookkeeping, and
+	// sharing one lock would make a turn blocked on a remote answer contend
+	// with the read loop dispatching session.cancel for an unrelated session.
+	consentMu  sync.Mutex
+	consentSeq int64
+	pending    map[string]chan consentReply
 }
 
 // servedSession is one open engine session and its queue of turns to run. A
@@ -365,16 +458,34 @@ func (s *server) run(stdin io.Reader) int {
 // handleLine parses and dispatches one message. A request with an id gets
 // exactly one response; a parse failure or an unknown method is reported against
 // whatever id could be recovered (null when even that failed).
+//
+// A method-less line is one of two things, not one: the ordinary malformed
+// case (nothing on this wire sends such a line deliberately), or a client's
+// reply to a server-initiated consent.request (ADR-0016) — which carries a
+// result or an error but never a method, the same shape JSON-RPC gives every
+// response. deliverReply tries the second reading first; only a line that is
+// neither a request nor a recognisable reply falls through to the original
+// refusal.
 func (s *server) handleLine(line string) {
-	var req rpcRequest
-	if err := json.Unmarshal([]byte(line), &req); err != nil {
+	var raw rpcLine
+	if err := json.Unmarshal([]byte(line), &raw); err != nil {
 		s.writeError(nil, codeParseError, fmt.Sprintf("not valid JSON: %v", err))
 		return
 	}
-	if req.Method == "" {
-		s.writeError(req.ID, codeInvalidRequest, "request has no method")
+	if raw.Method == "" {
+		if raw.Result != nil || raw.Error != nil {
+			// A well-formed reply, whether or not anything is still waiting
+			// for it — a late answer after a timeout or a cancelled turn has
+			// nothing to deliver to and is dropped silently rather than
+			// reported as malformed, since the message itself was never
+			// wrong.
+			s.deliverConsentReply(raw)
+			return
+		}
+		s.writeError(raw.ID, codeInvalidRequest, "request has no method")
 		return
 	}
+	req := rpcRequest{JSONRPC: raw.JSONRPC, ID: raw.ID, Method: raw.Method, Params: raw.Params}
 
 	switch req.Method {
 	case methodSessionStart:
@@ -443,7 +554,10 @@ func (s *server) dispatchStart(req rpcRequest) {
 	opts.SessionID = p.Session
 	opts.Selection = selection
 	opts.Events = s.notifier(p.Session)
-	s.applyUnattendedAnswerers(&opts)
+	if rerr := s.buildConsentOptions(p, &opts); rerr != nil {
+		s.writeError(req.ID, rerr.Code, rerr.Message)
+		return
+	}
 
 	sess, err := engine.Open(s.ctx, opts)
 	if err != nil {
@@ -582,17 +696,46 @@ func (s *server) handleCancel(req rpcRequest) {
 	s.writeResult(req.ID, cancelResult{Session: p.Session, Cancelled: true})
 }
 
-// --- unattended answerers ---------------------------------------------------
+// --- consent modes (ADR-0016) ------------------------------------------------
 
-// applyUnattendedAnswerers wires the consent and ask answerers for a surface
-// with nobody at a terminal, exactly as headless does. Policy/AskPolicy from the
-// process flags win where set (they are already on opts via s.base); otherwise
-// the fail-closed defaults apply: refuse shell/writes, dead-end ask.
-func (s *server) applyUnattendedAnswerers(opts *engine.Options) {
-	// Consent: nil Consenter + ConsentUnattended is engine.Open's headless case
-	// (permission.NewUnattendedDeny) when Policy is unset; when Policy is set it
-	// governs instead. Either way no human is attributed a decision (KAN-885).
-	opts.ConsentMode = engine.ConsentUnattended
+// buildConsentOptions resolves session.start's required consent_mode into the
+// Consent/ConsentMode fields engine.Open reads, replacing the old
+// process-wide, unconditional applyUnattendedAnswerers. It returns a non-nil
+// *rpcError for a missing or unrecognised consent_mode, or a
+// consentModeUnattendedPolicy request with no containment_provided
+// acknowledgment — every case a startup usage error, decided and returned
+// before engine.Open is ever called, the same ordering ADR-0007 decision 4
+// holds every other surface to.
+//
+// Ask/AskMode are wired identically under both modes — ADR-0016 reopens only
+// the Consenter/permission half of consent, not the ask tool's, so a declared
+// AskPolicy from the process flags still wins where set, and the fixed
+// headless refusal still answers otherwise, exactly as before this ADR.
+func (s *server) buildConsentOptions(p startParams, opts *engine.Options) *rpcError {
+	switch p.ConsentMode {
+	case consentModeUnattendedPolicy:
+		if !p.ContainmentProvided {
+			return &rpcError{Code: codeUsageError, Message: fmt.Sprintf(
+				"session.start's consent_mode is %q but containment_provided is not true; ADR-0011 "+
+					"decision 4 requires the caller to explicitly acknowledge it is supplying real "+
+					"process/container containment for this session", consentModeUnattendedPolicy)}
+		}
+		// Policy (ADR-0011's declared allowlist, from --policy-file) answers
+		// instead of Consent when it is set on s.base; Consent stays nil either
+		// way. No human is attributed a decision either path (KAN-885).
+		opts.ConsentMode = engine.ConsentUnattended
+
+	case consentModeRemoteInteractive:
+		rc := newRemoteConsenter(s, p.Session)
+		opts.Consent = rc.Ask
+		opts.ConsentMode = engine.ConsentRemote
+
+	default:
+		return &rpcError{Code: codeUsageError, Message: fmt.Sprintf(
+			"session.start needs a consent_mode of %q or %q; got %q",
+			consentModeRemoteInteractive, consentModeUnattendedPolicy, p.ConsentMode)}
+	}
+
 	if opts.AskPolicy == nil {
 		// No declared ask policy: dead-end ask the way headless does, attributed
 		// to the policy since nobody was asked (ADR-0009 decision 4).
@@ -601,6 +744,7 @@ func (s *server) applyUnattendedAnswerers(opts *engine.Options) {
 	}
 	// When AskPolicy is set, Ask must stay nil — Open refuses both at once — and
 	// mustAnswerer attributes the answer to the policy on its own (KAN-1028).
+	return nil
 }
 
 // --- writing the wire -------------------------------------------------------

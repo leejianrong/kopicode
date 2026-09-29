@@ -124,7 +124,7 @@ func TestServeRunsAResidentSessionOverManyTurns(t *testing.T) {
 
 	dir := t.TempDir()
 	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
-		"params": map[string]any{"session": "s1", "dir": dir, "prompt": "first"}})
+		"params": startPayload("s1", dir, "first")})
 	start := completedTurn(t, h, 1)
 	record, _ := start["record"].(string)
 	recordDirExists(t, record)
@@ -168,7 +168,7 @@ func TestServeSessionSurvivesACancelAndContinues(t *testing.T) {
 
 	dir := t.TempDir()
 	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
-		"params": map[string]any{"session": "s1", "dir": dir, "prompt": "loop forever"}})
+		"params": startPayload("s1", dir, "loop forever")})
 	<-reached
 
 	h.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": methodSessionCancel,
@@ -203,9 +203,9 @@ func TestServeRunsConcurrentSessionsInOneProcess(t *testing.T) {
 	h := startServe(t, engine.Options{ProviderBaseURL: srv.URL})
 
 	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
-		"params": map[string]any{"session": "s1", "dir": t.TempDir(), "prompt": "one"}})
+		"params": startPayload("s1", t.TempDir(), "one")})
 	h.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": methodSessionStart,
-		"params": map[string]any{"session": "s2", "dir": t.TempDir(), "prompt": "two"}})
+		"params": startPayload("s2", t.TempDir(), "two")})
 	r1 := completedTurn(t, h, 1)
 	r2 := completedTurn(t, h, 2)
 
@@ -249,11 +249,11 @@ func TestServeLockCollisionLeavesTheProcessUsable(t *testing.T) {
 
 	dir := t.TempDir()
 	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
-		"params": map[string]any{"session": "s1", "dir": dir, "prompt": "first"}})
+		"params": startPayload("s1", dir, "first")})
 	completedTurn(t, h, 1)
 
 	h.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": methodSessionStart,
-		"params": map[string]any{"session": "s2", "dir": dir, "prompt": "second"}})
+		"params": startPayload("s2", dir, "second")})
 	resp := h.awaitResponse(2)
 	rpcErr, _ := resp["error"].(map[string]any)
 	if rpcErr == nil {

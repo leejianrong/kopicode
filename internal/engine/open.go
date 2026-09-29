@@ -315,6 +315,26 @@ const (
 	// while Consent really does put the question to a person just misattributes
 	// in the opposite direction.
 	ConsentUnattended
+
+	// ConsentRemote says Consent's answers come from a live peer on the other
+	// end of a bidirectional channel — an orchestrator like cuttlefish, or
+	// another model — rather than a human at this process's own terminal or the
+	// harness answering its own pre-declared question (ADR-0016). Every
+	// PermissionDecided this session journals is stamped permission.SourceRemote,
+	// because kopicode cannot verify whether a human or another model answered
+	// on the far end: attributing it as SourceUser would overclaim a guarantee
+	// this mechanism cannot check, and SourcePolicy would misrepresent a live,
+	// ad hoc answer as a pre-declared rule match.
+	//
+	// A caller that sets this must also supply a non-nil Consent — [Open]
+	// refuses the combination of ConsentRemote with a nil Consent outright,
+	// unlike ConsentUnattended, which has exactly one legitimate nil-Consent
+	// case ([mustAskPolicy]'s doc comment explains why). There is no equivalent
+	// "nobody wired a remote consenter, so deny everything" case here: a caller
+	// declaring ConsentRemote without supplying one has not stated a mode, it
+	// has left out the mechanism the mode names, which is a front-end bug the
+	// same way [Policy] plus a nil resolver would be.
+	ConsentRemote
 )
 
 // SnapshotMode says whether a session records the tree after a turn that could
@@ -509,6 +529,12 @@ func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session,
 			"different answerers for the same question ('may this action proceed') and this package will "+
 			"not guess which one a caller meant — leave Consent nil when using Options.Policy "+
 			"(docs/adr/0011-unattended-invocation-policy-gate.md)", ErrConfig)
+	}
+	if opts.ConsentMode == ConsentRemote && opts.Consent == nil {
+		return nil, fmt.Errorf("%w: Options.ConsentMode is ConsentRemote but Options.Consent is nil; "+
+			"ConsentRemote names a mechanism (a live consenter on the other end of a bidirectional "+
+			"channel), not a mode that can answer on its own — a caller declaring it must supply the "+
+			"consenter (docs/adr/0016-live-remote-consent-for-agent-orchestrated-sessions.md)", ErrConfig)
 	}
 	if opts.AskPolicy != nil && opts.Ask != nil {
 		return nil, fmt.Errorf("%w: Options.AskPolicy is set together with Options.Ask; these are two "+
@@ -825,10 +851,13 @@ func gatePolicy(opts Options, resolver permission.Resolver) (permission.Policy, 
 }
 
 // mustAskPolicy builds the policy that forwards to Consent, attributing every
-// answer per mode (KAN-885). permission.NewAsk refuses a nil asker, and this
-// one is never nil: a nil Consenter is handled inside, by denying and saying
-// so, which keeps "nobody wired consent" distinct from "consent was refused"
-// on the record.
+// answer per mode (KAN-885; ADR-0016 adds the third, [ConsentRemote]).
+// permission.NewAsk refuses a nil asker, and this one is never nil: a nil
+// Consenter is handled inside, by denying and saying so, which keeps "nobody
+// wired consent" distinct from "consent was refused" on the record.
+// [ConsentRemote] with a nil Consenter never reaches this function —
+// [openSession] refuses that combination outright — so its only job here is
+// the source stamp.
 //
 // A nil Consenter under [ConsentUnattended] is handled differently again, and
 // on purpose (KAN-953's self-drive PoC is why): that combination names
@@ -846,14 +875,17 @@ func mustAskPolicy(c Consenter, mode ConsentMode) permission.Policy {
 		return permission.NewUnattendedDeny()
 	}
 	source := permission.SourceUser
-	if mode == ConsentUnattended {
+	switch mode {
+	case ConsentUnattended:
 		source = permission.SourcePolicy
+	case ConsentRemote:
+		source = permission.SourceRemote
 	}
 	p, err := permission.NewAsk(asker{consent: c}, source)
 	if err != nil {
 		// Unreachable: asker{} is a non-nil value whatever c is, and source is
-		// always one of the two permission.NewAsk accepts. A panic rather than
-		// a swallowed error, because the alternative would be a session
+		// always one of the three permission.NewAsk accepts. A panic rather
+		// than a swallowed error, because the alternative would be a session
 		// running with no policy at all.
 		panic("engine: building the consent policy: " + err.Error())
 	}

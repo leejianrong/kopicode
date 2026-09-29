@@ -219,12 +219,22 @@ const (
 
 	// SourcePolicy is the harness answering without a human.
 	SourcePolicy
+
+	// SourceRemote is a live answer relayed over a bidirectional channel from
+	// whatever is driving the session (ADR-0016) — an orchestrator like
+	// cuttlefish, or another model. It is deliberately distinct from both of
+	// the above: kopicode cannot verify whether a human or another model
+	// answered on the far end, so attributing it as SourceUser would overclaim
+	// a guarantee this mechanism cannot check, and SourcePolicy would
+	// misrepresent a live, ad hoc answer as a pre-declared rule match.
+	SourceRemote
 )
 
 var sourceText = map[Source]string{
 	SourceUnspecified: "unspecified",
 	SourceUser:        "user",
 	SourcePolicy:      "policy",
+	SourceRemote:      "remote",
 }
 
 // String returns the journal wire value for the source.
