@@ -77,8 +77,16 @@ jobs:
               fi
             done
           done
+          # One checksum file for every asset, names relative to the release page
+          # (no path prefix) so `sha256sum -c SHA256SUMS` works from a directory
+          # of downloads and scripts/install.sh can look an asset up by name.
+          # This catches a corrupted or truncated download; it is NOT a defence
+          # against a compromised release, since the sums are served from the
+          # same place as the binaries.
+          (cd release-assets && sha256sum -- * > SHA256SUMS)
           echo "staged assets:"
           ls -la release-assets
+          cat release-assets/SHA256SUMS
 
       # gh is preinstalled on GitHub-hosted runners and talks to the same
       # repository through the built-in GITHUB_TOKEN, so this needs no
