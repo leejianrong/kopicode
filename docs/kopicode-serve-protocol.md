@@ -84,10 +84,11 @@ method-less line carrying a `result` or an `error` is read as a reply and routed
 whatever is waiting on that id; one carrying neither is the ordinary "request has no
 method" refusal.
 
-## The three methods
+## The four methods
 
-The set is fixed at ADR-0013 decision 3's three: there is no `session.close` (a session
-lives until the process shuts down), no listing call, and no credential in any params.
+ADR-0013 decision 3 fixed three; `session.close` (KAN-1795) is the fourth. There is
+still no listing call and no credential in any params. A session lives until it is
+closed with `session.close` or the process shuts down.
 
 ### `session.start`
 
@@ -147,6 +148,22 @@ still acknowledged.
 signal was delivered; the cancelled turn reports its own `stop: "cancelled"` through its
 own `session.start`/`session.submit` response.
 
+### `session.close`
+
+Ends **one** session while the process stays up. The close queues behind any turns the
+session has already accepted, so they run to completion and answer first (send
+`session.cancel` first to end it immediately). Once accepted, a further `session.submit`
+to that session is refused with `-32000`. The session's `session_ended` is then written
+and announced as a `session.event` — its `text` carries the failure detail for a turn that
+did not complete cleanly — the working-tree lock is released, and the id is free to
+`session.start` again. The response follows the announcement.
+
+| param | type | required | meaning |
+|---|---|---|---|
+| `session` | string | yes | an open session's id |
+
+**Result**: `{ "session": "...", "closed": true }`.
+
 ## `consent.request` (server → client, ADR-0016)
 
 Sent only for a session whose `consent_mode` is `"remote_interactive"`. Every
@@ -200,7 +217,8 @@ turn as it runs.
 - Streaming text deltas are dropped: they are not in the record, and this stream carries
   only what the record holds. The reconciled `assistant_message` is emitted when the turn
   settles.
-- `session_ended` for every open session is emitted at shutdown (stdin close), the
+- `session_ended` is emitted when a session is closed with `session.close`, and for every
+  session still open at shutdown (stdin close), the
   record's other bookend.
 
 The notification stream is the journal's projection, not a second transcript: everything
@@ -230,12 +248,13 @@ The first four are JSON-RPC's reserved values; the server-defined ones sit in th
 |---|---|---|
 | -32700 | parse error | a line that is not valid JSON |
 | -32600 | invalid request | a message with no method |
-| -32601 | method not found | a method outside the three above |
+| -32601 | method not found | a method outside the four above |
 | -32602 | invalid params | a method's params are missing or malformed |
-| -32000 | unknown session | `session.submit`/`session.cancel` named an id with no open session |
+| -32000 | unknown session | `session.submit`/`session.cancel`/`session.close` named an id with no open session, or `session.submit` named one whose close is already accepted |
 | -32001 | session exists | `session.start` named an id already open in this process |
 | -32002 | open failed | `engine.Open` refused: a bad model, a missing credential |
 | -32003 | usage error | the arm could not be resolved (an unknown model or harness); or `session.start`'s `consent_mode` is missing/unrecognised, or `"unattended_policy"` is requested without `containment_provided: true` (ADR-0016) |
+| -32603 | internal error | `session.close` could not write the session's `session_ended` |
 | -32005 | session locked | `session.start`'s `dir` is already held by another live session |
 
 `-32004` is retired: it was `session busy`, a `session.submit` while a turn was in flight,
