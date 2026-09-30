@@ -47,6 +47,17 @@ need_cmd() {
 
 need_cmd curl
 
+# Checksum verification (SHA256SUMS, published by release.yml) needs a hasher:
+# sha256sum on Linux, shasum on macOS. Neither is a hard requirement — see
+# verify_asset — but say so once up front rather than per binary.
+if command -v sha256sum >/dev/null 2>&1; then
+    HASHER="sha256sum"
+elif command -v shasum >/dev/null 2>&1; then
+    HASHER="shasum -a 256"
+else
+    HASHER=""
+fi
+
 # --- detect platform -------------------------------------------------------
 #
 # Only linux/darwin, only amd64/arm64: the same PLATFORMS the Makefile
@@ -104,6 +115,35 @@ tag=$(printf '%s' "$release_json" | grep -m1 '"tag_name"' | sed -E 's/.*"tag_nam
 [ -n "$tag" ] || err "could not parse a release tag from the GitHub API response"
 info "latest release: ${tag}"
 
+# --- checksums ---------------------------------------------------------------
+#
+# Releases from v0.2.0 on attach a SHA256SUMS file. A mismatch always fails: a
+# truncated or corrupted download must never land on the user's PATH. A release
+# with no SHA256SUMS (v0.1.0, cut before this existed) or a machine with no
+# hasher installs with a loud warning instead, because refusing would make the
+# latest release uninstallable rather than safer. This catches damage in
+# transit; it does not defend against a compromised release, since the sums are
+# served from the same place as the binaries.
+
+sums=""
+if printf '%s' "$release_json" | grep -q '"name": *"SHA256SUMS"'; then
+    sums=$(curl -fsSL "https://github.com/${REPO}/releases/download/${tag}/SHA256SUMS") \
+        || err "release ${tag} lists a SHA256SUMS but it could not be downloaded"
+else
+    info "warning: release ${tag} publishes no SHA256SUMS; downloads will not be verified"
+fi
+
+verify_asset() {
+    # $1 = downloaded file, $2 = asset name
+    [ -n "$sums" ] || return 0
+    [ -n "$HASHER" ] || { info "warning: no sha256sum or shasum on PATH; not verifying ${2}"; return 0; }
+    want=$(printf '%s\n' "$sums" | awk -v n="$2" '$2 == n { print $1 }')
+    [ -n "$want" ] || { rm -f "$1"; err "SHA256SUMS for ${tag} has no entry for '${2}'"; }
+    got=$($HASHER "$1" | awk '{ print $1 }')
+    [ "$want" = "$got" ] || { rm -f "$1"; err "checksum mismatch for ${2}: expected ${want}, got ${got}; refusing to install"; }
+    info "verified ${2} (sha256)"
+}
+
 # --- install each requested binary -----------------------------------------
 
 mkdir -p "$INSTALL_DIR" || err "could not create install directory $INSTALL_DIR"
@@ -132,6 +172,8 @@ for bin in $BIN_LIST; do
         rm -f "$tmp"
         err "download failed: $url"
     fi
+
+    verify_asset "$tmp" "$asset"
 
     chmod +x "$tmp" || err "could not make $tmp executable"
     mv "$tmp" "$dest" || err "could not move $tmp to $dest"

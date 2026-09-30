@@ -209,15 +209,13 @@ numbers exist (`docs/paired-ab-*`); `slog` runs inside the engine
 Do not add a test count here — it goes stale on the next PR. `make test` prints the
 real number; a red suite, not a changed count, is the signal something is wrong.
 
-## Direction: a tagged release and a downloadable binary
+## Releases
 
-The goal is that a user downloads one binary and uses kopicode — no Go toolchain, no
-`go install`. That means a tagged semver release, per-platform binaries with checksums
-published by a release workflow, and install instructions in the README. `make xbuild`
-already cross-compiles every target; what is missing is the tag, the publishing, and a
-versioning policy (`internal/build` currently falls back to a pseudo-version).
-Tracked as KAN-1796. Prefer choices that move toward this, and don't add an install
-step that assumes a compiler.
+A user downloads one binary and uses kopicode — no Go toolchain. A `v*` tag triggers
+[`release.yml`](.github/workflows/release.yml), which publishes per-platform binaries and
+`SHA256SUMS`; `scripts/install.sh` installs the latest and verifies them. The process and
+the versioning policy are in [`docs/RELEASING.md`](docs/RELEASING.md). Pushing the tag is
+a deliberate human act. Don't add an install step that assumes a compiler.
 
 ## Decisions of record — read before proposing anything
 
@@ -261,7 +259,7 @@ make fmtcheck     # the same set, read-only; fails on any unformatted file
 make lint         # golangci-lint run  (staticcheck is one of its linters, not separate)
 make vet          # go vet ./...
 make tidycheck    # fails if go.mod/go.sum are not tidy, without leaving them changed
-make check        # fmtcheck + vet + lint + tidycheck — every cheap static gate
+make check        # fmtcheck + vet + lint + tidycheck + install-test — every cheap static gate
 make test         # go test -short -race -count=1 ./...  — fast inner loop, mock provider only
 make test-all     # the FULL suite as CI runs it: -race, integration build tag, e2e git fixtures
 make xbuild       # cross-compile AND vet every GOOS/GOARCH target
@@ -473,6 +471,7 @@ rather than recorded from a real run.
   for a headless consumer: the NDJSON schema, the full stable `exit_code`/`reason`
   vocabulary, and where the underlying failure detail (a provider's HTTP status and
   body, a harness error's own message) actually lands on the stream
+- [`docs/RELEASING.md`](docs/RELEASING.md) — versioning policy and how to cut a release
 - [`docs/token-growth.md`](docs/token-growth.md) — real per-turn context growth from
   two dogfood sessions (KAN-935/947); what it does and doesn't say about compaction
 - [`README.md`](README.md) — the thesis, where the harness gains are, the model table

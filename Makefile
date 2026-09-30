@@ -172,7 +172,7 @@ tidycheck: ## Fail if go.mod/go.sum are not tidy
 	exit $$status
 
 .PHONY: check
-check: fmtcheck vet lint tidycheck ## All the cheap static gates
+check: fmtcheck vet lint tidycheck install-test ## All the cheap static gates
 
 # -race because the loop is concurrent and a race here reproduces once a month.
 # -count=1 because Go caches test results and a cached pass looks like a real one.
@@ -270,6 +270,10 @@ vuln: ## govulncheck over the module
 # rather than a literal mirror of it.
 .PHONY: ci
 ci: check test-all bench-smoke xbuild ## Every CI gate that runs offline
+
+.PHONY: install-test
+install-test: ## Exercise scripts/install.sh against a fake curl (checksum paths)
+	sh scripts/install_test.sh
 
 .PHONY: install-hooks
 install-hooks: ## Install the pre-push hook

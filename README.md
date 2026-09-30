@@ -186,8 +186,10 @@ reads `AGENTS.md`. A worked example and the format are in
 `scripts/install.sh` (KAN-934) is the one-liner in step 1 above. It detects your OS
 and architecture, downloads the matching `kopicode-<os>-<arch>` asset staged by
 `.github/workflows/release.yml` (KAN-931) from the latest release, and installs it to
-`~/.local/bin`. On an unsupported OS/arch, or before any release exists, it fails with
-a clear message rather than downloading nothing silently. Windows and any architecture
+`~/.local/bin`, checking it against the release's `SHA256SUMS` (a mismatch refuses to
+install; a release that predates the sums installs with a warning). On an unsupported
+OS/arch, or before any release exists, it fails with a clear message rather than
+downloading nothing silently. Windows and any architecture
 outside the Makefile's `PLATFORMS` list stay on building from source.
 
 ## The thesis
