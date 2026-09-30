@@ -740,3 +740,131 @@ func TestServeRemoteInteractiveAsksTheClientForConsent(t *testing.T) {
 
 	h.close()
 }
+
+// TestServeCloseEndsOneSessionAndFreesItsTree drives KAN-1795: session.close
+// writes and announces the session's SessionEnded while the process stays up,
+// releases the working-tree lock, and frees the id — so the same id can start on
+// the same directory again, which is what a resident client reusing one child
+// across delegations needs.
+func TestServeCloseEndsOneSessionAndFreesItsTree(t *testing.T) {
+	t.Setenv(engine.APIKeyEnv, "kopicode-test-credential")
+	srv := scriptedProvider(t, sseBody("first"), sseBody("second"))
+	h := startServe(t, engine.Options{ProviderBaseURL: srv.URL})
+
+	dir := t.TempDir()
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
+		"params": startPayload("s1", dir, "one")})
+	h.awaitResponse(1)
+	if hasKind(eventKinds(h.notificationsFor("s1")), "session_ended") {
+		t.Fatal("session_ended announced before any close; it should wait for the close")
+	}
+
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": methodSessionClose,
+		"params": map[string]any{"session": "s1"}})
+	closed := h.awaitResponse(2)
+	if closed["error"] != nil {
+		t.Fatalf("session.close errored: %v", closed["error"])
+	}
+	result, _ := closed["result"].(map[string]any)
+	if result["session"] != "s1" || result["closed"] != true {
+		t.Errorf("close result = %v, want session s1 closed true", result)
+	}
+	// The response follows the announcement, so it is already on the wire.
+	if !hasKind(eventKinds(h.notificationsFor("s1")), "session_ended") {
+		t.Error("no session_ended after session.close; the record's bookend was not written")
+	}
+
+	// The process is still up, the tree's lock is free and the id is reusable.
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 3, "method": methodSessionStart,
+		"params": startPayload("s1", dir, "two")})
+	again := h.awaitResponse(3)
+	if again["error"] != nil {
+		t.Fatalf("restarting s1 on the same tree after a close errored: %v", again["error"])
+	}
+
+	if code := h.close(); code != exitSuccess {
+		t.Errorf("serve exit = %d, want %d", code, exitSuccess)
+	}
+}
+
+// TestServeCloseRefusesUnknownAndClosedSessions: a close for an id with no open
+// session, and a submit to a session whose close is already accepted, both get
+// the unknown-session code rather than queuing work that will never run.
+func TestServeCloseRefusesUnknownAndClosedSessions(t *testing.T) {
+	t.Setenv(engine.APIKeyEnv, "kopicode-test-credential")
+	srv, reached := gatedProvider(t)
+	h := startServe(t, engine.Options{ProviderBaseURL: srv.URL})
+
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionClose,
+		"params": map[string]any{"session": "nope"}})
+	resp := h.awaitResponse(1)
+	rpcErr, _ := resp["error"].(map[string]any)
+	if rpcErr == nil || !numEq(rpcErr["code"], codeUnknownSession) {
+		t.Fatalf("closing an unknown session = %v, want error %d", resp, codeUnknownSession)
+	}
+
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": methodSessionStart,
+		"params": startPayload("s1", t.TempDir(), "run")})
+	<-reached
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 3, "method": methodSessionClose,
+		"params": map[string]any{"session": "s1"}})
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 4, "method": methodSessionSubmit,
+		"params": map[string]any{"session": "s1", "prompt": "too late"}})
+	late := h.awaitResponse(4)
+	rpcErr, _ = late["error"].(map[string]any)
+	if rpcErr == nil || !numEq(rpcErr["code"], codeUnknownSession) {
+		t.Errorf("submit after an accepted close = %v, want error %d", late, codeUnknownSession)
+	}
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 5, "method": methodSessionClose,
+		"params": map[string]any{"session": "s1"}})
+	twice := h.awaitResponse(5)
+	rpcErr, _ = twice["error"].(map[string]any)
+	if rpcErr == nil || !numEq(rpcErr["code"], codeUnknownSession) {
+		t.Errorf("a second close = %v, want error %d", twice, codeUnknownSession)
+	}
+
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 6, "method": methodSessionCancel,
+		"params": map[string]any{"session": "s1"}})
+	h.awaitResponse(6)
+	h.close()
+}
+
+// TestServeCloseWaitsForTheTurnsAlreadyAccepted: a close queued behind a running
+// turn does not cut it off — the turn settles and answers first, then the close
+// answers — so a client can close straight after its last submit.
+func TestServeCloseWaitsForTheTurnsAlreadyAccepted(t *testing.T) {
+	t.Setenv(engine.APIKeyEnv, "kopicode-test-credential")
+	srv, reached := gatedProvider(t)
+	h := startServe(t, engine.Options{ProviderBaseURL: srv.URL})
+
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
+		"params": startPayload("s1", t.TempDir(), "run")})
+	<-reached
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": methodSessionClose,
+		"params": map[string]any{"session": "s1"}})
+
+	// Nothing has answered the close while the turn is still parked.
+	time.Sleep(100 * time.Millisecond)
+	h.mu.Lock()
+	for _, m := range h.all {
+		if m["method"] == nil && numEq(m["id"], 2) {
+			h.mu.Unlock()
+			t.Fatal("session.close answered while the turn ahead of it was still running")
+		}
+	}
+	h.mu.Unlock()
+
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 3, "method": methodSessionCancel,
+		"params": map[string]any{"session": "s1"}})
+	h.awaitResponse(3)
+	start := h.awaitResponse(1)
+	closed := h.awaitResponse(2)
+
+	if r, _ := start["result"].(map[string]any); r == nil || r["stop"] != "cancelled" {
+		t.Errorf("the turn ahead of the close = %v, want it to settle cancelled", start)
+	}
+	if r, _ := closed["result"].(map[string]any); r == nil || r["closed"] != true {
+		t.Errorf("close = %v, want closed true", closed)
+	}
+	h.close()
+}

@@ -58,10 +58,14 @@ import (
 //     context, the identical mechanism the REPL's Ctrl-C drives; it does not
 //     end the session, which stays open for further submits.
 //
-// A session lives from its start until the serve process shuts down (stdin
-// closes); there is no session.close in ADR-0013's enumerated set, so shutdown
-// is where every open session's SessionEnded is written. Adding an explicit
-// close is a later decision, not this card's.
+//   - session.close — params {session}. Ends that one session while the process
+//     stays up (KAN-1795): the close queues behind any turns already accepted, so
+//     they run to completion first (session.cancel first for an immediate end),
+//     then the session's SessionEnded is written and announced, its working-tree
+//     lock is released and its id is free to start again. New submits after a
+//     close is accepted are refused. Without it a session lives until the serve
+//     process shuts down (stdin closes) and SessionEnded — the only event whose
+//     text carries the failure — arrives only then.
 //
 // # Concurrency: a per-session queue, sessions run concurrently (KAN-1030)
 //
@@ -145,6 +149,7 @@ const (
 	methodSessionStart   = "session.start"
 	methodSessionSubmit  = "session.submit"
 	methodSessionCancel  = "session.cancel"
+	methodSessionClose   = "session.close"
 	methodSessionEvent   = "session.event"   // server → client notification
 	methodConsentRequest = "consent.request" // server → client request
 )
@@ -166,6 +171,7 @@ const (
 	codeInvalidRequest = -32600
 	codeMethodNotFound = -32601
 	codeInvalidParams  = -32602
+	codeInternalError  = -32603 // a session could not be closed cleanly
 
 	codeUnknownSession = -32000 // session.submit/cancel named an id with no open session
 	codeSessionExists  = -32001 // session.start named an id already open in this process
@@ -287,6 +293,18 @@ type turnResult struct {
 type cancelResult struct {
 	Session   string `json:"session"`
 	Cancelled bool   `json:"cancelled"`
+}
+
+// closeParams / closeResult are session.close's shapes. The result says the
+// session is gone; why it ended is on its session_ended event, announced before
+// this response.
+type closeParams struct {
+	Session string `json:"session"`
+}
+
+type closeResult struct {
+	Session string `json:"session"`
+	Closed  bool   `json:"closed"`
 }
 
 // eventParams wraps one journal-derived event as a notification's params,
@@ -419,10 +437,11 @@ type servedSession struct {
 	// cond signals the worker when a turn is queued or when the session is
 	// closing. Its L is &server.mu, so the worker waits and the read loop
 	// enqueues under the one lock that also guards the fields below.
-	cond   *sync.Cond
-	queue  []turnJob          // turns waiting to run, oldest first
-	cancel context.CancelFunc // the running turn's cancel, or nil between turns
-	closed bool               // shutdown asked this worker to drain and exit
+	cond    *sync.Cond
+	queue   []turnJob          // turns waiting to run, oldest first
+	cancel  context.CancelFunc // the running turn's cancel, or nil between turns
+	closed  bool               // shutdown asked this worker to drain and exit
+	closing bool               // a session.close is queued; no further turns are accepted
 }
 
 // turnJob is one queued turn: the request whose id its result answers, the
@@ -432,6 +451,7 @@ type turnJob struct {
 	reqID   json.RawMessage
 	prompt  string
 	isStart bool
+	isClose bool // a session.close, not a turn: the worker ends the session
 }
 
 // run reads one JSON message per line until stdin closes, dispatching each, then
@@ -494,9 +514,11 @@ func (s *server) handleLine(line string) {
 		s.dispatchSubmit(req)
 	case methodSessionCancel:
 		s.handleCancel(req)
+	case methodSessionClose:
+		s.dispatchClose(req)
 	default:
 		s.writeError(req.ID, codeMethodNotFound, fmt.Sprintf("unknown method %q; this surface has "+
-			"session.start, session.submit and session.cancel", req.Method))
+			"session.start, session.submit, session.cancel and session.close", req.Method))
 	}
 }
 
@@ -607,9 +629,62 @@ func (s *server) dispatchSubmit(req rpcRequest) {
 			"session.start first", p.Session))
 		return
 	}
+	if ss.closing {
+		s.mu.Unlock()
+		s.writeError(req.ID, codeUnknownSession, fmt.Sprintf("session %q is closing; start a new "+
+			"one with session.start", p.Session))
+		return
+	}
 	ss.queue = append(ss.queue, turnJob{reqID: req.ID, prompt: p.Prompt})
 	ss.cond.Signal()
 	s.mu.Unlock()
+}
+
+// dispatchClose queues the end of a session behind the turns it has already
+// accepted, so they finish and answer first. It runs inline on the read loop and
+// never waits: the worker does the closing, so a slow turn ahead of it cannot
+// stall the loop that session.cancel needs.
+func (s *server) dispatchClose(req rpcRequest) {
+	var p closeParams
+	if err := json.Unmarshal(req.Params, &p); err != nil {
+		s.writeError(req.ID, codeInvalidParams, fmt.Sprintf("session.close params: %v", err))
+		return
+	}
+	if p.Session == "" {
+		s.writeError(req.ID, codeInvalidParams, "session.close needs a session id")
+		return
+	}
+
+	s.mu.Lock()
+	ss := s.sessions[p.Session]
+	if ss == nil || ss.closing {
+		s.mu.Unlock()
+		s.writeError(req.ID, codeUnknownSession, fmt.Sprintf("no open session %q to close", p.Session))
+		return
+	}
+	ss.closing = true
+	ss.queue = append(ss.queue, turnJob{reqID: req.ID, isClose: true})
+	ss.cond.Signal()
+	s.mu.Unlock()
+}
+
+// finishClose ends one session on its own worker. The session leaves the map
+// first, under the lock, so a concurrent shutdown cannot close it a second time
+// and its id is reusable the moment SessionEnded is written; Close then writes
+// SessionEnded (announced to the client through the session's own observer) and
+// releases the working-tree lock before the response goes out.
+func (s *server) finishClose(ss *servedSession, job turnJob) {
+	s.mu.Lock()
+	delete(s.sessions, ss.id)
+	ss.closed = true
+	s.mu.Unlock()
+
+	if err := ss.sess.Close(s.ctx); err != nil {
+		say(s.stderr, "kopicode: closing session %q: %v\n", ss.id, err)
+		s.writeError(job.reqID, codeInternalError, fmt.Sprintf("closing session %q: %v", ss.id, err))
+		return
+	}
+	s.writeResult(job.reqID, closeResult{Session: ss.id, Closed: true})
 }
 
 // worker drains one session's queue in order until the session is closed. Each
@@ -633,6 +708,11 @@ func (s *server) worker(ss *servedSession) {
 		}
 		job := ss.queue[0]
 		ss.queue = ss.queue[1:]
+		if job.isClose {
+			s.mu.Unlock()
+			s.finishClose(ss, job)
+			return
+		}
 		turnCtx, cancel := context.WithCancel(s.ctx)
 		ss.cancel = cancel
 		s.mu.Unlock()
