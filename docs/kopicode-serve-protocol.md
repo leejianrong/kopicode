@@ -174,7 +174,7 @@ declared ahead of time.
 ```json
 --> { "jsonrpc": "2.0", "id": "c-1", "method": "consent.request",
       "params": { "session": "s1", "kind": "run_shell", "tool": "run_shell",
-                  "detail": "uv run pytest -v", "reason": "", "resolved": "" } }
+                  "detail": "/bin/sh -c uv run pytest -v", "reason": "", "resolved": "" } }
 <-- { "jsonrpc": "2.0", "id": "c-1", "result": { "answer": "allow" } }
 ```
 
@@ -183,9 +183,17 @@ declared ahead of time.
 | `session` | string | which session is asking |
 | `kind` | string | `run_shell` or `write_outside_root` |
 | `tool` | string | the tool name as the model called it |
-| `detail` | string | the command line, or the path, being consented to |
+| `detail` | string | what is being consented to: for `run_shell`, the argv the engine will run joined by single spaces, which is always `/bin/sh -c <line>`; for `write_outside_root`, the absolute path |
 | `reason` | string | why the gate is asking, when the policy layer has one to give |
 | `resolved` | string | for a write, the path after symlink resolution, when it differs from `detail` |
+
+For `run_shell`, `detail` is **not** the bare command line: the engine runs every shell
+command as `/bin/sh -c <line>` and puts that whole argv here, so the line the model wrote
+follows the `/bin/sh -c ` prefix. The words are joined by a single space with no quoting, so
+the join says nothing about where the line's own spaces were. A client that matches commands
+should strip that exact prefix once and treat the rest as untrusted model output, and deny a
+`detail` that does not start with it. (Found by a live consent client whose policy matched
+the bare line and so denied every real command.)
 
 `result.answer` is one of `"allow"`, `"allow_session"`, `"deny"` —
 `engine.ConsentAnswer`'s three values spelled out as text, the same way this protocol
