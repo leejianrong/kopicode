@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	sessioncore "github.com/leejianrong/kopicode/cmd/kopicode/session"
 	"github.com/leejianrong/kopicode/internal/engine"
@@ -338,18 +339,18 @@ type eventParams struct {
 // base options every session inherits, and hands the run loop the process's own
 // stdio.
 func serveCmd(args []string, stdout, stderr io.Writer) int {
-	base, code, ok := residentOptions("serve", "a task arrives over the wire as session.start's prompt, "+
+	base, timeout, code, ok := residentOptions("serve", "a task arrives over the wire as session.start's prompt, "+
 		"not on the command line", args, stderr)
 	if !ok {
 		return code
 	}
-	return serve(context.Background(), os.Stdin, stdout, stderr, base)
+	return serveWith(context.Background(), os.Stdin, stdout, stderr, base, timeout)
 }
 
 // residentOptions parses the process-level flags the two resident front ends
 // (`serve` and `mcp`) share and builds the base options every session inherits.
 // ok is false when the process should exit with code instead of running.
-func residentOptions(name, noArgsHint string, args []string, stderr io.Writer) (base engine.Options, code int, ok bool) {
+func residentOptions(name, noArgsHint string, args []string, stderr io.Writer) (base engine.Options, consentTimeout time.Duration, code int, ok bool) {
 	fs := flag.NewFlagSet("kopicode "+name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	debug := fs.Bool("debug", false, "engine diagnostics on stderr")
@@ -362,19 +363,27 @@ func residentOptions(name, noArgsHint string, args []string, stderr io.Writer) (
 	// ask call nobody can answer, or the fixed headless refusal when unset.
 	askPolicyFile := fs.String("ask-policy-file", "", "load an ask-policy file (ADR-0013) whose note answers "+
 		"the model's ask calls for every session; unset means the fixed 'no human is present' refusal")
+	timeoutFlag := fs.Duration("consent-timeout", remoteConsentTimeout, "how long a live consent request "+
+		"(consent_mode remote_interactive) waits for the client's answer before it is denied, for example 5m; "+
+		"between 1s and 24h")
 	if err := fs.Parse(args); err != nil {
 		// flag has already printed the error and the usage. A help request is not
 		// an error: -h/--help exits 0, everything else is a usage error.
 		if errors.Is(err, flag.ErrHelp) {
-			return base, exitSuccess, false
+			return base, 0, exitSuccess, false
 		}
-		return base, exitUsage, false
+		return base, 0, exitUsage, false
 	}
 	setupLogging(*debug, stderr)
 
 	if fs.NArg() != 0 {
 		say(stderr, "kopicode: `%s` takes no positional arguments; %s\n", name, noArgsHint)
-		return base, exitUsage, false
+		return base, 0, exitUsage, false
+	}
+	consentTimeout, err := parseConsentTimeout(*timeoutFlag)
+	if err != nil {
+		say(stderr, "kopicode: %v\n", err)
+		return base, 0, exitUsage, false
 	}
 
 	// Loaded up front, the same ordering ADR-0007 decision 4 holds every other
@@ -384,7 +393,7 @@ func residentOptions(name, noArgsHint string, args []string, stderr io.Writer) (
 		pf, err := engine.LoadPolicyFile(*policyFile)
 		if err != nil {
 			say(stderr, "kopicode: %v\n", err)
-			return base, exitUsage, false
+			return base, 0, exitUsage, false
 		}
 		base.Policy = &pf
 	}
@@ -392,11 +401,11 @@ func residentOptions(name, noArgsHint string, args []string, stderr io.Writer) (
 		ap, err := engine.LoadAskPolicyFile(*askPolicyFile)
 		if err != nil {
 			say(stderr, "kopicode: %v\n", err)
-			return base, exitUsage, false
+			return base, 0, exitUsage, false
 		}
 		base.AskPolicy = &ap
 	}
-	return base, exitSuccess, true
+	return base, consentTimeout, exitSuccess, true
 }
 
 // serve is the run loop, taking its streams and base options in the open so a
@@ -407,7 +416,12 @@ func residentOptions(name, noArgsHint string, args []string, stderr io.Writer) (
 // base carries what every session inherits (Policy, AskPolicy, ProviderBaseURL);
 // Dir and Selection are per-session, resolved from each session.start.
 func serve(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, base engine.Options) int {
-	s := &server{stderr: stderr}
+	return serveWith(ctx, stdin, stdout, stderr, base, remoteConsentTimeout)
+}
+
+// serveWith is serve with the live-consent timeout stated (`--consent-timeout`).
+func serveWith(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, base engine.Options, consentTimeout time.Duration) int {
+	s := &server{stderr: stderr, consentTimeout: consentTimeout}
 	// The Manager is the session lifecycle both resident front ends share
 	// (ADR-0015 decision 3); this file is only the JSON-RPC skin over it.
 	s.mgr = sessioncore.New(ctx, base, stderr, func(id string) engine.Consenter {
@@ -426,6 +440,9 @@ func serve(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, base 
 type server struct {
 	mgr    *sessioncore.Manager
 	stderr io.Writer
+
+	// consentTimeout bounds every live consent request (--consent-timeout).
+	consentTimeout time.Duration
 
 	// enc and encMu serialize every write to stdout. Notifications come off a
 	// turn's goroutine and responses come off both a turn's goroutine and the

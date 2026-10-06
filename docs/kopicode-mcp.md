@@ -21,7 +21,7 @@ The credential is read once from the process environment, as on every surface. T
 carries no credential and no per-session override.
 
 `kopicode mcp` takes the same process-level flags as `serve`: `--policy-file`,
-`--ask-policy-file`, `--debug`. A task never arrives on the command line; it arrives as a tool
+`--ask-policy-file`, `--consent-timeout`, `--debug`. A task never arrives on the command line; it arrives as a tool
 call.
 
 ## Transport
@@ -97,7 +97,7 @@ stop.
   [kopicode-serve-protocol.md § auto](kopicode-serve-protocol.md#auto-adr-0017).
 - **`remote_interactive`** — each shell command or out-of-tree write is put to the client as an
   MCP **elicitation** (`elicitation/create`, with an `allow` / `allow_session` / `deny` choice),
-  and the turn blocks on the answer for up to 60 seconds. A decline, a cancel, an error or a
+  and the turn blocks on the answer for up to 60 seconds (`--consent-timeout`, 1s to 24h). A decline, a cancel, an error or a
   timeout all deny. Needs a client that declared the `elicitation` capability in `initialize`;
   `kopicode_start` refuses this mode otherwise. Decisions are journalled `source: "remote"`.
 - **`unattended_policy`** — the process's `--policy-file` allowlist answers (ADR-0011); needs

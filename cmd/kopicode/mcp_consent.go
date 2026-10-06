@@ -16,7 +16,7 @@ import (
 // engine.Consenter that puts each permission request to the connected client as
 // an MCP elicitation/create request — the server-initiated, blocking round trip
 // ADR-0016 decision 4 requires of a channel — and blocks the turn until the
-// client answers, the turn's context ends, or remoteConsentTimeout elapses.
+// client answers, the turn's context ends, or the process's consent timeout (--consent-timeout) elapses.
 //
 // Every outcome but an explicit allow resolves to ConsentDeny with a nil error,
 // for the reason remoteConsenter.Ask gives: an error from Decide would discard
@@ -30,7 +30,7 @@ type elicitConsenter struct {
 }
 
 func newElicitConsenter(srv *mcpServer, session string) *elicitConsenter {
-	return &elicitConsenter{srv: srv, session: session, timeout: remoteConsentTimeout, clock: realClock{}}
+	return &elicitConsenter{srv: srv, session: session, timeout: srv.consentTimeout, clock: realClock{}}
 }
 
 // elicitReply is a client's reply to an elicitation/create request.

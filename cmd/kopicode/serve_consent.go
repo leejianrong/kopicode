@@ -18,9 +18,29 @@ import (
 // is assumed to eventually answer or hit Ctrl-C," so an unbounded wait would
 // hang the turn silently. 60 seconds is long enough for an automated
 // orchestrator to think and short enough that a dead peer does not hang a
-// turn indefinitely. Not yet configurable: no caller has asked for a
-// different value, and a flag can follow additively if one does.
+// turn indefinitely. It is the default: `--consent-timeout` overrides it for
+// a process (parseConsentTimeout), since a person answering through an
+// orchestrator needs longer than a script does.
 const remoteConsentTimeout = 60 * time.Second
+
+// The bounds `--consent-timeout` accepts. Below the floor a timeout is
+// indistinguishable from a broken peer; above the ceiling it is no longer a
+// bound on anything, which is the failure ADR-0016 decision 5 exists to prevent.
+const (
+	minConsentTimeout = time.Second
+	maxConsentTimeout = 24 * time.Hour
+)
+
+// parseConsentTimeout validates a `--consent-timeout` value. Zero is refused,
+// not read as "no timeout": an unbounded wait is the one thing this flag may
+// never express.
+func parseConsentTimeout(d time.Duration) (time.Duration, error) {
+	if d < minConsentTimeout || d > maxConsentTimeout {
+		return 0, fmt.Errorf("--consent-timeout %s is outside %s to %s; a consent request must always be bounded "+
+			"so a peer that never answers cannot hang a turn (ADR-0016 decision 5)", d, minConsentTimeout, maxConsentTimeout)
+	}
+	return d, nil
+}
 
 // consentRequestParams is consent.request's params: engine.ConsentRequest's
 // fields, copied across field-for-field the same discipline session.event's
@@ -89,7 +109,7 @@ type remoteConsenter struct {
 // newRemoteConsenter builds one for session, defaulting to the production
 // timeout and clock.
 func newRemoteConsenter(srv *server, session string) *remoteConsenter {
-	return &remoteConsenter{srv: srv, session: session, timeout: remoteConsentTimeout, clock: realClock{}}
+	return &remoteConsenter{srv: srv, session: session, timeout: srv.consentTimeout, clock: realClock{}}
 }
 
 // Ask satisfies engine.Consenter.

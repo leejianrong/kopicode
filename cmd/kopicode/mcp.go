@@ -82,23 +82,29 @@ const mcpInstructions = "kopicode runs coding tasks in a working tree. Call kopi
 
 // mcpCmd is `kopicode mcp`.
 func mcpCmd(args []string, stdout, stderr io.Writer) int {
-	base, code, ok := residentOptions("mcp", "a task arrives as a kopicode_start tool call, not on the "+
+	base, timeout, code, ok := residentOptions("mcp", "a task arrives as a kopicode_start tool call, not on the "+
 		"command line", args, stderr)
 	if !ok {
 		return code
 	}
-	return mcpServe(context.Background(), os.Stdin, stdout, stderr, base)
+	return mcpServeWith(context.Background(), os.Stdin, stdout, stderr, base, timeout)
 }
 
 // mcpServe is the run loop, taking its streams and base options in the open so a
 // test can drive scripted lines and point base.ProviderBaseURL at an httptest
 // server, the same seam serve uses.
 func mcpServe(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, base engine.Options) int {
+	return mcpServeWith(ctx, stdin, stdout, stderr, base, remoteConsentTimeout)
+}
+
+// mcpServeWith is mcpServe with the live-consent timeout stated.
+func mcpServeWith(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, base engine.Options, consentTimeout time.Duration) int {
 	s := &mcpServer{
-		stderr:  stderr,
-		stop:    make(chan struct{}),
-		calls:   map[string]*mcpCall{},
-		targets: map[string]*mcpCall{},
+		consentTimeout: consentTimeout,
+		stderr:         stderr,
+		stop:           make(chan struct{}),
+		calls:          map[string]*mcpCall{},
+		targets:        map[string]*mcpCall{},
 	}
 	s.mgr = sessioncore.New(ctx, base, stderr, func(id string) engine.Consenter {
 		return newElicitConsenter(s, id).Ask
@@ -111,6 +117,9 @@ func mcpServe(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, ba
 type mcpServer struct {
 	mgr    *sessioncore.Manager
 	stderr io.Writer
+
+	// consentTimeout bounds every elicitation (--consent-timeout).
+	consentTimeout time.Duration
 
 	enc   *json.Encoder
 	encMu sync.Mutex
