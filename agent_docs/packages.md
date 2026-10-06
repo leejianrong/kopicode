@@ -73,12 +73,12 @@ not this list:
   turn that could have changed the tree. `NotRun` is the zero value, not `Passed`; only
   a command that ran and failed blocks a success report. Discovery **executes nothing**
   — a Makefile target, `go.mod`, `scripts.test`, a uv project, in that order.
-- **`internal/provider/fixture`** — provider traffic as data. Every *shipped* fixture is
-  hand-authored and says so (`"origin": "hand_authored"`). The recorder that turns real
-  traffic into fixture data, scrubbing secrets through a header allowlist, now exists
-  (KAN-774, `recorder.go`) — but it is a `RoundTripper` test/tool seam, not yet wired into
-  a command that regenerates the corpus, so the hand-authored fixtures remain a
-  deliberate, bounded violation of the test-seam rule below, not an oversight.
+- **`internal/provider/fixture`** — provider traffic as data. Some shipped fixtures are
+  recorded (`"origin": "recorded"`, `recorded_*`) and some are still hand-authored and say
+  so. The recorder (KAN-774, `recorder.go`) is a `RoundTripper` that turns real traffic
+  into fixture data, scrubbing secrets through a header allowlist; `kopibench run
+  --record-dir DIR [--task ids]` drives it through `internal/bench/record.go`, and writes
+  only a recording that passes `Validate` (a session cut off at the turn cap is refused).
 - **`internal/repo`** — turn snapshots via git shadow refs
   (`refs/kopicode/<session>/<turn>`), written through a throwaway index so the user's
   real git state is never touched. `Restore` reads a tree back out via `git archive`
@@ -184,8 +184,8 @@ kopicode mechanism behaved as designed, and the classifier still bucketed it `ha
 per its deliberately conservative rule. This is the harness's first honest number, not
 a flattering one.
 
-**What doesn't exist yet:** the recorder exists (KAN-774) but nothing yet drives it to
-regenerate the corpus, so every *shipped* provider fixture is still hand-authored. The
+**What doesn't exist yet:** the recorder is driven by `kopibench run --record-dir`, but only two
+tasks are recorded so far; the three older shipped fixtures are still hand-authored. The
 other gaps this paragraph used to list have since closed — verify against the code, not
 this note: three models are registered (`internal/harness/registry.go`) and paired A/B
 numbers exist (`docs/paired-ab-*`); `slog` runs inside the engine

@@ -3,6 +3,7 @@ package bench
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/leejianrong/kopicode/internal/corpus"
 	"github.com/leejianrong/kopicode/internal/engine"
@@ -59,6 +60,16 @@ type Options struct {
 	Jobs int
 	// KeepWorktrees leaves every worktree behind for a post-mortem.
 	KeepWorktrees bool
+	// Tasks restricts the run to these task ids, in corpus order. Empty runs
+	// the whole corpus. An id the corpus does not have is an error, not a
+	// silently smaller run.
+	Tasks []string
+	// RecordDir records each task's live traffic as a fixture here (KAN-774).
+	// Live only: a mock run has nothing to record.
+	RecordDir string
+	// RecordPrefix prefixes each recorded fixture's name. Empty means
+	// "recorded_".
+	RecordPrefix string
 }
 
 // RunCorpus loads the corpus and runs it against one arm.
@@ -78,17 +89,29 @@ type Options struct {
 // failed part way still has results for the tasks that finished, and the report
 // is written from them.
 func RunCorpus(ctx context.Context, opts Options) (*RunResult, error) {
+	if opts.RecordDir != "" && opts.Provider != ProviderLive {
+		return nil, fmt.Errorf("bench: --record-dir needs a live run: a mock run replays traffic and has none to record")
+	}
 	c, err := corpus.Load(opts.CorpusDir)
 	if err != nil {
 		return nil, fmt.Errorf("bench: %w", err)
+	}
+
+	if len(opts.Tasks) > 0 {
+		if err := restrictTasks(c, opts.Tasks); err != nil {
+			return nil, err
+		}
 	}
 
 	r := &Runner{
 		Corpus:    c,
 		Selection: opts.Selection,
 		Build:     opts.Build.journalInfo(),
-		Agent:     EngineAgent{Provider: opts.Provider, Fixture: opts.Fixture},
-		Provider:  opts.Provider,
+		Agent: EngineAgent{
+			Provider: opts.Provider, Fixture: opts.Fixture,
+			RecordDir: opts.RecordDir, RecordPrefix: opts.RecordPrefix,
+		},
+		Provider: opts.Provider,
 		// Every run through this entry point classifies. [Runner.Classifier]
 		// stays nil-able because a test driving the reclamation guarantees has
 		// no journal to read, but a front end must not be able to produce a
@@ -99,4 +122,31 @@ func RunCorpus(ctx context.Context, opts Options) (*RunResult, error) {
 		KeepWorktrees: opts.KeepWorktrees,
 	}
 	return r.Run(ctx)
+}
+
+// restrictTasks narrows c to the named tasks, keeping corpus order. It runs
+// after corpus.Load, so the digest check has already covered the whole corpus.
+func restrictTasks(c *corpus.Corpus, ids []string) error {
+	want := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		want[id] = true
+	}
+	var kept []corpus.Task
+	for _, t := range c.Tasks {
+		if want[t.ID] {
+			kept = append(kept, t)
+			delete(want, t.ID)
+		}
+	}
+	if len(want) > 0 {
+		var missing []string
+		for _, id := range ids {
+			if want[id] {
+				missing = append(missing, id)
+			}
+		}
+		return fmt.Errorf("bench: the corpus has no task %s", strings.Join(missing, ", "))
+	}
+	c.Tasks = kept
+	return nil
 }

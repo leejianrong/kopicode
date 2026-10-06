@@ -50,6 +50,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 
 	"github.com/leejianrong/kopicode/internal/bench"
 	"github.com/leejianrong/kopicode/internal/build"
@@ -116,6 +117,10 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 	keep := fs.Bool("keep-worktrees", false,
 		"leave every task worktree behind for a post-mortem; the NEXT run reclaims them")
 	debug := fs.Bool("debug", false, "engine diagnostics on stderr")
+	tasks := fs.String("task", "", "run only these task ids (comma-separated) instead of the whole corpus")
+	recordDir := fs.String("record-dir", "",
+		"live only: record each task's real provider traffic as a fixture in this directory")
+	recordPrefix := fs.String("record-prefix", "recorded_", "name prefix for each recorded fixture")
 	save := fs.String("save", "",
 		"write this run's result as JSON here, so `kopibench compare` can pair it with another run later")
 	if err := fs.Parse(args); err != nil {
@@ -178,6 +183,9 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 		Commit:        *commit,
 		Jobs:          *jobs,
 		KeepWorktrees: *keep,
+		Tasks:         splitList(*tasks),
+		RecordDir:     *recordDir,
+		RecordPrefix:  *recordPrefix,
 	})
 	if result != nil {
 		if werr := bench.WriteReport(stdout, result); werr != nil {
@@ -304,4 +312,15 @@ func setupLogging(debug bool, stderr io.Writer) {
 		level = slog.LevelError
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(out, &slog.HandlerOptions{Level: level})))
+}
+
+// splitList turns a comma-separated flag into its non-empty, trimmed items.
+func splitList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

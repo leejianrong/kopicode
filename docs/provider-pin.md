@@ -476,3 +476,49 @@ before KAN-852. `z-ai/glm-5.2` now has: the corpus run above resolved every succ
 request to `sail-research/fp8`'s endpoint without a routing failure, which confirms the
 pin routes even though the rate-limit finding above means it is not yet a *clean* run in
 the sense KAN-800's was.
+
+## deepseek/deepseek-v3.2
+
+- **Observed:** 2026-10-06 (unauthenticated OpenRouter API)
+- **Registered as:** cheap open-weight A/B candidate, and the model the first recorded
+  fixtures are taken under (`kopibench run --record-dir`, KAN-774). Maps to
+  `DefaultConfigName`: the pinned endpoint reports `seed`, so the default's fixed seed
+  is a claim it can honour.
+
+### What was observed
+
+```bash
+curl -sS https://openrouter.ai/api/v1/models/deepseek/deepseek-v3.2/endpoints
+```
+
+Thirteen endpoints served it. Every real quantization on offer was `fp8` or `fp4`; the
+rest reported `unknown` and are excluded on the same ground as every other pin here.
+`status` is OpenRouter's own field (0 healthy, -2 degraded at the time of the look).
+
+| Provider | `tag` | Quant | Prompt | Completion | `seed`? | `tools`? | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| GMICloud (tried, failed) | `gmicloud/fp8` | `fp8` | $0.2088 | $0.3096 | yes | yes | -2 |
+| SiliconFlow | `siliconflow/fp8` | `fp8` | $0.259 | $0.42 | **no** | yes | 0 |
+| **AtlasCloud** | `atlas-cloud/fp8` | **`fp8`** | $0.26 | $0.38 | yes | yes | -2 |
+| Baidu | `baidu/fp8` | `fp8` | $0.28 | $0.42 | yes | **no** | 0 |
+| Alibaba | `alibaba/fp8` | `fp8` | $0.3705 | $1.1115 | yes | yes | -2 |
+| DeepInfra | `deepinfra/fp4` | `fp4` | $0.26 | $0.38 | — | yes | 0 |
+
+### Why AtlasCloud, `fp8`
+
+`fp8` is preferred to `fp4` for fidelity, as for every other pin in this file. Among the
+`fp8` rows, Baidu has no `tools` (ruled out for an agent) and SiliconFlow has no `seed`
+(the default configuration sends a fixed one). That leaves GMICloud, AtlasCloud and
+Alibaba, all reporting `status: -2` on the day, so health could not decide it and a live
+look had to.
+
+**GMICloud was tried first, being cheapest, and failed on a real request** (2026-10-06,
+first recording run): turn 1 was answered, turn 2 returned `400 "The requested model has
+been deprecated and is no longer available"` from GMICloud. A pin that cannot finish a
+two-turn session is not a pin, so the row is **AtlasCloud**, next cheapest and with the
+same parameters. With `allow_fallbacks: false` the failure was loud rather than silently
+served elsewhere, which is the property the pin exists for.
+
+### The quantization is reported
+
+`fp8` is the literal value in AtlasCloud's endpoint record, not assumed.
