@@ -408,18 +408,14 @@ func residentOptions(name, noArgsHint string, args []string, stderr io.Writer) (
 	return base, consentTimeout, exitSuccess, true
 }
 
-// serve is the run loop, taking its streams and base options in the open so a
+// serveWith is the run loop, taking its streams and base options in the open so a
 // test can drive scripted JSON-RPC lines through an in-memory reader and point
 // base.ProviderBaseURL at an httptest server — the same seam print_test.go uses
 // for `run --print`.
 //
 // base carries what every session inherits (Policy, AskPolicy, ProviderBaseURL);
 // Dir and Selection are per-session, resolved from each session.start.
-func serve(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, base engine.Options) int {
-	return serveWith(ctx, stdin, stdout, stderr, base, remoteConsentTimeout)
-}
-
-// serveWith is serve with the live-consent timeout stated (`--consent-timeout`).
+// consentTimeout bounds every live consent request (`--consent-timeout`).
 func serveWith(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, base engine.Options, consentTimeout time.Duration) int {
 	s := &server{stderr: stderr, consentTimeout: consentTimeout}
 	// The Manager is the session lifecycle both resident front ends share
