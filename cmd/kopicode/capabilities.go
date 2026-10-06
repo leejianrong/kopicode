@@ -20,6 +20,7 @@ const serveProtocol = 1
 // the same capabilities print the same bytes.
 var features = []string{
 	"allow_commands",
+	"ask.request",
 	"consent_mode.auto",
 	"consent_mode.remote_interactive",
 	"consent_mode.unattended_policy",

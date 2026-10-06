@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	sessioncore "github.com/leejianrong/kopicode/cmd/kopicode/session"
 	"github.com/leejianrong/kopicode/internal/engine"
 )
 
@@ -77,6 +78,10 @@ func shellCommand(argv []string) string {
 // would have to already know this binary's internal encoding to read.
 type consentResult struct {
 	Answer string `json:"answer"`
+	// Text is ask.request's answer, a pointer so a reply with no text field (a
+	// malformed one) is told apart from an empty answer, which is a person who
+	// read the question and had nothing to add (ADR-0009).
+	Text *string `json:"text"`
 }
 
 // consentReply is what handleLine hands a waiting remoteConsenter once a
@@ -285,4 +290,69 @@ func decodeConsentResult(raw json.RawMessage) *consentResult {
 		return nil
 	}
 	return &res
+}
+
+// askRequestParams is ask.request's params: the model's question and the
+// context it gave, plus the session id, shaped like consentRequestParams
+// (ADR-0020). Both fields are model output and reach a person: untrusted.
+type askRequestParams struct {
+	Session  string `json:"session"`
+	Question string `json:"question"`
+	Context  string `json:"context"`
+}
+
+// remoteAsker is ADR-0020's live answerer for the ask tool. It rides the same
+// waiter machinery as remoteConsenter, so a reply that lands after a timeout or
+// a cancel is dropped the same way, and the wait is bounded by the same timeout.
+type remoteAsker struct {
+	srv     *server
+	session string
+	timeout time.Duration
+	clock   clock
+}
+
+func newRemoteAsker(srv *server, session string, timeout time.Duration) *remoteAsker {
+	if timeout == 0 {
+		timeout = srv.consentTimeout
+	}
+	return &remoteAsker{srv: srv, session: session, timeout: timeout, clock: realClock{}}
+}
+
+// Ask satisfies engine.Answerer.
+//
+// Unlike a consent timeout, expiry is not a denial: an unanswered question has
+// no safe default (ADR-0009), so it returns the same "nobody could answer"
+// refusal the headless case gives, which the engine journals as refused and
+// shows the model as the tool's output — never as an answer, and never as the
+// end of the session. A reply that carries an error, or no text at all, is the
+// same refusal. Only the turn's own context ending is a real error.
+func (a *remoteAsker) Ask(ctx context.Context, req engine.AskRequest) (engine.AskAnswer, error) {
+	if err := ctx.Err(); err != nil {
+		return engine.AskAnswer{}, err
+	}
+	id, waiter := a.srv.registerConsentWaiter()
+	defer a.srv.abandonConsentWaiter(id)
+
+	a.srv.write(rpcRequestOut{
+		JSONRPC: jsonrpcVersion,
+		ID:      quoteConsentID(id),
+		Method:  methodAskRequest,
+		Params:  askRequestParams{Session: a.session, Question: req.Question, Context: req.Context},
+	})
+
+	timer, stop := a.clock.NewTimer(a.timeout)
+	defer stop()
+
+	select {
+	case reply := <-waiter:
+		if reply.Result != nil && reply.Result.Text != nil {
+			return engine.AskAnswer{Text: *reply.Result.Text}, nil
+		}
+		return sessioncore.DenyAsk(ctx, req)
+	case <-timer:
+		slog.WarnContext(ctx, "remote ask timed out", "session", a.session, "timeout", a.timeout)
+		return sessioncore.DenyAsk(ctx, req)
+	case <-ctx.Done():
+		return engine.AskAnswer{}, ctx.Err()
+	}
 }

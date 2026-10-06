@@ -106,6 +106,7 @@ its first turn.
 | `consent_mode` | string | **yes** | `"remote_interactive"`, `"unattended_policy"` (ADR-0016) or `"auto"` (ADR-0017) — see [Consent modes](#consent-modes). There is no default; omitting it is a usage error |
 | `containment_provided` | boolean | iff `consent_mode` is `"unattended_policy"` | the caller's explicit acknowledgment that it supplies real process/container containment for this session (ADR-0011 decision 4). Required and must be `true` for that mode; ignored for the other two |
 | `consent_timeout` | string | no | how long this session's `consent.request` waits for an answer before it is denied, as a Go duration (`"5m"`), within `1s` to `24h`; overrides `--consent-timeout` for this session only. Only meaningful under `"remote_interactive"` — sending it under any other mode is a usage error |
+| `ask_mode` | string | no | `"remote"` (ADR-0020) puts the model's `ask` tool to the client live as an [`ask.request`](#askrequest-server--client-adr-0020) instead of the process `--ask-policy-file` or the fixed "no human is present" refusal. Needs `consent_mode: "remote_interactive"`; any other mode, or any other value, is a usage error. Omit it for today's behaviour |
 | `read_only` | boolean | no | refuse every file write for this session (ADR-0019): `write_file` and `edit_file` are denied by the gate itself, inside the root or outside it, in every mode, and the client is never asked. Shell is **not** made read-only — it stays governed by `consent_mode` — so this is not a sandbox. A usage error under `"auto"`, which runs shell unasked |
 | `never_allow` | array of strings | no | extra never-allow entries for `consent_mode: "auto"` (ADR-0017), each `"command [token ...]"`; see [`"auto"`](#auto-adr-0017). Adds to the built-in list, never removes from it. Sending it under any other mode is a usage error |
 
@@ -182,11 +183,29 @@ prints:
 `version` is a git describe for humans and must not be parsed; `tree_state` is the machine-readable
 dirty bit. `protocol` moves only for a change that breaks an existing client. `features` is a sorted
 list of stable lower-case dotted names, added in the change that ships a capability, never renamed,
-and removed only with a protocol bump. Current names: `allow_commands`, `consent_mode.auto`,
+and removed only with a protocol bump. Current names: `allow_commands`, `ask.request`, `consent_mode.auto`,
 `consent_mode.remote_interactive`, `consent_mode.unattended_policy`, `consent_request.command`,
 `consent_timeout.flag`, `consent_timeout.session`, `mcp`, `server.hello`, `session.close`,
 `session.read_only`.
 `cmd/kopicode/capabilities_test.go` ties the list to the consent modes and methods in the code.
+
+## `ask.request` (server → client, ADR-0020)
+
+Sent only for a session started with `ask_mode: "remote"`. The model called its `ask` tool; the
+question is relayed so a person can answer it, and the answer goes back to the model mid-turn.
+
+```json
+--> { "jsonrpc": "2.0", "id": "c-3", "method": "ask.request",
+      "params": { "session": "s1", "question": "tabs or spaces?", "context": "gofmt is not set up" } }
+<-- { "jsonrpc": "2.0", "id": "c-3", "result": { "text": "tabs" } }
+```
+
+`question` and `context` are model output and reach a person: untrusted, as `detail` is. `text` may
+be the empty string (a person who had nothing to add); a reply with no `text`, or with an `error`,
+counts as unanswered. The wait is bounded by the session's consent timeout (`--consent-timeout`, or
+`session.start`'s `consent_timeout`). **Expiry is not a denial**: the model is told "no human is present
+to answer this question", the headless refusal, journalled as refused, and the turn goes on. An answer is
+journalled with `source: "remote"`.
 
 ## `consent.request` (server → client, ADR-0016)
 

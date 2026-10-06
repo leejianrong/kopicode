@@ -726,9 +726,10 @@ type AskAnswered struct {
 	// ToolResult until someone cross-references CallID against the
 	// PermissionDecided-style record this type exists to be.
 	Answer Text `json:"answer"`
-	// Source is "user" or "policy" — PermissionDecided's own vocabulary, for
-	// the same reason: a headless run's canned refusal must never be
-	// indistinguishable from a person answering.
+	// Source is "user", "policy" or "remote" — PermissionDecided's own
+	// vocabulary, for the same reason: a headless run's canned refusal must
+	// never be indistinguishable from a person answering. "remote" (ADR-0020)
+	// is an answer relayed over `kopicode serve`'s ask.request.
 	Source string `json:"source"`
 	// Refused is true when nobody actually answered: no human present, or the
 	// turn was cancelled while the question was open. Answer then carries the

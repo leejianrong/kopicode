@@ -972,8 +972,11 @@ func mustAnswerer(a Answerer, mode AskMode, policy *AskPolicyFile) (Answerer, st
 		return policy.answerer(), askSourcePolicy
 	}
 	source := askSourceUser
-	if mode == AskUnattended {
+	switch mode {
+	case AskUnattended:
 		source = askSourcePolicy
+	case AskRemote:
+		source = askSourceRemote
 	}
 	if a == nil {
 		a = noAnswerer

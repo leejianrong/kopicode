@@ -161,6 +161,7 @@ const (
 	methodSessionCancel  = "session.cancel"
 	methodSessionClose   = "session.close"
 	methodServerHello    = "server.hello"    // capabilities, see capabilities.go
+	methodAskRequest     = "ask.request"     // server → client request (ADR-0020)
 	methodSessionEvent   = "session.event"   // server → client notification
 	methodConsentRequest = "consent.request" // server → client request
 )
@@ -293,6 +294,11 @@ type startParams struct {
 	// ReadOnly refuses every file write for this session (ADR-0019). A usage
 	// error under consent_mode "auto". Shell is not made read-only.
 	ReadOnly bool `json:"read_only"`
+
+	// AskMode is "" or "remote" (ADR-0020): "remote" puts the model's ask to the
+	// client as an ask.request instead of the process ask policy or the fixed
+	// refusal. Needs consent_mode "remote_interactive".
+	AskMode string `json:"ask_mode"`
 }
 
 type submitParams struct {
@@ -433,6 +439,9 @@ func serveWith(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, b
 	// (ADR-0015 decision 3); this file is only the JSON-RPC skin over it.
 	s.mgr = sessioncore.New(ctx, base, stderr, func(id string, timeout time.Duration) engine.Consenter {
 		return newRemoteConsenter(s, id, timeout).Ask
+	})
+	s.mgr.SetRemoteAsk(func(id string, timeout time.Duration) engine.Answerer {
+		return newRemoteAsker(s, id, timeout).Ask
 	})
 	s.enc = json.NewEncoder(stdout)
 	// Off, for the reason journal.Marshal and print.go's emitter both give: the
@@ -603,7 +612,7 @@ func (s *server) dispatchStart(req rpcRequest) {
 		ID: p.Session, Dir: p.Dir, Prompt: p.Prompt,
 		Model: p.Model, Harness: p.Harness, HarnessConfig: p.HarnessConfig,
 		ConsentMode: p.ConsentMode, ContainmentProvided: p.ContainmentProvided, NeverAllow: p.NeverAllow,
-		ConsentTimeout: timeout, ReadOnly: p.ReadOnly,
+		ConsentTimeout: timeout, ReadOnly: p.ReadOnly, AskMode: p.AskMode,
 	}, s.notifier(p.Session), sessioncore.Turn{Done: func(r sessioncore.TurnResult) {
 		s.writeResult(id, turnResultOf(r))
 	}}); err != nil {
