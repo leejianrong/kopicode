@@ -203,9 +203,10 @@ against a timeout, or a stray line) is dropped silently rather than reported as 
 error: the message was well-formed, it simply arrived for a question that had already
 settled one way or another.
 
-**A request that goes unanswered denies, after 60 seconds**, and is never treated as
-though granted (ADR-0016 decision 5). This is not yet configurable; see the ADR for why
-a flag was deferred rather than guessed at. A denial this way is attributed exactly like
+**A request that goes unanswered denies, after 60 seconds by default**, and is never treated
+as though granted (ADR-0016 decision 5). `--consent-timeout <duration>` (for example `5m`)
+changes it for the process, between 1s and 24h; zero or unbounded is refused, because a bound
+is the point. A denial this way is attributed exactly like
 an explicit `"deny"` reply — see [Consent modes](#consent-modes) on `Source`.
 
 ## The `session.event` notification
@@ -290,6 +291,7 @@ prompt, never on the command line.
 | flag | meaning |
 |---|---|
 | `--policy-file <path>` | an ADR-0011 declared-allowlist policy; content for any session that declares `consent_mode: "unattended_policy"` (below). Unset means refuse every shell command and write outside `dir` under that mode |
+| `--consent-timeout <duration>` | how long a `consent.request` waits for its answer before it is denied; default `60s`, between `1s` and `24h` |
 | `--ask-policy-file <path>` | an ADR-0013/KAN-1028 ask-policy file whose note answers the model's `ask` calls, for every session regardless of `consent_mode`. Unset means the fixed "no human is present" refusal |
 | `--debug` | engine diagnostics on stderr (off by default) |
 

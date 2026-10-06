@@ -43,6 +43,13 @@ type serveHarness struct {
 
 func startServe(t *testing.T, base engine.Options) *serveHarness {
 	t.Helper()
+	return startServeWith(t, base, remoteConsentTimeout)
+}
+
+// startServeWith is startServe with the live-consent timeout stated, the seam
+// --consent-timeout reaches serve through.
+func startServeWith(t *testing.T, base engine.Options, consentTimeout time.Duration) *serveHarness {
+	t.Helper()
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
 	h := &serveHarness{t: t, inW: inW, exit: make(chan int, 1), decoded: make(chan struct{})}
@@ -61,7 +68,7 @@ func startServe(t *testing.T, base engine.Options) *serveHarness {
 		}
 	}()
 	go func() {
-		code := serve(context.Background(), inR, outW, io.Discard, base)
+		code := serveWith(context.Background(), inR, outW, io.Discard, base, consentTimeout)
 		_ = outW.Close()
 		h.exit <- code
 	}()
@@ -1053,4 +1060,71 @@ func TestServeRemoteInteractiveIgnoresTheProcessPolicyFile(t *testing.T) {
 		t.Fatalf("remote_interactive session beside a process-level policy file errored: %v", resp["error"])
 	}
 	h.close()
+}
+
+// TestServeConsentTimeoutIsConfigurable: --consent-timeout reaches the live
+// consenter. With a short timeout and a client that never answers, the request
+// is denied on the clock the process was given and the denial is on the record
+// attributed remote, exactly as an explicit deny would be.
+func TestServeConsentTimeoutIsConfigurable(t *testing.T) {
+	t.Setenv(engine.APIKeyEnv, "kopicode-test-credential")
+	srv := scriptedProvider(t,
+		sseToolCall("call-1", "run_shell", `{"command":"echo hi"}`),
+		sseBody("done"),
+	)
+	h := startServeWith(t, engine.Options{ProviderBaseURL: srv.URL}, 150*time.Millisecond)
+	start := time.Now()
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
+		"params": map[string]any{
+			"session": "s1", "dir": t.TempDir(), "prompt": "go", "consent_mode": consentModeRemoteInteractive,
+		}})
+	h.awaitRequest(methodConsentRequest) // never answered
+	resp := h.awaitResponse(1)
+	if resp["error"] != nil {
+		t.Fatalf("session.start errored: %v", resp["error"])
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("took %s; the 150ms timeout was not applied (the default is %s)", elapsed, remoteConsentTimeout)
+	}
+	decisions := permissionDecisions(h.notificationsFor("s1"))
+	if len(decisions) != 1 || decisions[0]["decision"] != "deny" || decisions[0]["source"] != "remote" {
+		t.Errorf("decisions = %v, want one deny attributed remote", decisions)
+	}
+	h.close()
+}
+
+func TestConsentTimeoutFlagIsBounded(t *testing.T) {
+	for _, tc := range []struct {
+		arg  string
+		want int // exit code when refused, or -1 for accepted
+	}{
+		{"--consent-timeout=5m", -1},
+		{"--consent-timeout=1s", -1},
+		{"--consent-timeout=24h", -1},
+		{"--consent-timeout=0", exitUsage},
+		{"--consent-timeout=500ms", exitUsage},
+		{"--consent-timeout=25h", exitUsage},
+		{"--consent-timeout=-5s", exitUsage},
+		{"--consent-timeout=soon", exitUsage},
+	} {
+		var stderr strings.Builder
+		_, timeout, code, ok := residentOptions("serve", "hint", []string{tc.arg}, &stderr)
+		if tc.want == -1 {
+			if !ok {
+				t.Errorf("%s refused: %s", tc.arg, stderr.String())
+			}
+			continue
+		}
+		if ok || code != tc.want {
+			t.Errorf("%s: ok=%v code=%d timeout=%s, want a usage refusal", tc.arg, ok, code, timeout)
+		}
+	}
+	_, timeout, _, ok := residentOptions("serve", "hint", nil, io.Discard)
+	if !ok || timeout != remoteConsentTimeout {
+		t.Errorf("default = %s (ok %v), want %s", timeout, ok, remoteConsentTimeout)
+	}
+	_, timeout, _, _ = residentOptions("mcp", "hint", []string{"--consent-timeout=2m"}, io.Discard)
+	if timeout != 2*time.Minute {
+		t.Errorf("parsed timeout = %s, want 2m", timeout)
+	}
 }
