@@ -1,13 +1,13 @@
 # ADR-0015: An MCP server front end for agent-orchestrated sessions
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-06)
 - **Date:** 2026-09-19
 - **Deciders:** Jian (leejianrong2@gmail.com)
 
 Drafted by an agent during a 2026-09-19 planning session on kopicode's adoption goal —
 profit is explicitly not the goal, adoption is — and a concrete shape for it: a Claude
 Code, Hermes, or OpenClaw agent should be able to spin up a kopicode session directly
-and let it run a coding task on its own. Pending Jian's review.
+and let it run a coding task on its own. Reviewed and accepted by Jian on 2026-10-06, after implementation.
 
 Companion to [ADR-0016](0016-live-remote-consent-for-agent-orchestrated-sessions.md),
 which is the consent half of the same goal. This ADR is the transport/front-end half

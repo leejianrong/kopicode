@@ -300,9 +300,9 @@ being CGo; the resolution sketch is stdlib `go/ast` for Go plus an optional exte
 | Context compaction: a verification-truthfulness fix accepted, supersession-based compaction rejected | [0012](docs/adr/0012-context-compaction-strategy.md) |
 | `kopicode serve`, a resident session surface over stdio (NDJSON JSON-RPC) | [0013](docs/adr/0013-agent-controlled-resident-session-surface.md) |
 | A skills mechanism: a documented `.agents/skills/` directory, no new tool | [0014](docs/adr/0014-skills-mechanism.md) *(Proposed)* |
-| An MCP server front end, reusing `serve`'s session core | [0015](docs/adr/0015-mcp-server-front-end.md) *(Proposed; implemented)* |
-| Live remote consent for agent-orchestrated sessions; an explicit consent-mode declaration | [0016](docs/adr/0016-live-remote-consent-for-agent-orchestrated-sessions.md) *(Proposed)* |
-| An `auto` consent mode: allow inside the root, a fixed never-allow list outside it | [0017](docs/adr/0017-auto-consent-mode.md) *(Proposed)* |
+| An MCP server front end, reusing `serve`'s session core | [0015](docs/adr/0015-mcp-server-front-end.md) *(Accepted)* |
+| Live remote consent for agent-orchestrated sessions; an explicit consent-mode declaration | [0016](docs/adr/0016-live-remote-consent-for-agent-orchestrated-sessions.md) *(Accepted)* |
+| An `auto` consent mode: allow inside the root, a fixed never-allow list outside it | [0017](docs/adr/0017-auto-consent-mode.md) *(Accepted)* |
 | A tokenized allowlist: command prefixes matched on whole tokens, every command in a line | [0018](docs/adr/0018-tokenized-allowlist.md) *(Proposed)* |
 
 Two of these reverse earlier plans in this repo, and three more amend earlier ones
