@@ -1,0 +1,371 @@
+{
+  "format_version": 1,
+  "origin": "recorded",
+  "origin_note": "",
+  "name": "recorded_go_flag_equals_form",
+  "description": "A live deepseek/deepseek-v3.2 session on corpus task go-flag-equals-form, recorded by `kopibench run --record-dir`.",
+  "model_id": "deepseek/deepseek-v3.2",
+  "pin": {
+    "order": [
+      "atlas-cloud/fp8"
+    ],
+    "allow_fallbacks": false,
+    "quantizations": [
+      "fp8"
+    ]
+  },
+  "exchanges": [
+    {
+      "turn": 1,
+      "attempt": 1,
+      "note": "Recorded from a live session on corpus task go-flag-equals-form, turn 1 attempt 1.",
+      "request_headers": {
+        "accept": "text/event-stream",
+        "content-type": "application/json"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "text/event-stream"
+        },
+        "body": {
+          "id": "gen-1791276161-NbjWXv0M8GmbHPhmbzuq",
+          "object": "chat.completion",
+          "created": 1791276161,
+          "model": "deepseek/deepseek-v3.2",
+          "provider": "AtlasCloud",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": "I'll start by exploring the repository to understand the deploy tool's argument parser. Let me first check for any skills that might be relevant.\n\n```tool\n{\"name\": \"list_dir\", \"arguments\": {\"path\": \".agents/skills\"}}\n```"
+              },
+              "finish_reason": "stop",
+              "native_finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 3630,
+            "completion_tokens": 53,
+            "total_tokens": 3683
+          }
+        },
+        "stream": [
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"I\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"'ll\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" start\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" by exploring\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" the repository\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" to\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" understand the deploy\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" tool\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"'s\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" argument\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" parser. Let\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" me\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" first check\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" for any\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" skills that\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" might be relevant\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\".\\n\\n```\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"tool\\n\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"{\\\"name\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\\\": \\\"list\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"_dir\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\\\", \\\"arguments\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\\\": {\\\"\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"path\\\": \\\".\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"agents/s\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"kills\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\\\"}}\\n```\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"native_finish_reason\":\"stop\"}]}",
+          "",
+          "data: {\"id\":\"gen-1791276161-NbjWXv0M8GmbHPhmbzuq\",\"object\":\"chat.completion.chunk\",\"created\":1791276161,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"service_tier\":null,\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"native_finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3630,\"completion_tokens\":53,\"total_tokens\":3683,\"cost\":0.00050634,\"is_byok\":false,\"prompt_tokens_details\":{\"cached_tokens\":3520,\"cache_write_tokens\":0,\"audio_tokens\":0,\"video_tokens\":0},\"cost_details\":{\"upstream_inference_cost\":0.00050634,\"upstream_inference_prompt_cost\":0.0004862,\"upstream_inference_completions_cost\":0.00002014},\"completion_tokens_details\":{\"reasoning_tokens\":0,\"image_tokens\":0,\"audio_tokens\":0}}}",
+          "",
+          "data: [DONE]",
+          ""
+        ]
+      },
+      "expect": {
+        "finish_reason": "stop",
+        "route": "fenced_json",
+        "tools": [
+          "list_dir"
+        ],
+        "usage": {
+          "prompt": 3630,
+          "completion": 53,
+          "total": 3683
+        },
+        "served_by": "AtlasCloud"
+      }
+    },
+    {
+      "turn": 2,
+      "attempt": 1,
+      "note": "Recorded from a live session on corpus task go-flag-equals-form, turn 2 attempt 1.",
+      "request_headers": {
+        "accept": "text/event-stream",
+        "content-type": "application/json"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "text/event-stream"
+        },
+        "body": {
+          "id": "gen-1791276164-elts108X14pIHsdfh3x1",
+          "object": "chat.completion",
+          "created": 1791276164,
+          "model": "deepseek/deepseek-v3.2",
+          "provider": "AtlasCloud",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": "No skills directory. Let me search for the deploy tool and its argument parser.\n\n```tool\n{\"name\": \"grep\", \"arguments\": {\"pattern\": \"deploy\", \"path\": \"\", \"ignore_case\": false}}\n```\n\n",
+                "tool_calls": [
+                  {
+                    "id": "call_056325eec74e4281be6f2f2f",
+                    "type": "function",
+                    "function": {
+                      "name": "grep",
+                      "arguments": "{\"pattern\": \"deploy\", \"path\": \"\", \"ignore_case\": false}"
+                    }
+                  }
+                ]
+              },
+              "finish_reason": "tool_calls",
+              "native_finish_reason": "tool_calls"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 3912,
+            "completion_tokens": 121,
+            "total_tokens": 4033
+          }
+        },
+        "stream": [
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"No\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" skills directory\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\".\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" Let me\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" search for\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" the deploy\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" tool and\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" its argument\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" parser.\\n\\n\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"```tool\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\\n{\\\"\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"name\\\":\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" \\\"g\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"rep\\\",\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" \\\"arguments\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\\\": {\\\"\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"pattern\\\":\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" \\\"de\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ploy\\\",\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" \\\"path\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\\\": \\\"\\\",\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" \\\"ignore\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"_case\\\":\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\" false}}\\n\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"```\\n\\n\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"id\":\"call_056325eec74e4281be6f2f2f\",\"type\":\"function\",\"function\":{\"name\":\"grep\",\"arguments\":\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"pattern\\\": \\\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"deploy\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\", \\\"path\\\": \\\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\", \\\"ignore_case\\\": \"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"false\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null,\"role\":\"assistant\",\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"}\"}}]},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\",\"role\":\"assistant\"},\"finish_reason\":\"tool_calls\",\"native_finish_reason\":\"tool_calls\"}]}",
+          "",
+          "data: {\"id\":\"gen-1791276164-elts108X14pIHsdfh3x1\",\"object\":\"chat.completion.chunk\",\"created\":1791276164,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"service_tier\":null,\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\",\"role\":\"assistant\"},\"finish_reason\":\"tool_calls\",\"native_finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":3912,\"completion_tokens\":121,\"total_tokens\":4033,\"cost\":0.00058054,\"is_byok\":false,\"prompt_tokens_details\":{\"cached_tokens\":3712,\"cache_write_tokens\":0,\"audio_tokens\":0,\"video_tokens\":0},\"cost_details\":{\"upstream_inference_cost\":0.00058054,\"upstream_inference_prompt_cost\":0.00053456,\"upstream_inference_completions_cost\":0.00004598},\"completion_tokens_details\":{\"reasoning_tokens\":0,\"image_tokens\":0,\"audio_tokens\":0}}}",
+          "",
+          "data: [DONE]",
+          ""
+        ]
+      },
+      "expect": {
+        "finish_reason": "tool_calls",
+        "route": "native",
+        "tools": [
+          "grep"
+        ],
+        "usage": {
+          "prompt": 3912,
+          "completion": 121,
+          "total": 4033
+        },
+        "served_by": "AtlasCloud"
+      }
+    },
+    {
+      "turn": 3,
+      "attempt": 1,
+      "note": "Recorded from a live session on corpus task go-flag-equals-form, turn 3 attempt 1.",
+      "request_headers": {
+        "accept": "text/event-stream",
+        "content-type": "application/json"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "text/event-stream"
+        },
+        "body": {
+          "id": "gen-1791276167-hvC6qhjMO5aZpns4XQjo",
+          "object": "chat.completion",
+          "created": 1791276167,
+          "model": "deepseek/deepseek-v3.2",
+          "provider": "AtlasCloud",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": "\n```"
+              },
+              "finish_reason": "stop",
+              "native_finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 3832,
+            "completion_tokens": 3,
+            "total_tokens": 3835
+          }
+        },
+        "stream": [
+          "data: {\"id\":\"gen-1791276167-hvC6qhjMO5aZpns4XQjo\",\"object\":\"chat.completion.chunk\",\"created\":1791276167,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\\n\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276167-hvC6qhjMO5aZpns4XQjo\",\"object\":\"chat.completion.chunk\",\"created\":1791276167,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"```\",\"role\":\"assistant\"},\"finish_reason\":null,\"native_finish_reason\":null}]}",
+          "",
+          "data: {\"id\":\"gen-1791276167-hvC6qhjMO5aZpns4XQjo\",\"object\":\"chat.completion.chunk\",\"created\":1791276167,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"native_finish_reason\":\"stop\"}]}",
+          "",
+          "data: {\"id\":\"gen-1791276167-hvC6qhjMO5aZpns4XQjo\",\"object\":\"chat.completion.chunk\",\"created\":1791276167,\"model\":\"deepseek/deepseek-v3.2\",\"provider\":\"AtlasCloud\",\"service_tier\":null,\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"native_finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3832,\"completion_tokens\":3,\"total_tokens\":3835,\"cost\":0.00053154,\"is_byok\":false,\"prompt_tokens_details\":{\"cached_tokens\":3584,\"cache_write_tokens\":0,\"audio_tokens\":0,\"video_tokens\":0},\"cost_details\":{\"upstream_inference_cost\":0.00053154,\"upstream_inference_prompt_cost\":0.0005304,\"upstream_inference_completions_cost\":0.00000114},\"completion_tokens_details\":{\"reasoning_tokens\":0,\"image_tokens\":0,\"audio_tokens\":0}}}",
+          "",
+          "data: [DONE]",
+          ""
+        ]
+      },
+      "expect": {
+        "finish_reason": "stop",
+        "route": "",
+        "usage": {
+          "prompt": 3832,
+          "completion": 3,
+          "total": 3835
+        },
+        "served_by": "AtlasCloud"
+      }
+    }
+  ]
+}

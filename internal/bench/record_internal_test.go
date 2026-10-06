@@ -107,3 +107,20 @@ func TestRecordDirRefusesAMockRun(t *testing.T) {
 		t.Fatalf("err = %v, want a refusal naming that recording needs a live run", err)
 	}
 }
+
+// TestFillExtractorFactsLabelsAFencedJSONCall: a reply whose tool call is fenced
+// JSON in prose must be filed under the route the extractor takes, not left with
+// an empty one, which is how the shipped tests would read "called nothing".
+func TestFillExtractorFactsLabelsAFencedJSONCall(t *testing.T) {
+	body := `{"id":"x","object":"chat.completion","model":"m","choices":[{"index":0,` +
+		`"message":{"role":"assistant","content":"Reading it.\n` + "```tool" + `\n{\"name\":\"read_file\",\"arguments\":{\"path\":\"a.go\"}}\n` + "```" + `"},` +
+		`"finish_reason":"stop"}]}`
+	f := fixture.Fixture{Exchanges: []fixture.Exchange{{Response: fixture.Response{Body: []byte(body)}}}}
+	if err := fillExtractorFacts(&f); err != nil {
+		t.Fatalf("fillExtractorFacts: %v", err)
+	}
+	got := f.Exchanges[0].Expect
+	if got.Route != "fenced_json" || len(got.Tools) != 1 || got.Tools[0] != "read_file" {
+		t.Errorf("expect = route %q tools %v, want fenced_json [read_file]", got.Route, got.Tools)
+	}
+}

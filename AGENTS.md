@@ -192,8 +192,8 @@ Assert **observable outcomes** — journal events, the resulting tree, exit code
 captured stdout — never internal loop state.
 
 The mock provider **replays recorded traffic rather than synthesising it**, so it
-doesn't mask real breakage by drifting from actual provider behaviour. Two
-recorded fixtures now ship (`recorded_*`, deepseek/deepseek-v3.2), made by
+doesn't mask real breakage by drifting from actual provider behaviour. Ten
+recorded fixtures now ship (`recorded_*`, deepseek/deepseek-v3.2, one per corpus task bar three), made by
 `kopibench run --record-dir`; the three older ones are still hand-authored and
 say so, and are being replaced as tasks are recorded.
 

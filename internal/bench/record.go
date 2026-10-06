@@ -2,6 +2,8 @@ package bench
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -9,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/leejianrong/kopicode/internal/engine"
+	"github.com/leejianrong/kopicode/internal/parse"
 	"github.com/leejianrong/kopicode/internal/provider"
 	"github.com/leejianrong/kopicode/internal/provider/fixture"
 )
@@ -68,6 +71,9 @@ func (p recordingProvider) finish(dir, name string, model string) (string, error
 	if err != nil {
 		return "", fmt.Errorf("bench: assembling the recording for %s: %w", p.task, err)
 	}
+	if err := fillExtractorFacts(&f); err != nil {
+		return "", fmt.Errorf("bench: the recording for %s: %w", p.task, err)
+	}
 	if len(f.Exchanges) == 0 {
 		return "", fmt.Errorf("bench: nothing was recorded for %s: the session made no request that got a reply", p.task)
 	}
@@ -82,4 +88,65 @@ func (p recordingProvider) finish(dir, name string, model string) (string, error
 		return "", fmt.Errorf("bench: %w", err)
 	}
 	return filepath.Clean(path), nil
+}
+
+// fillExtractorFacts sets each exchange's route and tool names from what the real
+// extractor makes of the reply.
+//
+// The recorder itself only knows a reply is native when the wire says so, and it
+// cannot import internal/parse. But a model that writes its call as fenced JSON
+// or an XML tag inside prose is the case the harness's repair routes exist for,
+// and the shipped tests hold every fixture's declared route to the extractor's
+// own answer. Left empty, a recording of exactly the interesting replies would
+// claim they called nothing.
+func fillExtractorFacts(f *fixture.Fixture) error {
+	for i := range f.Exchanges {
+		ex := &f.Exchanges[i]
+		var body struct {
+			Choices []struct {
+				Message struct {
+					Content   *string `json:"content"`
+					ToolCalls []struct {
+						ID       string `json:"id"`
+						Function struct {
+							Name      string `json:"name"`
+							Arguments string `json:"arguments"`
+						} `json:"function"`
+					} `json:"tool_calls"`
+				} `json:"message"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal(ex.Response.Body, &body); err != nil {
+			return fmt.Errorf("exchange %d: decoding the body: %w", i, err)
+		}
+		if len(body.Choices) != 1 {
+			continue // an error body or an empty reply: nothing was called
+		}
+		m := body.Choices[0].Message
+		var msg parse.Message
+		if m.Content != nil {
+			msg.Content = *m.Content
+		}
+		for _, tc := range m.ToolCalls {
+			enc, err := json.Marshal(tc.Function.Arguments)
+			if err != nil {
+				return fmt.Errorf("exchange %d: re-encoding arguments: %w", i, err)
+			}
+			msg.ToolCalls = append(msg.ToolCalls, parse.NativeCall{ID: tc.ID, Name: tc.Function.Name, Arguments: enc})
+		}
+		ext, err := parse.Extract(msg)
+		if errors.Is(err, parse.ErrNoToolCall) {
+			ex.Expect.Route, ex.Expect.Tools = "", nil
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("exchange %d: the extractor failed on a recorded reply: %w", i, err)
+		}
+		var names []string
+		for _, c := range ext.Calls() {
+			names = append(names, c.Name)
+		}
+		ex.Expect.Route, ex.Expect.Tools = ext.Route().String(), names
+	}
+	return nil
 }
