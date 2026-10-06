@@ -1,91 +1,48 @@
 # kopicode
 
-A coding agent for the terminal, and a harness you can tune per model.
+A terminal coding agent, and a harness you can tune per model. kopicode is built to make
+cheap open-weight models code reliably: it repairs malformed tool calls, edits through
+hash anchors that reject on drift instead of guessing, syntax-checks every edit, and will not
+report success until your project's own tests pass. One engine runs the same way from your
+terminal, a script, or another agent.
 
-Slice 1 is built and has been run against a real repository and against the frozen
-benchmark corpus: a REPL and a headless bench runner drive one engine, with tool-call
-parse-and-repair, hash-anchored edits that reject on drift rather than guessing, a
-post-edit syntax gate, forced verification, and a permission gate in front of anything
-that runs a shell command or writes outside the project. This README records the
-decisions behind that build; the reasoning behind each one is in
-[`docs/adr/`](docs/adr/), and `CLAUDE.md`'s "Build status" section is the fuller,
-more current account of what exists — trust it over this file where the two disagree.
+```mermaid
+flowchart LR
+    you["you, in a terminal"] --> repl["kopicode<br/>(REPL)"]
+    script["a script"] --> run["kopicode run --print<br/>(one task, JSON out)"]
+    agent["an agent<br/>(Claude Code, cuttlefish, …)"] --> mcp["kopicode mcp<br/>kopicode serve"]
+    ci["the benchmark"] --> bench["kopibench"]
+    repl & run & mcp & bench --> engine["one engine<br/>tool-call repair · anchored edits<br/>syntax gate · forced verification<br/>permission gate"]
+    engine --> model["any OpenRouter model<br/>(pinned provider)"]
+    engine --> repo["your repo<br/>+ git shadow refs<br/>+ the session journal"]
+```
 
-## Quickstart
+**Status:** v0.2, with recorded runs on real repositories in
+[`docs/dogfood-runs/`](docs/dogfood-runs/). One model is measured end to end; two more are
+registered. There is no sandbox: an approved shell command runs with your
+privileges ([why](docs/adr/0008-shell-isolation-accepted-risk.md)). Questions and bugs go in
+the [issue tracker](https://github.com/leejianrong/kopicode/issues).
 
-Getting from nothing installed to a first turn in the interactive REPL. The pre-built
-binary needs nothing else; Go 1.26 or later is required only if you build from source.
+## Quick start
 
-### 1. Install
-
-The fastest path is a pre-built binary from the latest [GitHub Release](https://github.com/leejianrong/kopicode/releases).
-The installer detects your OS and architecture and drops `kopicode` into `~/.local/bin`:
+You need an [OpenRouter](https://openrouter.ai/keys) API key. The pre-built binary needs
+nothing else; building from source needs Go 1.26 or later.
 
 ```bash
+# install the latest release into ~/.local/bin (checks it against SHA256SUMS)
 curl -fsSL https://raw.githubusercontent.com/leejianrong/kopicode/main/scripts/install.sh | sh
+
+# or build from source
+git clone https://github.com/leejianrong/kopicode.git && cd kopicode && make build   # -> bin/kopicode
+
+export OPENROUTER_API_KEY="..."   # read from the environment only; a .env file is not loaded
+cd your-project
+kopicode                          # starts the REPL in the current directory
 ```
 
-Set `INSTALL_BIN=kopicode,kopibench` to grab the bench runner too, or `INSTALL_DIR`
-to install somewhere other than `~/.local/bin`. Prefer to download by hand? Each
-release ships `kopicode-<os>-<arch>` and `kopibench-<os>-<arch>` for linux and darwin
-(amd64/arm64) plus windows/amd64 — grab the one that matches, `chmod +x`, and put it
-on your `PATH`.
-
-**Or build from source** (needs Go 1.26+):
-
-```bash
-git clone https://github.com/leejianrong/kopicode.git
-cd kopicode
-make build   # or: go build -o bin/kopicode ./cmd/kopicode
-```
-
-This produces `bin/kopicode` (and `bin/kopibench`, the headless benchmark runner,
-which this quickstart does not cover).
-
-### 2. Set your API key
-
-kopicode talks to models through [OpenRouter](https://openrouter.ai/). Set
-`OPENROUTER_API_KEY` in your environment before starting a session — where to get a
-key is out of scope here, but without it kopicode has no provider to talk to and
-refuses to open a session:
-
-```bash
-export OPENROUTER_API_KEY="..."
-```
-
-kopicode reads this from the process environment and nowhere else — it does **not**
-auto-load a `.env` file. If you keep the key in one, export it into your shell first
-(`export $(grep -v '^#' .env | xargs)`, or a loader like `direnv`) before running
-kopicode.
-
-### 3. Pick a model
-
-Three model ids are registered today:
-
-| Model id | Notes |
-| --- | --- |
-| `qwen/qwen3-coder-next` | the default — used if `--model` is omitted |
-| `minimax/minimax-m2` | |
-| `z-ai/glm-5.2` | long context |
-
-```bash
-bin/kopicode --model qwen/qwen3-coder-next
-```
-
-Omit `--model` to get the default. A model id outside this list is refused at
-startup, before anything else happens, with the supported list printed back —
-never a provider error one request later.
-
-### 4. First run
-
-A bare `bin/kopicode` starts the interactive REPL in the current directory. Type a
-task in plain English at the prompt; the model reads files, proposes edits and, where
-it decides it needs to, runs a shell command.
-
-Two kinds of action always stop and ask for your consent first: running a shell
-command, and writing to a path outside the project directory. Ordinary edits and
-writes *inside* the project are not gated — that's the agent's job, not a decision the
-loop asks you to make turn after turn. The prompt looks like this:
+Type a task at the prompt. The model reads files, proposes edits and, when it needs to, runs
+a shell command. Two things always stop and ask first: running a shell command, and writing
+outside the project. Edits inside the project are the agent's job and are not gated.
 
 ```
 [perm] run_shell needs your consent
@@ -93,399 +50,117 @@ loop asks you to make turn after turn. The prompt looks like this:
 allow? [y]es / [N]o / [a]lways for this exact request:
 ```
 
-- `y` allows this one call.
-- Anything else — including a bare Enter — denies it, which is the deliberately safe
-  default.
-- `a` allows this *exact* request (same tool, same exact command or path) for the
-  rest of the session. It's an exact match, not a standing grant over a directory or
-  a command prefix — a different shell command still asks again.
+`y` allows this call; anything else, including Enter, denies; `a` allows that exact request
+for the session (an exact match, never a directory or a command prefix). `Ctrl-C` cancels the
+turn in flight without ending the session. Your first task is best a small, well-described
+bug in a repo with tests: [`docs/trying-kopicode.md`](docs/trying-kopicode.md) walks through
+two real ones. A one-line fix cost about $0.04.
 
-`Ctrl-C` while a turn is in flight cancels that turn — the model's in-progress reply,
-or a running shell command — without ending the session; you'll see a `[cancelled]`
-line and get the prompt back. `Ctrl-C` at an empty prompt just discards whatever
-you'd typed.
+## Usage
 
-Want concrete first tasks — real repositories, exact prompts, and what to watch for?
-See [`docs/trying-kopicode.md`](docs/trying-kopicode.md).
-
-### 5. `.kopicode/config.toml`
-
-A repository can pin its own model and harness, so that everyone who runs kopicode in
-it gets the same arm without typing flags:
+**Interactively**, as above. Pick a model with `--model` (default `qwen/qwen3-coder-next`;
+`minimax/minimax-m2` and `z-ai/glm-5.2` are also registered, and an unknown id is refused at
+startup with the list printed). Pin a repository's choice so everyone gets the same one:
 
 ```toml
+# .kopicode/config.toml
 model = "minimax/minimax-m2"
 ```
 
-Precedence, highest first: `--model` / `--harness` on the command line, then this
-file, then the built-in default. There is no environment variable anywhere in that
-chain — `OPENROUTER_API_KEY` above is the one thing kopicode reads from the
-environment, and it's a credential, not a configuration choice.
+Precedence is `--model` / `--harness`, then this file, then the built-in default. No
+environment variable is in that chain.
 
-**Example configurations**: See [`docs/examples/`](docs/examples/) for ready-to-use
-config templates for Go, JavaScript/TypeScript, Python, and multi-language projects.
-
-### 6. Tuning the harness (raising the turn cap)
-
-The built-in harness bounds are fixed at build time. When you need one to be
-different — most often when a session stops with `max_turns` (exit 4) because a
-task needed more turns than the default 20 — write a **declared harness config**
-(ADR-0010): a small TOML file that starts from a built-in configuration and
-overrides just the fields you name.
-
-```toml
-# harness.toml
-base = "default"
-max_turns = 40
-```
+**As a one-shot**, with the record as newline-delimited JSON on stdout:
 
 ```bash
-bin/kopicode --harness-config harness.toml "…your task…"
+kopicode run --print "fix the failing test in ./parser"
 ```
 
-You can also pin it per repository with `harness_config = "harness.toml"` in
-`.kopicode/config.toml` (resolved next to that file). The tunable fields are
-`max_turns`, `token_budget`, `repair_budget`, and `max_tokens`. A declared config
-is **local-only**: it never anchors a published benchmark number. Full details,
-the template, and the precedence rules are in
-[`docs/harness-tuning.md`](docs/harness-tuning.md) and
-[`docs/examples/harness-config.toml`](docs/examples/harness-config.toml).
+It refuses shell commands and out-of-project writes unless a policy file says otherwise
+([wire and exit codes](docs/run-print-protocol.md)).
 
-### 7. Scripting and embedding
+**From another agent**, as an MCP server. Four tools, session events as progress
+notifications, and a required `consent_mode` that says who answers permission requests:
 
-Two non-interactive surfaces sit over the same engine, both out of scope for this
-quickstart:
-
-- `kopicode run --print` — the headless one-shot: it runs one prompt and emits
-  newline-delimited JSON events on stdout instead of driving a terminal. See
-  `cmd/kopicode/print.go`'s doc comment for the schema.
-- `kopicode serve` — a resident surface that holds a process open and drives sessions
-  over NDJSON JSON-RPC 2.0 on stdio, for an orchestrator that spawns kopicode as a
-  child and runs a sequence of tasks without paying startup cost each time
-  ([ADR-0013](docs/adr/0013-agent-controlled-resident-session-surface.md)). The wire
-  is documented in [`docs/kopicode-serve-protocol.md`](docs/kopicode-serve-protocol.md).
-- `kopicode mcp` — the same sessions as an MCP server on stdio, so an MCP-capable agent
-  (Claude Code, for one: `claude mcp add kopicode -e OPENROUTER_API_KEY -- kopicode mcp`)
-  can run coding tasks with no bespoke client
-  ([ADR-0015](docs/adr/0015-mcp-server-front-end.md)). Four tools, session events as
-  progress notifications; see [`docs/kopicode-mcp.md`](docs/kopicode-mcp.md).
-
-Both refuse shell and out-of-project writes by default, with nobody at a terminal to
-consent; a `--policy-file` ([ADR-0011](docs/adr/0011-unattended-invocation-policy-gate.md))
-is how an orchestrator declares, up front, what an unattended invocation may do.
-
-### 8. Skills
-
-A repository can package instructions for a recurring task under
-`.agents/skills/<name>/SKILL.md` — a file with a `name`/`description` frontmatter and
-Markdown body ([ADR-0014](docs/adr/0014-skills-mechanism.md)). No new tool and nothing
-to enable: the default system prompt tells the model to read a relevant skill before
-improvising, using the same `read_file` it uses for any other file. The path is the
-vendor-neutral convention Claude Code, Codex CLI, Cursor and Gemini CLI also read, so a
-skill written for one works under kopicode unchanged — the same interop reason kopicode
-reads `AGENTS.md`. A worked example and the format are in
-[`docs/examples/README.md`](docs/examples/README.md#skills-packaged-reusable-task-instructions).
-
-### About the installer
-
-`scripts/install.sh` (KAN-934) is the one-liner in step 1 above. It detects your OS
-and architecture, downloads the matching `kopicode-<os>-<arch>` asset staged by
-`.github/workflows/release.yml` (KAN-931) from the latest release, and installs it to
-`~/.local/bin`, checking it against the release's `SHA256SUMS` (a mismatch refuses to
-install; a release that predates the sums installs with a warning). On an unsupported
-OS/arch, or before any release exists, it fails with a clear message rather than
-downloading nothing silently. Windows and any architecture
-outside the Makefile's `PLATFORMS` list stay on building from source.
-
-## The thesis
-
-A model's harness — prompt structure, tool surface, parse-and-repair behaviour,
-context handling, verification loop — moves its measured coding ability by a large
-margin. Published claims put the swing at 10–25 percentage points on standard
-software-engineering benchmarks.
-
-Open-weight models are the ones with the most headroom, because they get the least
-harness attention. So kopicode is two things at once, deliberately:
-
-1. **A terminal coding agent good enough to build with daily.** That is the product,
-   and the thing it is judged on.
-2. **A harness that can be tuned per model, with a benchmark rig to prove the tuning
-   worked.** Benchmarks are a regression gate and an experiment platform, not the
-   deliverable.
-
-Both matter from the first slice, because they constrain the architecture in the
-same direction: one engine, two front ends — an interactive REPL and a headless
-runner. A benchmark cannot drive a REPL.
-
-## Where the harness gains actually are
-
-Ordered by expected payoff, which is also the build order:
-
-1. **Tool-call parse-and-repair.** Weak models emit malformed JSON, invented tool
-   names, and wrong parameter shapes. Accepting several formats and feeding a
-   specific error back for a retry — instead of burning the turn — is the single
-   biggest lever.
-2. **An edit tool where the model never reproduces file content.** `read_file`
-   returns per-line content anchors; `edit_file` references them and **rejects on
-   drift** rather than applying somewhere plausible. Exact-match replacement fails
-   constantly on models that paraphrase, and fuzzy matching fails *open* — it can
-   land above the similarity floor in the wrong place, silently. Anchors sidestep
-   both instead of tolerating either
-   ([ADR-0006](docs/adr/0006-hash-anchored-edits-and-failure-attribution.md), a
-   design adopted from oh-my-pi).
-3. **Forced verification.** The loop runs tests and lint after edits and will not
-   report success without them.
-
-Note what these have in common: none of them are model-*specific*. They are generic
-reliability work that disproportionately helps weak models. The genuinely
-model-specific layer — prompt phrasing, XML versus JSON preference, thinking-block
-handling — sits on top and is thinner. Build the thick layer first.
-
-There is no plugin catalogue and no add-on taxonomy yet. The axes get invented after
-two models have been made to work, not before ([ADR-0005](docs/adr/0005-benchmark-and-ab-methodology.md)).
-What *does* ship from the start is the shape that holds them: a harness configuration is
-a named value in the binary, resolved from the model id
-([ADR-0007](docs/adr/0007-model-selection-and-harness-config-shape.md)). Deferring the
-axes and deferring the shape are separate questions, and only the first is deferred.
-
-## Prior art, and what we are deliberately not building
-
-Surveyed 2026-08-11. Two projects define the space kopicode sits in, and both are MIT:
-
-- **[Pi](https://pi.dev/)** (Earendil Inc. / Mario Zechner, TypeScript) — a
-  deliberately minimal harness with lazy-loaded skills and extensions, four surfaces
-  (TUI, print/JSON, RPC, SDK), and **session trees you can navigate back into and
-  continue from**.
-- **[oh-my-pi](https://github.com/can1357/oh-my-pi)** (Can Bölük, Rust core + Node
-  CLI) — the batteries-included fork: ~160k LoC, 31 tools, LSP wired into every write,
-  a DAP debugger, browser and desktop control, subagents in parallel worktrees, 60+
-  providers, and the **hashline** edit format kopicode's ADR-0006 adopts.
-
-Two consequences worth stating plainly.
-
-**Session trees are not a differentiator.** Pi ships navigate-to-any-previous-point
-already. kopicode's git-backed version restores the *tree* as well as the
-conversation, which is the half Pi doesn't do, but that is a refinement of a shipped
-feature and not a wedge. ADR-0002 had already stopped leaning on it.
-
-**Competing on tool surface is unwinnable and off-thesis.** Explicit non-goals, not
-"later": LSP integration, DAP debugging, browser or desktop control, voice and TTS,
-image generation, a memory system, in-process coreutils, dozens of providers, and
-IDE integration. Every one is orthogonal to whether a cheap open model can be made to
-code reliably — which is the only question this project is trying to answer.
-
-What *is* on the roadmap, borrowed deliberately: the `ask` tool (agent asks on genuine
-ambiguity, slice 2), semantic model roles (cheap model for grunt work, strong for
-planning — slice 3, after the second model, since it expands the A/B matrix), and a
-JSON-RPC surface for editors (slice 3, mostly plumbed by the headless runner already).
-AST-structural editing stays an open question, blocked on tree-sitter's Go bindings
-being CGo; the resolution sketch is stdlib `go/ast` for Go plus an optional external
-`ast-grep` binary, per ADR-0006 §6.
-
-## Decisions of record
-
-| Decision | ADR |
-| --- | --- |
-| Go, not Python or TypeScript | [0001](docs/adr/0001-go-implementation-language.md) |
-| No durable-execution runtime; own event log + git shadow refs | [0002](docs/adr/0002-no-durable-runtime-own-journal.md) |
-| One repo; engine under `internal/`, not a separate library | [0003](docs/adr/0003-single-repo-internal-engine.md) |
-| Line-oriented REPL, no full-screen TUI | [0004](docs/adr/0004-line-oriented-repl.md) |
-| Paired A/B methodology, pinned providers, mock provider | [0005](docs/adr/0005-benchmark-and-ab-methodology.md) |
-| Hash-anchored edits; three-bucket failure attribution | [0006](docs/adr/0006-hash-anchored-edits-and-failure-attribution.md) |
-| One binary for every model; harness config resolved from the model id; what an arm is | [0007](docs/adr/0007-model-selection-and-harness-config-shape.md) |
-| Model-authored shell isolation is an accepted risk, not a sandbox | [0008](docs/adr/0008-shell-isolation-accepted-risk.md) *(Proposed)* |
-| The `ask` tool: a sibling to consent, not an extension of it | [0009](docs/adr/0009-ask-tool-contract.md) *(Proposed)* |
-| Declarative harness configs and a self-tuning search loop (`kopitune`) | [0010](docs/adr/0010-declarative-harness-configs-and-self-tuning.md) |
-| A policy gate for unattended invocation, containment left to the caller | [0011](docs/adr/0011-unattended-invocation-policy-gate.md) |
-| Context compaction: a verification-truthfulness fix accepted, supersession-based compaction rejected | [0012](docs/adr/0012-context-compaction-strategy.md) |
-| `kopicode serve`, a resident session surface over stdio (NDJSON JSON-RPC) | [0013](docs/adr/0013-agent-controlled-resident-session-surface.md) |
-| A skills mechanism: a documented `.agents/skills/` directory, no new tool | [0014](docs/adr/0014-skills-mechanism.md) *(Proposed)* |
-| An MCP server front end, reusing `serve`'s session core | [0015](docs/adr/0015-mcp-server-front-end.md) *(Accepted)* |
-| Live remote consent for agent-orchestrated sessions; an explicit consent-mode declaration | [0016](docs/adr/0016-live-remote-consent-for-agent-orchestrated-sessions.md) *(Accepted)* |
-| An `auto` consent mode: allow inside the root, a fixed never-allow list outside it | [0017](docs/adr/0017-auto-consent-mode.md) *(Accepted)* |
-| A tokenized allowlist: command prefixes matched on whole tokens, every command in a line | [0018](docs/adr/0018-tokenized-allowlist.md) *(Accepted)* |
-
-Two of these reverse earlier plans in this repo, and three more amend earlier ones
-without reversing them (one amends two prior ADRs at once). Worth being explicit about
-all of them.
-
-**Satay is out.** The original bet was "a kopicode session is a journal" — replay
-it, fork it at the turn where it went wrong. The hole in that: Satay forks by
-replaying a prefix and *reusing recorded results*, so a fork at turn 7 replays the
-`edit_file` calls as recorded return values rather than re-running them. **The
-journal records what the agent decided and what it was told. It does not record the
-repo.** A forked session gives you a rewound conversation over a working tree that
-never moved, which is worse than not forking. For a coding agent the state that
-matters is the filesystem, and the thing that versions filesystems is git. Details
-and the replacement design in [ADR-0002](docs/adr/0002-no-durable-runtime-own-journal.md).
-
-**kopi-engine is folded in.** With Satay out and cuttlefish unstarted, a separate engine
-repo was two CI setups and a version matrix for one unbuilt product. Go's
-`internal/` gives the boundary for free. [ADR-0003](docs/adr/0003-single-repo-internal-engine.md).
-
-**Declared configs sit next to the built-in registry.** ADR-0007 said users don't
-author a harness configuration. That held for the case it was written for: a
-published benchmark result, which has to reproduce from the artifact alone. A
-private one doesn't carry that requirement, so
-[ADR-0010](docs/adr/0010-declarative-harness-configs-and-self-tuning.md) adds a
-second, declarative config class, TOML, base configuration plus field overrides, for
-a model with no built-in entry, plus `kopitune`: a search loop over the fields the
-harness already has. It's local-only by design. A declared config never anchors a
-published number.
-
-**The unattended case needed its own trust model, not a workaround.** ADR-0008
-accepted that a consented shell command runs with the operator's full privilege, on
-the premise that the operator and the person whose task is running are the same
-trusted person. cuttlefish breaks that premise on purpose, so
-[ADR-0011](docs/adr/0011-unattended-invocation-policy-gate.md) adds a second mode: a
-declared allowlist policy instead of a human answering, with real containment
-supplied by whoever calls kopicode unattended, not by kopicode itself.
-
-## Layout
-
-```
-cmd/kopicode/        REPL, run --print, and serve surfaces
-cmd/kopibench/       headless bench runner
-internal/
-  engine/            agent loop, turn state, context assembly
-  provider/          OpenRouter client, mock/replay provider
-  parse/             tool-call extraction + repair
-  tools/             read, write, edit, delete, list, grep, shell
-  journal/           append-only tagged-union event log
-  repo/              git shadow refs, worktrees, diff rendering
-  permission/        policy decisions (what needs asking, not how to ask)
-  bench/             runner, oracle execution, McNemar scoring
-bench/tasks/         the frozen task corpus (data, not code)
-docs/PRD.md          requirements, success measures, scope boundary
-docs/adr/            decisions of record
-docs/SLICE-1.md      the current slice
+```bash
+claude mcp add kopicode -- kopicode mcp
 ```
 
-`internal/` is the enforced boundary: nothing outside this module can import the
-engine, so the split survives without a lint rule. The surface layer talks to the
-engine through its interface only, which an import-hygiene test checks.
+kopicode reads `OPENROUTER_API_KEY` from the environment it is launched with. If your client
+does not pass yours through, give it the key with the client's own option (for Claude Code,
+`-e OPENROUTER_API_KEY=...`, which stores the key in that client's config).
 
-## Models
+`kopicode serve` is the same sessions over NDJSON JSON-RPC for an orchestrator that spawns
+kopicode as a child. See [`docs/kopicode-mcp.md`](docs/kopicode-mcp.md) and
+[`docs/kopicode-serve-protocol.md`](docs/kopicode-serve-protocol.md).
 
-**One binary serves every supported model.** There is no per-model build and no
-build-time model constant; the model is selected at run time with `--model`, falling
-back to `model = "…"` in `.kopicode/config.toml` and then to a built-in default, and an
-unrecognised id is a startup usage error listing what is supported rather than a
-provider error one request later. Each supported model resolves to a per-model harness
-configuration held in the binary, and (model × harness configuration × provider pin) is
-what defines a benchmark arm
-([ADR-0007](docs/adr/0007-model-selection-and-harness-config-shape.md)).
+## How unattended sessions are kept safe
 
-The **Role** column below is about what gets *measured*, and in what order — not about
-what the binary can run.
+Nobody is at a terminal to say yes, so a caller picks one of three answerers for shell
+commands and writes outside the project:
 
-Verified against OpenRouter on 2026-08-11. Prices are USD per million tokens,
-input/output.
+| `consent_mode` | Who answers | Use it for |
+| --- | --- | --- |
+| `auto` | the harness: shell inside the project runs; a fixed never-allow list (`sudo`, `rm` outside the project, forced `git push`, a download piped into a shell, writes outside) is refused | your own repo, on your own machine |
+| `remote_interactive` | the calling agent, per action, live | open-ended work with a supervisor |
+| `unattended_policy` | a declared allowlist (`--policy-file`) | a fixed, known set of commands |
 
-| Model | Price | Context | Role |
-| --- | --- | --- | --- |
-| `qwen/qwen3-coder-next` | 0.12 / 0.80 | 262K | **slice-1 target** |
-| `minimax/minimax-m2` | 0.26 / 1.02 | 205K | A/B candidate |
-| `z-ai/glm-5.2` | 0.56 / 1.76 | 1M | A/B candidate, long-context |
-| a current frontier model | — | — | ceiling, run rarely |
+Command lines are tokenized, every command in them is checked, and anything that cannot be
+analysed is refused. None of this is a sandbox; real containment is the caller's job
+([ADR-0017](docs/adr/0017-auto-consent-mode.md), [ADR-0018](docs/adr/0018-tokenized-allowlist.md)).
 
-The last row is a role rather than an entry: the frontier model is picked and added to
-the registry when the ceiling run is actually scheduled, since naming one now would only
-date the table.
+## Why a harness, and what it has measured
 
-`qwen3-coder-next` is the slice-1 target: cheapest of the credible coding models,
-coding-specialised, 80B total with 3B activated, and it runs in non-thinking mode
-with no `<think>` blocks — one less parsing problem while the loop is being built.
+A model's harness (prompt structure, tool surface, parse-and-repair, verification loop) moves
+its measured coding ability by a large margin, and open-weight models have the most headroom
+because they get the least harness attention. The gains kopicode bets on are generic
+reliability work, in order of expected payoff:
 
-Leaderboard aggregators disagree with each other on the current top of the open
-field (Kimi K3, DeepSeek V4, Qwen 3.6, GLM 5.x all get named), so treat any
-SWE-bench number quoted second-hand as unverified. The rig exists to measure this
-ourselves.
+1. **Tool-call parse-and-repair.** Weak models emit malformed JSON and invented tool names;
+   accepting several formats and feeding back a specific error beats burning the turn.
+2. **An edit tool where the model never reproduces file content.** `read_file` returns
+   per-line anchors and `edit_file` rejects when they no longer match
+   ([ADR-0006](docs/adr/0006-hash-anchored-edits-and-failure-attribution.md)).
+3. **Forced verification.** The loop runs your tests after edits and will not report success
+   without them.
 
-**Pin the provider.** OpenRouter load-balances across providers by default and they
-differ in quantization, which silently invalidates any A/B result. Every benchmark
-request sets `provider.order`, `allow_fallbacks: false`, and `quantizations`
-([ADR-0005](docs/adr/0005-benchmark-and-ab-methodology.md)).
+Measured, not asserted: on the frozen 13-task corpus both pinned arms
+(`qwen/qwen3-coder-next` and `minimax/minimax-m2`) pass 12 of 13 and fail the *same* task, for
+about $0.17 and $0.29 a run. The corpus does not yet separate the two models; the result and
+what it says about the corpus are in
+[`docs/paired-ab-qwen-vs-minimax-m2-v2.md`](docs/paired-ab-qwen-vs-minimax-m2-v2.md). Every
+number comes from a pinned provider and quantization, because an unpinned A/B is not
+evidence ([`docs/provider-pin.md`](docs/provider-pin.md)). You can rerun it free against a
+mock provider with `make bench-smoke`.
 
-Slice 1 pins `parasail/bf16` at `bf16` — the only one of the four endpoints serving
-`qwen3-coder-next` that reports a full-precision quantization, and also the cheapest of
-them, which is where the price in the table above comes from. Two of the other three
-report their quantization as `unknown`, which is a legal filter value and a worthless
-pin. [`docs/provider-pin.md`](docs/provider-pin.md) has the observed endpoint list, the
-date, and the re-check.
+## Configuration
 
-## Slice 1
+| Setting | Where | Notes |
+| --- | --- | --- |
+| `OPENROUTER_API_KEY` | environment | required; never written to the journal or logs |
+| `model`, `harness`, `harness_config` | `.kopicode/config.toml` or flags | flags win |
+| turn cap and other bounds | a declared harness config (`--harness-config`) | for example `max_turns = 40` when a session stops with `max_turns`; local-only, never anchors a published number. See [`docs/harness-tuning.md`](docs/harness-tuning.md) |
+| per-language examples | [`docs/examples/`](docs/examples/) | Go, JavaScript/TypeScript, Python, multi-language |
+| reusable task instructions | `.agents/skills/<name>/SKILL.md` | the same convention Claude Code, Codex and Cursor read ([ADR-0014](docs/adr/0014-skills-mechanism.md)) |
 
-Done means both of these are true:
+`kopicode sessions` lists past sessions; `--resume <id>` and `--fork <id>:<turn>` continue or
+branch one. Every session is a journal under `.kopicode/sessions/`; everything printed is
+derived from it.
 
-- **It builds things.** Point it at a real repo, give it a real small task, get a
-  correct diff that passes the existing suite.
-- **It benchmarks.** The headless runner executes a local task corpus against
-  `qwen3-coder-next` with unit-test oracles, and against a mock provider at zero
-  token cost for plumbing regressions.
+## Documentation
 
-One model measured, one harness configuration registered. No plugin system, no
-second arm, no add-on catalogue.
+- [`docs/trying-kopicode.md`](docs/trying-kopicode.md) — first tasks, with real repositories
+- [`docs/adr/`](docs/adr/README.md) — every decision and why, one page each
+- [`docs/background.md`](docs/background.md) — prior art, what is deliberately not being
+  built, and the history behind the design
+- [`docs/PRD.md`](docs/PRD.md) — requirements and scope
+- [`docs/RELEASING.md`](docs/RELEASING.md) — how a release is cut
 
-That is a **scope limit on slice 1, not a property of the product**. The binary
-selects its model at run time and resolves a harness configuration from it
-([ADR-0007](docs/adr/0007-model-selection-and-harness-config-shape.md)); slice 1 simply
-registers one configuration and measures one model against it.
+## Contributing
 
-## Where this sits
-
-```
-kopicode (this repo)          cuttlefish (later, not started)
-   terminal coding agent        always-on assistant
-   interactive, supervised      unattended, triggered
-                                  |
-                                satay
-                          durable execution, journal, replay, fork
-```
-
-cuttlefish is where durable execution earns its cost: unattended, trigger-driven,
-long-running, holding credentials, with no human watching to hit Ctrl-C. Replay
-from the top is designed for exactly that workload. kopicode is the opposite case
-and pays the determinism tax for benefits it does not collect.
-
-They stay two products for the reason that was always the right one: something
-acting while nobody watches needs a stricter safety model than something you are
-supervising. A coding agent's worst case is a bad diff, caught in review, reversible
-with `git revert`. An always-on assistant with long-lived credentials has no
-equivalent rollback. That is an architecture, not a config flag.
-
-## The lesson worth not relearning
-
-sibei-flow hand-rolled a transcript alongside its agent loop: a `list[str]` built by
-appending as the loop ran, with tool output clipped at 1200 characters. Lossy by
-construction — the diagnostic output justifying a fix could be truncated exactly
-where a reviewer looks — and free to drift, since adding a tool call and forgetting
-the append produced a record of a run that never happened. Fixing it took a
-dedicated PR and had to land before a launch to avoid becoming a migration. See
-sibei-flow [ADR-0013](https://github.com/leejianrong/sibei-flow/blob/main/docs/design/adr/0013-transcript-tagged-union.md).
-
-The lesson is not "use a durable runtime." It is: **one session record, typed as a
-tagged union, never truncated, and everything a user or reviewer sees is derived
-from it.** [ADR-0002](docs/adr/0002-no-durable-runtime-own-journal.md) holds that
-line without Satay.
-
-## Naming
-
-`kopi` is coffee. `kopitiam` is **not** available, being the working name for
-Satay's hosted plane in
-[ADR-0026](https://github.com/leejianrong/satay-runtime/blob/main/docs/adr/0026-license-and-hosted-journal-plane.md).
+Read [`CONTRIBUTING.md`](CONTRIBUTING.md) for setup and workflow. Agents working in this
+repository follow [`AGENTS.md`](AGENTS.md).
 
 ## Licence
 
-Apache-2.0, matching Satay and sibei-flow.
-
-## Status
-
-Slice 1 is built and later slices have landed on top of it: one engine now drives
-three session surfaces — the interactive REPL, headless `run --print`, and the resident
-`serve` (ADR-0013) — alongside the bench runner, measured end to end against a real
-repository and the frozen benchmark corpus. The "Build status" section of `CLAUDE.md`
-is the fuller, more current account of what exists today; the "Quickstart" section
-above is how to try it. See the
-[Abang page](https://leejianrong.github.io/abang-landing-page/) for where this sits
-among the rest.
+Apache-2.0. See [`LICENSE`](LICENSE).

@@ -605,7 +605,7 @@ func TestDeniedPermissionIsAnObservationNotAHarnessFailure(t *testing.T) {
 	}
 }
 
-// TestOversizedToolOutputSpillsRatherThanClipping holds CLAUDE.md's rule at the
+// TestOversizedToolOutputSpillsRatherThanClipping holds AGENTS.md's rule at the
 // loop's own boundary: the model is shown everything, and the record keeps
 // everything.
 func TestOversizedToolOutputSpillsRatherThanClipping(t *testing.T) {

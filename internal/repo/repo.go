@@ -29,7 +29,7 @@
 //
 // # Shell out, never link
 //
-// Git is a subprocess (ADR-0001, CLAUDE.md). Linking libgit2 would cost CGo,
+// Git is a subprocess (ADR-0001, AGENTS.md). Linking libgit2 would cost CGo,
 // and CGo costs cross-compilation without a C toolchain and breaks `go install`
 // for users without a compiler — which is the distribution promise ADR-0001
 // rests on. Every path here therefore threads a [context.Context] explicitly
@@ -270,7 +270,7 @@ func (r *Repo) Head(ctx context.Context) (string, error) {
 // .gitignore is a tracked file. Writing to it would show up in the user's
 // `git status`, in their next commit, and in a diff they did not ask for.
 // info/exclude is repository-local, untracked, and exactly the mechanism git
-// documents for this. ADR-0002 §3 and CLAUDE.md both say so.
+// documents for this. ADR-0002 §3 and AGENTS.md both say so.
 //
 // # CommonDir, not GitDir
 //

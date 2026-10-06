@@ -6,7 +6,7 @@ import (
 )
 
 // APIKeyEnv is the one variable no subprocess kopicode starts ever inherits.
-// CLAUDE.md: the provider credential must appear in no journal, no blob and no
+// AGENTS.md: the provider credential must appear in no journal, no blob and no
 // log, and the cheapest way to keep it out is for the process that could print
 // it not to have it.
 const APIKeyEnv = "OPENROUTER_API_KEY"

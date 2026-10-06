@@ -22,7 +22,7 @@ import "os"
 // byte-range locking on a HANDLE and behaves closely enough to flock for this
 // purpose — including release on process death, which is the property the whole
 // design rests on. It needs golang.org/x/sys/windows, because syscall's Windows
-// surface does not export it, and CLAUDE.md wants a reason in the PR before a
+// surface does not export it, and AGENTS.md wants a reason in the PR before a
 // dependency lands. Until a Windows user asks, the honest position is the one
 // written here: [Supported] is false, and a caller that cares can say so.
 const supported = false

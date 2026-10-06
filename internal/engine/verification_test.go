@@ -449,7 +449,7 @@ func TestANilVerifierIsNotASkip(t *testing.T) {
 
 // --- the record ---------------------------------------------------------
 
-// TestVerificationOutputIsJournaledWhole is CLAUDE.md's rule at the place it is
+// TestVerificationOutputIsJournaledWhole is AGENTS.md's rule at the place it is
 // most likely to be broken: a test suite's output is the largest thing this loop
 // writes, and clipping the diagnostic that justifies the next fix is the
 // specific failure this project is designed out of.

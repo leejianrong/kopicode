@@ -10,7 +10,7 @@ import (
 
 // This file is KAN-939's half of the loop: rebuilding [Assembler]'s message
 // history from a resumed session's prior events, so the first new turn's
-// request carries the whole prior conversation — CLAUDE.md's "naive full
+// request carries the whole prior conversation — AGENTS.md's "naive full
 // history, nothing truncates" applied across a process boundary rather than
 // only across turns within one process.
 //

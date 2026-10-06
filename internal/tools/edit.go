@@ -245,7 +245,7 @@ type EditResult struct {
 // the bytes on disk at apply time and must resolve to exactly one line; any
 // mismatch leaves the file byte-identical and returns the region's current
 // anchors, so a drifted file cannot be silently corrupted
-// (ADR-0006, CLAUDE.md "Edits fail closed"). There is no similarity floor here,
+// (ADR-0006, AGENTS.md "Edits fail closed"). There is no similarity floor here,
 // no nearest match, and no path by which a failed anchor match degrades into an
 // approximate one — the fuzzy fallback is KAN-785 and lands as a second mode
 // beside this one, never as a fallthrough from it.
@@ -644,7 +644,7 @@ func rejectAdvice(reason RejectReason, total int) string {
 // and the region is therefore unknown.
 //
 // The result is bounded by Limits.MaxLines exactly as a read_file is bounded,
-// and the bound is *declared* in the returned notice. CLAUDE.md forbids
+// and the bound is *declared* in the returned notice. AGENTS.md forbids
 // clipping diagnostic output silently; it does not forbid the same declared
 // window read_file already returns, and an unbounded dump of a four-megabyte
 // file into a refusal would be its own harm.

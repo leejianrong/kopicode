@@ -156,7 +156,7 @@ type Options struct {
 	//
 	// Fork requires a git repository at Dir, and Snapshots must not be
 	// SnapshotsOff: both the source session's tree at Fork.Turn and the new
-	// session's own snapshot chain live there, and CLAUDE.md's argument for
+	// session's own snapshot chain live there, and AGENTS.md's argument for
 	// why a fork restores the tree automatically — see [Fork]'s doc
 	// comment — has no lesser version for a caller that opted out of
 	// snapshots.
@@ -301,7 +301,7 @@ type Options struct {
 // surface's fact to assert about itself — it is the one thing the engine has
 // to get right for the record to be trustworthy, and a self-reported "I am a
 // human" is not a control. A surface says how it was built (REPL vs. headless);
-// the engine decides what that means for the journal (CLAUDE.md, "the engine
+// the engine decides what that means for the journal (AGENTS.md, "the engine
 // decides policy, the surfaces decide presentation").
 type ConsentMode uint8
 
@@ -660,7 +660,7 @@ func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session,
 	// id and which arm this invocation resolved to, not anything the model or
 	// the user said. The resolution itself already ran in the caller
 	// (ResolveSelection) and is journaled on SessionStarted; this line is the
-	// diagnostic echo of it, off by default and to stderr (CLAUDE.md, "slog
+	// diagnostic echo of it, off by default and to stderr (AGENTS.md, "slog
 	// never duplicates the journal").
 	slog.Debug("opening session",
 		"dir", abs, "session", id,
@@ -705,7 +705,7 @@ func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session,
 		// stays a leaf with no new dependency, and the engine is the one place
 		// that already knows this is a session-opening step worth narrating.
 		// A refusal names the holder — a fact about another process, not about
-		// this session's content — so it is exactly what CLAUDE.md's boundary
+		// this session's content — so it is exactly what AGENTS.md's boundary
 		// calls a diagnostic fact.
 		var heldErr *lock.HeldError
 		if errors.As(err, &heldErr) {

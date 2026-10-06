@@ -351,7 +351,7 @@ it too.
 
 ## The rest of the ground rules
 
-These are in `CLAUDE.md` and this is only the index. Read the "Boundaries that must
+These are in `AGENTS.md` and this is only the index. Read the "Boundaries that must
 not be crossed" section in full.
 
 - **Never `git switch main`, never cd into the parent checkout.** Branch off

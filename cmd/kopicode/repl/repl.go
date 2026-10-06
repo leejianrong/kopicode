@@ -15,7 +15,7 @@
 // does: this is presentation. The engine decides *that* consent is required
 // and what a decision means; how the question looks, what a tool result reads
 // like and whether a spinner turns are the surface's business and nothing the
-// engine should be able to see (ADR-0003 decision 4, CLAUDE.md "the engine
+// engine should be able to see (ADR-0003 decision 4, AGENTS.md "the engine
 // decides policy; the surfaces decide presentation").
 //
 // # There is one session record and this is not it
@@ -24,7 +24,7 @@
 // are copied from a journal payload — one Event kind per journal event type,
 // listed on [Kind] — so what the user reads is a rendering of the record
 // rather than a parallel account of it (ADR-0002 decision 2, and the
-// sibei-flow ADR-0013 lesson CLAUDE.md cites).
+// sibei-flow ADR-0013 lesson AGENTS.md cites).
 //
 // Streamed model text is the one place that needs stating carefully, because
 // the tokens reach the terminal before the journal has an AssistantMessage to

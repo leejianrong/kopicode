@@ -7,7 +7,7 @@
 //
 // # These fixtures are synthesised, and that is a known, temporary violation
 //
-// CLAUDE.md's test-seam rule is explicit: "The mock provider replays recorded
+// AGENTS.md's test-seam rule is explicit: "The mock provider replays recorded
 // traffic rather than synthesising it. If it drifts from real provider
 // behaviour, green plumbing tests will mask real breakage." Every fixture in
 // this package's data directory today is hand-written, because the build order

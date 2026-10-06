@@ -54,7 +54,7 @@
 //
 // # Subprocesses
 //
-// Every checker is shelled out to, never linked (CLAUDE.md, ADR-0006 §5). Each
+// Every checker is shelled out to, never linked (AGENTS.md, ADR-0006 §5). Each
 // one runs in a process group of its own via internal/procgroup, under a
 // timeout, and is killed as a group on cancellation — a checker that hangs
 // after every edit would hang the agent loop.
@@ -69,7 +69,7 @@
 //
 // # Output
 //
-// Nothing is truncated, ever (CLAUDE.md). The one edit made to any captured
+// Nothing is truncated, ever (AGENTS.md). The one edit made to any captured
 // stream is that the absolute repository root is rewritten to its repo-relative
 // form, so that a journal recorded on one machine reads the same on another;
 // nothing is dropped by it. Checkers are invoked with Dir set and a *relative*

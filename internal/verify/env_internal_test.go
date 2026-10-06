@@ -12,7 +12,7 @@ import (
 )
 
 // TestTheStripListCoversTheCredential is the one entry that is not about the
-// correctness of a verdict. CLAUDE.md: the provider key appears in no journal,
+// correctness of a verdict. AGENTS.md: the provider key appears in no journal,
 // no blob and no log — and this subprocess's output is journaled verbatim, so
 // the cheapest guarantee is that the process which could print it never has it.
 func TestTheStripListCoversTheCredential(t *testing.T) {

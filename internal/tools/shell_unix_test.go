@@ -204,7 +204,7 @@ func TestRunShellCapturesBothStreamsAndTheExitCode(t *testing.T) {
 	}
 }
 
-// TestRunShellDoesNotTruncateOutput is the CLAUDE.md rule in test form:
+// TestRunShellDoesNotTruncateOutput is the AGENTS.md rule in test form:
 // clipping the diagnostic output that justifies a fix is the specific failure
 // being designed out, so run_shell declares no bound on either stream.
 func TestRunShellDoesNotTruncateOutput(t *testing.T) {

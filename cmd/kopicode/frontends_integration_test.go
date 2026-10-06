@@ -214,7 +214,7 @@ func TestModelSelectionOnBothFrontEnds(t *testing.T) {
 
 			t.Run("diagnostics are off by default", func(t *testing.T) {
 				// slog is off unless --debug, and on stderr rather than stdout
-				// because --print owns stdout (CLAUDE.md).
+				// because --print owns stdout (AGENTS.md).
 				res := run(t, bin, repoDir(t), nil, fe.argv("--model", defaultModelID)...)
 				if strings.Contains(res.stderr, "harness_config_hash") {
 					t.Errorf("diagnostics appeared without --debug:\n%s", res.stderr)
@@ -379,7 +379,7 @@ func startHolder(t *testing.T, bin, dir string) *lockedHolder {
 
 	cmd := exec.Command(bin)
 	cmd.Dir = dir
-	// Built rather than inherited, per CLAUDE.md. The key is a placeholder: the
+	// Built rather than inherited, per AGENTS.md. The key is a placeholder: the
 	// session opens a client with it and never makes a request, and the point
 	// of setting it is that a machine with no credential must not refuse for
 	// *that* reason in a test about locking.

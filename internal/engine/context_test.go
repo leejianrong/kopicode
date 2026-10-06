@@ -224,7 +224,7 @@ func TestAssembleKeepsFullHistory(t *testing.T) {
 	}
 }
 
-// Never truncate. CLAUDE.md's rule is usually read as being about the journal;
+// Never truncate. AGENTS.md's rule is usually read as being about the journal;
 // an assembler that clipped a large tool result to save tokens would be the same
 // boundary crossed from the inside, and the model would lose the diagnostic
 // output that justifies the fix.

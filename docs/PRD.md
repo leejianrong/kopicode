@@ -149,7 +149,7 @@ shared journal.
 The reason is one sentence: every item on that list is orthogonal to whether a cheap open
 model can be made to code reliably, and competing on tool surface against a
 batteries-included agent is a fight this project would lose while abandoning its thesis.
-See the prior-art section of the [README](../README.md).
+See the prior-art section of [`docs/background.md`](background.md).
 
 ## Constraints
 

@@ -161,7 +161,7 @@ func TestExcludeStateDirIsIdempotent(t *testing.T) {
 
 // TestExcludeStateDirDoesNotTouchGitignore — .gitignore is a tracked file.
 // Writing to it would appear in the user's status, in their next commit, and in
-// a diff they did not ask for. CLAUDE.md and ADR-0002 §3 both say info/exclude.
+// a diff they did not ask for. AGENTS.md and ADR-0002 §3 both say info/exclude.
 func TestExcludeStateDirDoesNotTouchGitignore(t *testing.T) {
 	dir := newRepo(t)
 	writeFile(t, dir, ".gitignore", "*.log\n")

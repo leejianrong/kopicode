@@ -38,7 +38,7 @@ import (
 // keeps only the request headers named in [allowedRequestHeaders], and every
 // other header — Authorization included — is dropped while the request is
 // still in memory, before a [Fixture] value exists to put it in. This is an
-// allowlist and not a denylist on purpose (CLAUDE.md, "Boundaries that must
+// allowlist and not a denylist on purpose (AGENTS.md, "Boundaries that must
 // not be crossed" and docs/SLICE-1.md §Build Plan step 3): a denylist is
 // correct only until the provider adds a second auth-bearing header, and the
 // header nobody thought to add to the denylist is the one that leaks. The

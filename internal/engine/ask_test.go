@@ -12,7 +12,7 @@ import (
 // This file is docs/adr/0009-ask-tool-contract.md's own test seam: the ask
 // tool's dispatch, driven through the engine's public interface with the
 // mock/replay provider and a scripted Answerer, exactly the primary seam
-// CLAUDE.md's "Test seam" section names. Nothing here reaches into runAsk's
+// AGENTS.md's "Test seam" section names. Nothing here reaches into runAsk's
 // internals — every assertion is a journal event, a tool result string, or a
 // Stop the session settled on.
 

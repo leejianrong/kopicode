@@ -17,7 +17,7 @@ import (
 // none of what it emits is session content — the user's prompt, the model's
 // reply, or a tool call's id and arguments. Those already have exactly one
 // home and it is the journal; a logger that also carried them would be the
-// parallel transcript CLAUDE.md's boundary rule exists to prevent, arriving
+// parallel transcript AGENTS.md's boundary rule exists to prevent, arriving
 // disguised as observability.
 //
 // The two forbidden substrings that matter most are the assistant's final

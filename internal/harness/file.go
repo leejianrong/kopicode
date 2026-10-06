@@ -8,7 +8,7 @@ import (
 )
 
 // ConfigDirName is the per-repository directory kopicode keeps its state in. It
-// is excluded through .git/info/exclude and never through .gitignore (CLAUDE.md,
+// is excluded through .git/info/exclude and never through .gitignore (AGENTS.md,
 // "Never touch the user's git state").
 const ConfigDirName = ".kopicode"
 

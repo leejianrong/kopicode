@@ -13,7 +13,7 @@ useDefault = true
 # `gitleaks dir .` scans the filesystem, not git's index, so it sees `.env`
 # even though `.gitignore` (line: `/.env`) keeps it out of every commit. That
 # file is the documented, intended place for a real OPENROUTER_API_KEY
-# locally (see .env.example and CLAUDE.md's Commands section) so that `make
+# locally (see .env.example and AGENTS.md's Commands section) so that `make
 # bench` and `make smoke-live` can read it without it ever touching the
 # shell's history or environment inheritance rules. Scanning it is a false
 # positive on every machine that has followed that instruction, and it is not
