@@ -103,8 +103,9 @@ its first turn.
 | `model` | string | no | model-id override (else the repo config / built-in default) |
 | `harness` | string | no | built-in harness-config name override |
 | `harness_config` | string | no | path to a declared harness-config file (ADR-0010), the same axis as `harness`; a relative path resolves against `dir`. Passing both `harness` and `harness_config` is a usage error |
-| `consent_mode` | string | **yes** | `"remote_interactive"` or `"unattended_policy"` (ADR-0016) — see [Consent modes](#consent-modes). There is no default; omitting it is a usage error |
-| `containment_provided` | boolean | iff `consent_mode` is `"unattended_policy"` | the caller's explicit acknowledgment that it supplies real process/container containment for this session (ADR-0011 decision 4). Required and must be `true` for that mode; ignored for `"remote_interactive"` |
+| `consent_mode` | string | **yes** | `"remote_interactive"`, `"unattended_policy"` (ADR-0016) or `"auto"` (ADR-0017) — see [Consent modes](#consent-modes). There is no default; omitting it is a usage error |
+| `containment_provided` | boolean | iff `consent_mode` is `"unattended_policy"` | the caller's explicit acknowledgment that it supplies real process/container containment for this session (ADR-0011 decision 4). Required and must be `true` for that mode; ignored for the other two |
+| `never_allow` | array of strings | no | extra never-allow entries for `consent_mode: "auto"` (ADR-0017), each `"command [token ...]"`; see [`"auto"`](#auto-adr-0017). Adds to the built-in list, never removes from it. Sending it under any other mode is a usage error |
 
 **Result** (`turnResult`): the turn's outcome, projected the way `run --print`'s last line
 is.
@@ -261,7 +262,7 @@ The first four are JSON-RPC's reserved values; the server-defined ones sit in th
 | -32000 | unknown session | `session.submit`/`session.cancel`/`session.close` named an id with no open session, or `session.submit` named one whose close is already accepted |
 | -32001 | session exists | `session.start` named an id already open in this process |
 | -32002 | open failed | `engine.Open` refused: a bad model, a missing credential |
-| -32003 | usage error | the arm could not be resolved (an unknown model or harness); or `session.start`'s `consent_mode` is missing/unrecognised, or `"unattended_policy"` is requested without `containment_provided: true` (ADR-0016) |
+| -32003 | usage error | the arm could not be resolved (an unknown model or harness); or `session.start`'s `consent_mode` is missing/unrecognised, or `"unattended_policy"` is requested without `containment_provided: true` (ADR-0016); or `never_allow` is sent without `consent_mode: "auto"`, or holds a malformed entry (ADR-0017) |
 | -32603 | internal error | `session.close` could not write the session's `session_ended` |
 | -32005 | session locked | `session.start`'s `dir` is already held by another live session |
 
@@ -305,7 +306,7 @@ modes below. Only the permission gate — `run_shell` and a write outside `dir` 
 Every `session.start` must declare `consent_mode`. There is no default that grants
 capability (the same posture ADR-0011 decision 3 already held this surface to): an
 unconfigured invocation refuses everything, and a caller has to say explicitly which of
-the two mechanisms below it wants.
+the three mechanisms below it wants.
 
 ### `"unattended_policy"` (ADR-0011)
 
@@ -345,3 +346,57 @@ in advance every command a model will phrase.
 Every resulting `permission_decided` event is attributed `source: "remote"` — never
 `"user"` or `"policy"`, because kopicode cannot verify whether a human or another model
 answered on the far end of the channel.
+
+### `"auto"` (ADR-0017)
+
+For a developer running an agent on their own repository who does not want to answer
+every command. No `consent.request` is ever sent. The harness answers each permission
+check itself, from a fixed rule, and a session that declares it has said it accepts that
+rule: it is never a default, and a `session.start` without `consent_mode` is still refused.
+
+- A `run_shell` whose working directory is inside `dir`, and which matches nothing on the
+  never-allow list below, is **allowed**.
+- A match is **denied** with a reason naming the rule, and is not asked about. The model
+  is told the refusal will not change on retry.
+- Every write outside `dir` is **denied**. (A file tool targeting a path outside `dir` is
+  the other thing the gate asks about; auto mode has no answer to that but no.)
+
+Every resulting `permission_decided` event is attributed `source: "auto"` — never `"user"`
+(nobody was asked), never `"policy"` (no caller-declared rule matched), never `"remote"`.
+Every allowed command gets its own event; auto mode never answers `allow_session`.
+
+**The built-in never-allow list.** The command line (`/bin/sh -c <line>`) is tokenized and
+every command in it is checked, including inside `;`, `&&`, `||`, `|`, newlines,
+`( … )`, `$( … )`, backticks, `<( … )`, `sh -c '…'` and `eval '…'`, and behind `env`,
+`nice`, `timeout`, `xargs`, `find -exec` and the like:
+
+| Rule | Refuses |
+| --- | --- |
+| privilege escalation | `sudo`, `doas`, `su`, `pkexec`, `runuser` |
+| `rm` | any target outside `dir` (after `cd`, `..`, symlinks and `~`); a recursive `rm` of `dir` itself; a recursive `rm` whose target is computed at run time; `--no-preserve-root` |
+| forced push | `git push` with `--force`, `-f` (also inside a flag cluster such as `-fu`), `--force-with-lease`, `--force-if-includes`, `--mirror`, a `+refspec`, or an argument computed at run time |
+| download into a shell | `curl`/`wget`/`fetch`/`aria2c` piped to `sh`, `bash`, `zsh`, `dash`, … ; `sh <(curl …)`; `bash -c "$(curl …)"`; `eval`/`source` of a download |
+| redirection outside `dir` | `>`, `>>`, `&>`, `2>` and friends to a path outside `dir`, or computed at run time (`/dev/null`, `/dev/stdout`, `/dev/stderr` are allowed) |
+
+**It fails closed.** A command line the tokenizer cannot account for is denied, not
+guessed at: an unterminated quote or substitution, a heredoc or here-string, a command
+whose name is computed at run time (`$CMD`, `$'\x73udo'`), `eval` or `sh -c` of a computed
+string, a line nested deeper than 8 levels, or one too large to analyse. The reason says
+which. A model that hits one should use a file tool (`write_file` instead of a heredoc) or
+spell the command out.
+
+**Extending it.** `never_allow` entries are `"command [token ...]"`: they match a command
+whose name (by basename) is the first token and whose arguments contain the remaining
+tokens in order, so `"terraform apply"` also matches `terraform -chdir=infra apply` and
+`env terraform apply`. A word computed at run time matches any token, since it could be that
+token. An entry holding shell syntax (`; & | < > ( ) $ \` quotes) is a usage error. At most
+64 entries of 200 bytes. Entries only add; nothing removes or narrows a built-in rule.
+
+**What it is not.** It judges the request the model wrote, not what the process then does.
+A command it allows runs with the full authority of the user who started kopicode:
+`python -c`, `make`, a script already in the tree, `find … -delete`, `cp`/`mv`/`tee` into
+another directory, an alias or `git -c alias.…`, or a download saved to a file and run in
+a second command are all outside what it can see. It is a guard against the obvious
+catastrophes and against smuggling one in behind an innocuous first word, not a sandbox;
+real containment is the caller's job (ADR-0011 decision 4). `--policy-file` does not apply to
+an `"auto"` session.

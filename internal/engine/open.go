@@ -259,6 +259,14 @@ type Options struct {
 	// [permission.SourcePolicy] on its own, independent of ConsentMode.
 	Policy *PolicyFile
 
+	// AutoNeverAllow is the caller's additions to [ConsentAuto]'s never-allow
+	// list (ADR-0017): "command [token ...]" entries appended to the built-in
+	// list, never replacing or narrowing it. It is meaningful only under
+	// [ConsentAuto]; setting it under any other mode is refused rather than
+	// ignored, because a caller who supplied a never-allow list and got a mode
+	// that does not consult it believes it is protected when it is not.
+	AutoNeverAllow []string
+
 	// Provider overrides the model provider. Nil builds the live OpenRouter
 	// client from OPENROUTER_API_KEY.
 	//
@@ -335,7 +343,32 @@ const (
 	// has left out the mechanism the mode names, which is a front-end bug the
 	// same way [Policy] plus a nil resolver would be.
 	ConsentRemote
+
+	// ConsentAuto says the harness answers consent itself, from a fixed rule
+	// rather than from anyone (ADR-0017): shell commands whose working
+	// directory is inside the session root, and which match nothing on the
+	// never-allow list, are allowed without a question; everything on the list,
+	// and every write outside the root, is refused with a reason. Every
+	// PermissionDecided this session journals is stamped
+	// permission.SourceAuto — not SourceUser, because nobody was asked, and not
+	// SourcePolicy, because no caller-declared rule matched.
+	//
+	// Like [ConsentUnattended] with no [Options.Policy], the answerer is built
+	// by [Open] itself, so a caller sets this with a nil [Options.Consent] and a
+	// nil [Options.Policy]; supplying either is refused, since a second
+	// answerer to the same question is exactly the ambiguity [Open] never
+	// resolves by guessing. It is an explicit declaration and never a default:
+	// the zero value of [ConsentMode] is [ConsentInteractive].
+	ConsentAuto
 )
+
+// ValidateAutoNeverAllow reports whether entries are an acceptable
+// [Options.AutoNeverAllow]. A front end calls it to refuse a malformed request
+// before opening anything, without importing internal/permission itself —
+// cmd/ reaches the engine through this package only (ADR-0003).
+func ValidateAutoNeverAllow(entries []string) error {
+	return permission.ValidateNeverAllow(entries)
+}
 
 // SnapshotMode says whether a session records the tree after a turn that could
 // have changed it (affordance G1, ADR-0002 §3).
@@ -536,6 +569,20 @@ func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session,
 			"channel), not a mode that can answer on its own — a caller declaring it must supply the "+
 			"consenter (docs/adr/0016-live-remote-consent-for-agent-orchestrated-sessions.md)", ErrConfig)
 	}
+	if opts.ConsentMode == ConsentAuto && (opts.Consent != nil || opts.Policy != nil) {
+		return nil, fmt.Errorf("%w: Options.ConsentMode is ConsentAuto but Options.Consent or Options.Policy "+
+			"is also set; auto mode is its own answerer and this package will not guess which of two a "+
+			"caller meant (docs/adr/0017-auto-consent-mode.md)", ErrConfig)
+	}
+	if len(opts.AutoNeverAllow) > 0 && opts.ConsentMode != ConsentAuto {
+		return nil, fmt.Errorf("%w: Options.AutoNeverAllow is set but Options.ConsentMode is not ConsentAuto; "+
+			"nothing would consult the list (docs/adr/0017-auto-consent-mode.md)", ErrConfig)
+	}
+	if opts.ConsentMode == ConsentAuto {
+		if err := permission.ValidateNeverAllow(opts.AutoNeverAllow); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrConfig, err)
+		}
+	}
 	if opts.AskPolicy != nil && opts.Ask != nil {
 		return nil, fmt.Errorf("%w: Options.AskPolicy is set together with Options.Ask; these are two "+
 			"different answerers for the same question (what the model asked) and this package will not "+
@@ -692,7 +739,7 @@ func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session,
 	}
 	s.closers = append(s.closers, set.Close)
 
-	policy, err := gatePolicy(opts, set.Root.Resolver())
+	policy, err := gatePolicy(opts, set.Root.Path(), set.Root.Resolver())
 	if err != nil {
 		return fail(fmt.Errorf("engine: building the consent policy: %w", err))
 	}
@@ -843,7 +890,10 @@ func streamTo(obs Observer) func(int, provider.Delta) {
 // tool root a few lines above this call in openSession — which is exactly
 // why this cannot happen inside [Options] validation any earlier: nothing
 // resolves paths for this session until the tool root exists.
-func gatePolicy(opts Options, resolver permission.Resolver) (permission.Policy, error) {
+func gatePolicy(opts Options, root string, resolver permission.Resolver) (permission.Policy, error) {
+	if opts.ConsentMode == ConsentAuto {
+		return permission.NewAuto(root, resolver, opts.AutoNeverAllow)
+	}
 	if opts.Policy == nil {
 		return mustAskPolicy(opts.Consent, opts.ConsentMode), nil
 	}
