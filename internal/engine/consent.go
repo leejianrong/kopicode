@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/leejianrong/kopicode/internal/permission"
 )
@@ -33,6 +34,11 @@ type ConsentRequest struct {
 	// difference between consenting to "../../etc/hosts" and consenting to
 	// "/etc/hosts".
 	Resolved string
+	// Argv is the exact argv a shell action will run, element for element, and
+	// nil for a write. Detail is this joined by single spaces, which loses where
+	// each element's own spaces were; a surface that has to match or show the
+	// command reads this instead of splitting Detail.
+	Argv []string
 }
 
 // ConsentAnswer is what a surface answered.
@@ -97,6 +103,7 @@ func (a asker) Ask(ctx context.Context, req permission.Request) (permission.Verd
 		Detail:   req.Detail,
 		Reason:   req.Reason,
 		Resolved: req.Resolved,
+		Argv:     slices.Clone(req.Action.Command),
 	})
 	if err != nil {
 		return permission.VerdictDeny, err

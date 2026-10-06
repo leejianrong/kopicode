@@ -53,6 +53,22 @@ type consentRequestParams struct {
 	Detail   string `json:"detail"`
 	Reason   string `json:"reason"`
 	Resolved string `json:"resolved"`
+	// Command is the exact line passed to `sh -c`, for a run_shell request whose
+	// argv is `/bin/sh -c <line>`; absent otherwise. Detail carries the same
+	// text behind a "/bin/sh -c " prefix and with the argv joined by spaces.
+	Command string `json:"command,omitempty"`
+	// Argv is the exact argv, for a shell request; absent for a write.
+	Argv []string `json:"argv,omitempty"`
+}
+
+// shellCommand returns the line a `/bin/sh -c <line>` argv runs, or "" for any
+// other shape — including a shell argv that is not exactly that, which a client
+// should read from Argv rather than have guessed at.
+func shellCommand(argv []string) string {
+	if len(argv) == 3 && argv[0] == "/bin/sh" && argv[1] == "-c" {
+		return argv[2]
+	}
+	return ""
 }
 
 // consentResult is consent.request's result shape: engine.ConsentAnswer's
@@ -106,10 +122,14 @@ type remoteConsenter struct {
 	clock   clock
 }
 
-// newRemoteConsenter builds one for session, defaulting to the production
-// timeout and clock.
-func newRemoteConsenter(srv *server, session string) *remoteConsenter {
-	return &remoteConsenter{srv: srv, session: session, timeout: srv.consentTimeout, clock: realClock{}}
+// newRemoteConsenter builds one for session. A zero timeout means the
+// process-wide --consent-timeout; a session.start consent_timeout overrides it
+// for this session alone. The clock is the production one.
+func newRemoteConsenter(srv *server, session string, timeout time.Duration) *remoteConsenter {
+	if timeout == 0 {
+		timeout = srv.consentTimeout
+	}
+	return &remoteConsenter{srv: srv, session: session, timeout: timeout, clock: realClock{}}
 }
 
 // Ask satisfies engine.Consenter.
@@ -147,6 +167,8 @@ func (r *remoteConsenter) Ask(ctx context.Context, req engine.ConsentRequest) (e
 			Detail:   req.Detail,
 			Reason:   req.Reason,
 			Resolved: req.Resolved,
+			Command:  shellCommand(req.Argv),
+			Argv:     req.Argv,
 		},
 	})
 

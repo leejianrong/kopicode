@@ -105,6 +105,7 @@ its first turn.
 | `harness_config` | string | no | path to a declared harness-config file (ADR-0010), the same axis as `harness`; a relative path resolves against `dir`. Passing both `harness` and `harness_config` is a usage error |
 | `consent_mode` | string | **yes** | `"remote_interactive"`, `"unattended_policy"` (ADR-0016) or `"auto"` (ADR-0017) — see [Consent modes](#consent-modes). There is no default; omitting it is a usage error |
 | `containment_provided` | boolean | iff `consent_mode` is `"unattended_policy"` | the caller's explicit acknowledgment that it supplies real process/container containment for this session (ADR-0011 decision 4). Required and must be `true` for that mode; ignored for the other two |
+| `consent_timeout` | string | no | how long this session's `consent.request` waits for an answer before it is denied, as a Go duration (`"5m"`), within `1s` to `24h`; overrides `--consent-timeout` for this session only. Only meaningful under `"remote_interactive"` — sending it under any other mode is a usage error |
 | `never_allow` | array of strings | no | extra never-allow entries for `consent_mode: "auto"` (ADR-0017), each `"command [token ...]"`; see [`"auto"`](#auto-adr-0017). Adds to the built-in list, never removes from it. Sending it under any other mode is a usage error |
 
 **Result** (`turnResult`): the turn's outcome, projected the way `run --print`'s last line
@@ -187,6 +188,11 @@ declared ahead of time.
 | `detail` | string | what is being consented to: for `run_shell`, the argv the engine will run joined by single spaces, which is always `/bin/sh -c <line>`; for `write_outside_root`, the absolute path |
 | `reason` | string | why the gate is asking, when the policy layer has one to give |
 | `resolved` | string | for a write, the path after symlink resolution, when it differs from `detail` |
+| `command` | string | for `run_shell` whose argv is `/bin/sh -c <line>`: the exact `<line>`, no prefix and no joining. Absent otherwise |
+| `argv` | array of strings | for a shell action, the exact argv, element for element. Absent for a write |
+
+A client should match and display `command` (or `argv`), not parse `detail`; `detail` stays
+for compatibility.
 
 For `run_shell`, `detail` is **not** the bare command line: the engine runs every shell
 command as `/bin/sh -c <line>` and puts that whole argv here, so the line the model wrote
@@ -291,7 +297,7 @@ prompt, never on the command line.
 | flag | meaning |
 |---|---|
 | `--policy-file <path>` | an ADR-0011 declared-allowlist policy; content for any session that declares `consent_mode: "unattended_policy"` (below). Unset means refuse every shell command and write outside `dir` under that mode |
-| `--consent-timeout <duration>` | how long a `consent.request` waits for its answer before it is denied; default `60s`, between `1s` and `24h` |
+| `--consent-timeout <duration>` | how long a `consent.request` waits for its answer before it is denied; default `60s`, between `1s` and `24h`. A session can override it with `session.start`'s `consent_timeout` |
 | `--ask-policy-file <path>` | an ADR-0013/KAN-1028 ask-policy file whose note answers the model's `ask` calls, for every session regardless of `consent_mode`. Unset means the fixed "no human is present" refusal |
 | `--debug` | engine diagnostics on stderr (off by default) |
 
