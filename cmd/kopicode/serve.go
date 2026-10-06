@@ -282,6 +282,12 @@ type startParams struct {
 	// under any other consent_mode is a usage error: nothing would consult it,
 	// and a caller who sent a never-allow list is relying on it.
 	NeverAllow []string `json:"never_allow"`
+
+	// ConsentTimeout overrides --consent-timeout for this session: a Go
+	// duration string such as "5m", within the same bounds as the flag. Only
+	// consent_mode "remote_interactive" waits on a live answer, so sending it
+	// under any other mode is a usage error.
+	ConsentTimeout string `json:"consent_timeout"`
 }
 
 type submitParams struct {
@@ -420,8 +426,8 @@ func serveWith(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, b
 	s := &server{stderr: stderr, consentTimeout: consentTimeout}
 	// The Manager is the session lifecycle both resident front ends share
 	// (ADR-0015 decision 3); this file is only the JSON-RPC skin over it.
-	s.mgr = sessioncore.New(ctx, base, stderr, func(id string) engine.Consenter {
-		return newRemoteConsenter(s, id).Ask
+	s.mgr = sessioncore.New(ctx, base, stderr, func(id string, timeout time.Duration) engine.Consenter {
+		return newRemoteConsenter(s, id, timeout).Ask
 	})
 	s.enc = json.NewEncoder(stdout)
 	// Off, for the reason journal.Marshal and print.go's emitter both give: the
@@ -572,11 +578,25 @@ func (s *server) dispatchStart(req rpcRequest) {
 		return
 	}
 
+	var timeout time.Duration
+	if p.ConsentTimeout != "" {
+		d, err := time.ParseDuration(p.ConsentTimeout)
+		if err == nil {
+			d, err = parseConsentTimeout(d)
+		}
+		if err != nil {
+			s.writeError(req.ID, codeUsageError, fmt.Sprintf("session.start consent_timeout %q: %v", p.ConsentTimeout, err))
+			return
+		}
+		timeout = d
+	}
+
 	id := req.ID
 	if err := s.mgr.Start(sessioncore.StartParams{
 		ID: p.Session, Dir: p.Dir, Prompt: p.Prompt,
 		Model: p.Model, Harness: p.Harness, HarnessConfig: p.HarnessConfig,
 		ConsentMode: p.ConsentMode, ContainmentProvided: p.ContainmentProvided, NeverAllow: p.NeverAllow,
+		ConsentTimeout: timeout,
 	}, s.notifier(p.Session), sessioncore.Turn{Done: func(r sessioncore.TurnResult) {
 		s.writeResult(id, turnResultOf(r))
 	}}); err != nil {

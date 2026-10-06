@@ -726,6 +726,14 @@ func TestServeRemoteInteractiveAsksTheClientForConsent(t *testing.T) {
 	if params["kind"] != "run_shell" {
 		t.Errorf("consent.request params.kind = %v, want run_shell", params["kind"])
 	}
+	// The structured form (#177): the exact line and argv, so a client does not
+	// strip a prefix off the joined detail.
+	if params["command"] != "echo hi" {
+		t.Errorf("consent.request params.command = %v, want the bare line %q", params["command"], "echo hi")
+	}
+	if argv, _ := params["argv"].([]any); len(argv) != 3 || argv[0] != "/bin/sh" || argv[1] != "-c" || argv[2] != "echo hi" {
+		t.Errorf("consent.request params.argv = %v, want [/bin/sh -c echo hi]", params["argv"])
+	}
 
 	h.send(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{"answer": "allow"}})
 
@@ -1126,5 +1134,65 @@ func TestConsentTimeoutFlagIsBounded(t *testing.T) {
 	_, timeout, _, _ = residentOptions("mcp", "hint", []string{"--consent-timeout=2m"}, io.Discard)
 	if timeout != 2*time.Minute {
 		t.Errorf("parsed timeout = %s, want 2m", timeout)
+	}
+}
+
+// TestServeSessionConsentTimeoutOverridesTheProcessFlag (#178): one resident
+// serve is shared by sessions that want different waits. The process is given a
+// ten-minute timeout and the session asks for one second, so a client that never
+// answers is denied on the session's clock.
+func TestServeSessionConsentTimeoutOverridesTheProcessFlag(t *testing.T) {
+	t.Setenv(engine.APIKeyEnv, "kopicode-test-credential")
+	srv := scriptedProvider(t,
+		sseToolCall("call-1", "run_shell", `{"command":"echo hi"}`),
+		sseBody("done"),
+	)
+	h := startServeWith(t, engine.Options{ProviderBaseURL: srv.URL}, 10*time.Minute)
+	start := time.Now()
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
+		"params": map[string]any{
+			"session": "s1", "dir": t.TempDir(), "prompt": "go",
+			"consent_mode": consentModeRemoteInteractive, "consent_timeout": "1s",
+		}})
+	h.awaitRequest(methodConsentRequest) // never answered
+	if resp := h.awaitResponse(1); resp["error"] != nil {
+		t.Fatalf("session.start errored: %v", resp["error"])
+	}
+	if elapsed := time.Since(start); elapsed > 30*time.Second {
+		t.Errorf("took %s; the session's 1s consent_timeout did not override the process's 10m", elapsed)
+	}
+	decisions := permissionDecisions(h.notificationsFor("s1"))
+	if len(decisions) != 1 || decisions[0]["decision"] != "deny" || decisions[0]["source"] != "remote" {
+		t.Errorf("decisions = %v, want one deny attributed remote", decisions)
+	}
+	h.close()
+}
+
+// TestServeSessionConsentTimeoutIsBoundedAndOnlyForRemote: the same 1s to 24h
+// bounds as the flag, and a mode that never waits on a live answer refuses it
+// rather than ignoring it, as never_allow does.
+func TestServeSessionConsentTimeoutIsBoundedAndOnlyForRemote(t *testing.T) {
+	for name, extra := range map[string]map[string]any{
+		"zero":              {"consent_mode": consentModeRemoteInteractive, "consent_timeout": "0s"},
+		"below the floor":   {"consent_mode": consentModeRemoteInteractive, "consent_timeout": "500ms"},
+		"above the ceiling": {"consent_mode": consentModeRemoteInteractive, "consent_timeout": "25h"},
+		"not a duration":    {"consent_mode": consentModeRemoteInteractive, "consent_timeout": "soon"},
+		"auto":              {"consent_mode": consentModeAuto, "consent_timeout": "5m"},
+		"unattended_policy": {"consent_mode": consentModeUnattendedPolicy, "containment_provided": true, "consent_timeout": "5m"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := startServe(t, engine.Options{})
+			params := map[string]any{"session": "s1", "dir": t.TempDir(), "prompt": "hi"}
+			for k, v := range extra {
+				params[k] = v
+			}
+			h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart, "params": params})
+			resp := h.awaitResponse(1)
+			rpcErr, _ := resp["error"].(map[string]any)
+			if rpcErr == nil || !numEq(rpcErr["code"], codeUsageError) {
+				t.Fatalf("got %v, want a usage error", resp)
+			}
+			h.close()
+		})
 	}
 }

@@ -106,7 +106,7 @@ func mcpServeWith(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer
 		calls:          map[string]*mcpCall{},
 		targets:        map[string]*mcpCall{},
 	}
-	s.mgr = sessioncore.New(ctx, base, stderr, func(id string) engine.Consenter {
+	s.mgr = sessioncore.New(ctx, base, stderr, func(id string, _ time.Duration) engine.Consenter {
 		return newElicitConsenter(s, id).Ask
 	})
 	s.enc = json.NewEncoder(stdout)

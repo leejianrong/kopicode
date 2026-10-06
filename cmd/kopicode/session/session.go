@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/leejianrong/kopicode/internal/engine"
 )
@@ -88,6 +89,12 @@ type StartParams struct {
 	// NeverAllow adds entries to ConsentAuto's never-allow list (ADR-0017);
 	// supplying it under any other mode is a usage error.
 	NeverAllow []string
+
+	// ConsentTimeout overrides the process-wide live-consent timeout for this
+	// session alone. Zero means "use the process default"; it is meaningful
+	// only under ConsentRemoteInteractive, and the caller has already checked
+	// its bounds.
+	ConsentTimeout time.Duration
 }
 
 // Turn is a queued turn's callbacks. Begin, when set, is called from the
@@ -113,7 +120,7 @@ type TurnResult struct {
 // RemoteConsent builds the live consenter for one session (ADR-0016), or is nil
 // when the front end has no way to ask its peer — in which case a session
 // declaring remote_interactive is refused rather than left to deny everything.
-type RemoteConsent func(sessionID string) engine.Consenter
+type RemoteConsent func(sessionID string, timeout time.Duration) engine.Consenter
 
 // Manager is the resident state: the open sessions.
 type Manager struct {
@@ -397,6 +404,13 @@ func (m *Manager) Shutdown() {
 // AskPolicy still wins where set and the fixed headless refusal answers
 // otherwise.
 func (m *Manager) buildConsentOptions(p StartParams, opts *engine.Options) *Error {
+	if p.ConsentTimeout != 0 && p.ConsentMode != ConsentRemoteInteractive {
+		// Nothing would consult it: only a live consent request waits on a
+		// timeout. A caller who sent one is relying on it, so refuse rather than
+		// ignore, the same rule never_allow is held to.
+		return errf(KindUsage, "consent_timeout is only meaningful under consent_mode %q, which is the only "+
+			"mode that waits for a live answer; got %q", ConsentRemoteInteractive, p.ConsentMode)
+	}
 	if len(p.NeverAllow) > 0 && p.ConsentMode != ConsentAuto {
 		return errf(KindUsage, "never_allow only applies to consent_mode %q; this session declared %q "+
 			"and nothing would consult the list", ConsentAuto, p.ConsentMode)
@@ -435,7 +449,7 @@ func (m *Manager) buildConsentOptions(p StartParams, opts *engine.Options) *Erro
 		// the live consenter it makes engine.Open refuse the session as two
 		// answerers for one question.
 		opts.Policy = nil
-		opts.Consent = m.remote(p.ID)
+		opts.Consent = m.remote(p.ID, p.ConsentTimeout)
 		opts.ConsentMode = engine.ConsentRemote
 
 	default:
