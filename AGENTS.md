@@ -81,33 +81,21 @@ make ci           # check + test-all + bench-smoke + xbuild: everything CI runs 
 
 ### Worktrees: lease them, do not sweep them
 
-Manage worktree lifecycle with **`treehouse`** rather than hand-rolled `git worktree
-add` plus a cleanup sweep, which is the combination that eventually deletes a worktree
-an agent is still working in.
+Use **`treehouse`**, not hand-rolled `git worktree add` plus a cleanup sweep (that
+combination eventually deletes a worktree an agent is still in):
 
 ```bash
 treehouse get --lease --lease-holder agent-<id>   # prints the path; never handed out twice
-treehouse status --json                            # what is live — read this before cleaning
-treehouse return <path>                            # release when the agent is done
-treehouse prune                                    # dry run by default; --yes to act
-treehouse destroy <path>                           # dry run by default; skips risky classes
+treehouse status --json                            # what is live: read before cleaning
+treehouse return <path>                            # release when done
+treehouse prune                                    # dry run; --yes acts on unleased, clean, merged ones
 ```
 
-A leased worktree is never handed out by a later `get`, and never removed by `prune`
-until it is returned. `prune` only treats a worktree as stale when it is unleased,
-idle, clean, and already merged into the default branch.
-
-**`treehouse` is a lifecycle tool, not an isolation boundary** — a leased worktree is
-still an ordinary git worktree sharing config, objects, refs and the stash with its
-parent (see the sub-agent note at the top of this file). Clean up only when nothing is
-running, and remove completed agents' worktrees **by path**, never by sweeping a glob
-— then run `golangci-lint cache clean`, since its cache is keyed on package content and
-a deleted sibling checkout otherwise resurfaces as findings against paths that no
-longer exist.
-
-**One honest gap:** an agent run under the harness's `isolation: "worktree"` gets a
-worktree the harness creates itself under `.claude/worktrees/`, which `treehouse` does
-not manage or see. Brief such an agent to `treehouse get --lease` explicitly instead.
+A lease is lifecycle, not isolation: a worktree still shares `.git/config`, refs and the
+stash with its parent (see the sub-agent note above). Remove finished worktrees **by path**,
+never by glob, then run `golangci-lint cache clean`. A worktree made by the harness's own
+`isolation: "worktree"` (under `.claude/worktrees/`) is invisible to `treehouse`; brief such an
+agent to lease one explicitly instead.
 
 ## Boundaries that must not be crossed
 
@@ -160,24 +148,19 @@ These are the product's structural promises. Hold them.
 - **Never touch the user's git state.** Shadow refs live under `refs/kopicode/`,
   through a throwaway `GIT_INDEX_FILE`. `.kopicode/` goes in `.git/info/exclude`, never
   `.gitignore`.
-- **Every subprocess names the directory it runs in *and* builds its own
-  environment**, in tests as well as product code. `Dir` alone is not enough —
-  `GIT_DIR` overrides the working directory entirely, and this has already set
-  `core.bare = true` in the real `.git/config` and staged a stash that would have
-  deleted every tracked file. `internal/arch/subprocess_test.go` enforces both halves
-  statically over every `exec.Command`/`exec.CommandContext`/struct-literal `Cmd` in
-  the tree, and fails closed on one it can't follow. A genuine exception carries
-  `//kopicode:allow-nodir: <reason>` or `//kopicode:allow-noenv: <reason>` — a waiver
-  with no reason waives nothing.
-  - **Assigning `Env` isn't the same as deciding what it holds.** `cmd.Env =
-    os.Environ()` (or `nil`) inherits everything while satisfying the assignment rule —
-    a separate, `//kopicode:allow-ambientenv`-waivable check reads the actual value.
-    Every package that spawns something owns a named environment builder (an
-    **allowlist** for secrets, where missing one is unbounded risk; a **denylist** for
-    a toolchain invocation, where enumerating every variable that could change what
-    `go build`/`node`/`python` does is a losing game). Build from one of those, never
-    from the environment you were handed — see `internal/arch/subprocess_test.go` for
-    the enforced list of builders.
+- **Every subprocess names the directory it runs in *and* builds its own environment**, in
+  tests as well as product code. `Dir` alone is not enough: an inherited `GIT_DIR`
+  overrides it, and that has already set `core.bare = true` in the real `.git/config`.
+  `internal/arch/subprocess_test.go` enforces it statically and fails closed. Build `Env`
+  from the package's own named builder (an allowlist for secrets, a denylist for
+  toolchains), never from `os.Environ()`. Waivers (`//kopicode:allow-nodir|noenv|ambientenv:
+  <reason>`) need a reason. The full rules and the worked examples are in
+  [`.claude/skills/agent-ground-rules/SKILL.md`](.claude/skills/agent-ground-rules/SKILL.md).
+- **A `serve` wire addition ships with its feature name.** A new method, `session.start`
+  field or consent mode adds a string to `features` in `cmd/kopicode/capabilities.go` (what
+  `kopicode version --json` and `server.hello` report) and a row in
+  `docs/kopicode-serve-protocol.md`. Names are never renamed; `capabilities_test.go`
+  fails if a consent mode or method has none.
 - **Pin the provider on every benchmark request.** `provider.order`,
   `allow_fallbacks: false`, fixed `quantizations`, all recorded per result. An unpinned
   A/B number is not evidence.
