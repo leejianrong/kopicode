@@ -1,6 +1,6 @@
 # ADR-0018: A tokenized allowlist, `allow_commands`, for declared policy files
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-06)
 - **Date:** 2026-10-06
 - **Deciders:** Jian (leejianrong2@gmail.com)
 
