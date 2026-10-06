@@ -40,7 +40,7 @@ func TestTopLevelHelpListsCommandsAndExitsZero(t *testing.T) {
 			t.Errorf("run(%q) exit = %d, want %d (help is not an error). stderr:\n%s",
 				arg, code, exitSuccess, stderr.String())
 		}
-		for _, want := range []string{"repl", "run", "serve", "sessions", "version"} {
+		for _, want := range []string{"repl", "run", "serve", "mcp", "sessions", "version"} {
 			if !strings.Contains(stdout.String(), want) {
 				t.Errorf("run(%q) help does not mention %q:\n%s", arg, want, stdout.String())
 			}

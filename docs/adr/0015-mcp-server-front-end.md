@@ -146,3 +146,23 @@ changed.
   open-weight models" success measure has been missing: an MCP-capable coding agent —
   Claude Code named as the motivating example, not the only one — can add kopicode as
   an MCP server with no bespoke client code.
+
+## Implementation notes (2026-10-06)
+
+Built as decided, with these particulars the ADR left to the implementing card:
+
+- **Tools** are `kopicode_start`, `kopicode_submit`, `kopicode_cancel` and `kopicode_close` —
+  the three methods of decision 4 plus `close`, which `serve` gained in KAN-1795. `start` and
+  `submit` block until the turn settles; a task that did not complete is an `isError` result.
+  See [`docs/kopicode-mcp.md`](../kopicode-mcp.md).
+- **Progress** (decision 5): events ride `notifications/progress` on the call's token, `message`
+  carrying the schema-1 `record` JSON. The projection (`recordOf`) stays in `cmd/kopicode`
+  rather than moving into `cmd/kopicode/session`: it is shared by `print.go`, `serve` and `mcp`,
+  and the session package's contract is lifecycle, with events delivered through an
+  `engine.Observer` it never inspects.
+- **Consent** (decision 8 is superseded by ADR-0016/0017, now landed): every start declares
+  `consent_mode`. `remote_interactive` uses MCP elicitation, which ADR-0016 named as the leading
+  candidate and this implementation confirms fits: a server-initiated, blocking round trip with an
+  accept / decline / cancel answer. It needs a client that declared the capability.
+- **Cancellation** uses `notifications/cancelled` as the MCP spec defines it: the turn stops and
+  the cancelled request gets no response.

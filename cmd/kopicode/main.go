@@ -57,6 +57,7 @@ func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 var commands = map[string]func(args []string, stdout, stderr io.Writer) int{
 	"repl":     interactive,
 	"run":      runPrint,
+	"mcp":      mcpCmd,
 	"serve":    serveCmd,
 	"sessions": sessionsCmd,
 	"version":  version,
@@ -75,6 +76,7 @@ var commandHelp = []struct{ name, desc string }{
 	{"repl", "start an interactive coding session (this is the default)"},
 	{"run", "run one task headless and print the record as JSON (needs --print)"},
 	{"serve", "hold a process open and drive sessions over JSON-RPC on stdio"},
+	{"mcp", "serve kopicode as an MCP server on stdio, for MCP-capable agents"},
 	{"sessions", "list this repository's past sessions (ids for --resume / --fork)"},
 	{"version", "print the build version and commit"},
 }
