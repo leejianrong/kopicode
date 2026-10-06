@@ -33,6 +33,10 @@ type Gate struct {
 	resolver Resolver
 	policy   Policy
 
+	// readOnly refuses every write outright (ADR-0019). Set once at
+	// construction by [Gate.SetReadOnly], before the gate is shared.
+	readOnly bool
+
 	mu     sync.Mutex
 	grants map[grant]bool
 }
@@ -76,6 +80,14 @@ func New(root string, resolver Resolver, policy Policy) (*Gate, error) {
 		grants:   map[grant]bool{},
 	}, nil
 }
+
+// SetReadOnly makes the gate refuse every write — inside the root or outside it —
+// without consulting the policy (ADR-0019). Shell is untouched: run_shell stays
+// governed by the policy, and a read-only session is not a sandbox.
+//
+// It must be called before the gate is shared between goroutines; it is not
+// guarded, because a session's read-only declaration is made once, at open.
+func (g *Gate) SetReadOnly(readOnly bool) { g.readOnly = readOnly }
 
 // Root returns the resolved repo root the gate judges containment against.
 func (g *Gate) Root() string { return g.root }
@@ -166,6 +178,9 @@ func (g *Gate) classify(a Action) (Request, bool, error) {
 		return Request{}, false, nil
 
 	case OperationWrite:
+		if g.readOnly {
+			return Request{}, false, denied(ErrReadOnly, "%s: file edits are refused in a read-only session", a.Tool)
+		}
 		if a.Path == "" {
 			return Request{}, false, denied(ErrInvalidAction, "%s: write with no path", a.Tool)
 		}

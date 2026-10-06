@@ -29,6 +29,7 @@ var features = []string{
 	"mcp",
 	"server.hello",
 	"session.close",
+	"session.read_only",
 }
 
 // capabilities is what `kopicode version --json` prints and what serve answers

@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -146,6 +148,19 @@ func (h *serveHarness) awaitRequest(method string) map[string]any {
 	}
 	h.t.Fatalf("timed out waiting for a %s request", method)
 	return nil
+}
+
+// sawRequest reports whether a request carrying method and an id has arrived so
+// far, without waiting for one. awaitRequest is the waiting form.
+func (h *serveHarness) sawRequest(method string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, m := range h.all {
+		if m["method"] == method && m["id"] != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // notificationsFor returns every session.event notification tagged with session.
@@ -1195,4 +1210,51 @@ func TestServeSessionConsentTimeoutIsBoundedAndOnlyForRemote(t *testing.T) {
 			h.close()
 		})
 	}
+}
+
+// TestServeReadOnlySessionRefusesAFileWrite (#176, ADR-0019): a read_only
+// session whose model calls write_file gets a denial it can read, the file is
+// not created, and no consent.request is sent — the refusal is the gate's, not a
+// question for the client.
+func TestServeReadOnlySessionRefusesAFileWrite(t *testing.T) {
+	t.Setenv(engine.APIKeyEnv, "kopicode-test-credential")
+	srv := scriptedProvider(t,
+		sseToolCall("call-1", "write_file", `{"path":"new.txt","content":"hi"}`),
+		sseBody("done"),
+	)
+	h := startServe(t, engine.Options{ProviderBaseURL: srv.URL})
+	dir := t.TempDir()
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
+		"params": map[string]any{
+			"session": "s1", "dir": dir, "prompt": "write a file",
+			"consent_mode": consentModeRemoteInteractive, "read_only": true,
+		}})
+	if resp := h.awaitResponse(1); resp["error"] != nil {
+		t.Fatalf("session.start errored: %v", resp["error"])
+	}
+	if _, err := os.Stat(filepath.Join(dir, "new.txt")); err == nil {
+		t.Error("new.txt exists: a read-only session wrote a file")
+	}
+	if h.sawRequest(methodConsentRequest) {
+		t.Error("a consent.request was sent; the refusal must not be put to the client")
+	}
+	h.close()
+}
+
+// TestServeReadOnlyIsAUsageErrorUnderAuto: auto runs shell unasked and a shell
+// line can write, so the pair is refused rather than quietly less read-only
+// than the caller believes.
+func TestServeReadOnlyIsAUsageErrorUnderAuto(t *testing.T) {
+	h := startServe(t, engine.Options{})
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
+		"params": map[string]any{
+			"session": "s1", "dir": t.TempDir(), "prompt": "hi",
+			"consent_mode": consentModeAuto, "read_only": true,
+		}})
+	resp := h.awaitResponse(1)
+	rpcErr, _ := resp["error"].(map[string]any)
+	if rpcErr == nil || !numEq(rpcErr["code"], codeUsageError) {
+		t.Fatalf("got %v, want a usage error", resp)
+	}
+	h.close()
 }

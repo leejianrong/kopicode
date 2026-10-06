@@ -73,6 +73,12 @@ var ErrDenied = errors.New("permission denied")
 // fails the suite, rather than defaulting silently to allow.
 var ErrUnknownOperation = errors.New("unclassified operation")
 
+// ErrReadOnly is joined onto the refusal of a write in a session declared
+// read-only (ADR-0019). It is a denial the gate makes itself, never a question
+// put to a [Policy]: a policy that could answer "allow" would make the
+// declaration a request.
+var ErrReadOnly = errors.New("session is read-only")
+
 // ErrInvalidAction is joined onto the refusal when an [Action] is missing the
 // field its operation is about — a write with no path, a shell call with no
 // argv. A malformed request is not a request to interpret generously.

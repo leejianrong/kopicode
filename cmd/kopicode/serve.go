@@ -289,6 +289,10 @@ type startParams struct {
 	// consent_mode "remote_interactive" waits on a live answer, so sending it
 	// under any other mode is a usage error.
 	ConsentTimeout string `json:"consent_timeout"`
+
+	// ReadOnly refuses every file write for this session (ADR-0019). A usage
+	// error under consent_mode "auto". Shell is not made read-only.
+	ReadOnly bool `json:"read_only"`
 }
 
 type submitParams struct {
@@ -599,7 +603,7 @@ func (s *server) dispatchStart(req rpcRequest) {
 		ID: p.Session, Dir: p.Dir, Prompt: p.Prompt,
 		Model: p.Model, Harness: p.Harness, HarnessConfig: p.HarnessConfig,
 		ConsentMode: p.ConsentMode, ContainmentProvided: p.ContainmentProvided, NeverAllow: p.NeverAllow,
-		ConsentTimeout: timeout,
+		ConsentTimeout: timeout, ReadOnly: p.ReadOnly,
 	}, s.notifier(p.Session), sessioncore.Turn{Done: func(r sessioncore.TurnResult) {
 		s.writeResult(id, turnResultOf(r))
 	}}); err != nil {

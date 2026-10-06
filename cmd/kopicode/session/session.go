@@ -90,6 +90,10 @@ type StartParams struct {
 	// supplying it under any other mode is a usage error.
 	NeverAllow []string
 
+	// ReadOnly refuses every file write for the session (ADR-0019). It is a
+	// usage error under ConsentAuto, which would run shell unasked.
+	ReadOnly bool
+
 	// ConsentTimeout overrides the process-wide live-consent timeout for this
 	// session alone. Zero means "use the process default"; it is meaningful
 	// only under ConsentRemoteInteractive, and the caller has already checked
@@ -404,6 +408,12 @@ func (m *Manager) Shutdown() {
 // AskPolicy still wins where set and the fixed headless refusal answers
 // otherwise.
 func (m *Manager) buildConsentOptions(p StartParams, opts *engine.Options) *Error {
+	if p.ReadOnly && p.ConsentMode == ConsentAuto {
+		return errf(KindUsage, "read_only cannot be combined with consent_mode %q: auto runs shell inside the "+
+			"root unasked, and a shell line can write, so the session would not be read-only (ADR-0019); "+
+			"use %q or %q", ConsentAuto, ConsentRemoteInteractive, ConsentUnattendedPolicy)
+	}
+	opts.ReadOnly = p.ReadOnly
 	if p.ConsentTimeout != 0 && p.ConsentMode != ConsentRemoteInteractive {
 		// Nothing would consult it: only a live consent request waits on a
 		// timeout. A caller who sent one is relying on it, so refuse rather than
