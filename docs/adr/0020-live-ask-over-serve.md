@@ -1,6 +1,6 @@
 # ADR-0020: Live `ask` over serve
 
-- **Status:** Proposed (2026-10-06)
+- **Status:** Accepted (2026-10-06)
 - **Date:** 2026-10-06
 - **Deciders:** Jian (leejianrong2@gmail.com)
 
