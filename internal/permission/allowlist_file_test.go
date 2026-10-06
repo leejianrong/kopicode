@@ -186,3 +186,40 @@ func TestLoadAllowlistFileRefusesAMissingFile(t *testing.T) {
 		t.Fatal("LoadAllowlistFile succeeded reading a file that does not exist")
 	}
 }
+
+// TestAllowlistFileAllowCommands: the tokenized key (ADR-0018) parses in the same
+// flat grammar, may stand alone or beside `allow`, and a file with neither is
+// still refused.
+func TestAllowlistFileAllowCommands(t *testing.T) {
+	dir := t.TempDir()
+	read := func(content string) (permission.AllowlistFile, error) {
+		return permission.LoadAllowlistFile(writeAllowlistFile(t, dir, content))
+	}
+
+	f, err := read(`root = "/repo"` + "\n" + `allow_commands = [["uv", "run", "pytest"], ["ls"]]` + "\n")
+	if err != nil {
+		t.Fatalf("allow_commands alone: %v", err)
+	}
+	if len(f.AllowCommands) != 2 || f.AllowCommands[0][2] != "pytest" {
+		t.Errorf("AllowCommands = %v", f.AllowCommands)
+	}
+	if f.Allow == nil || len(f.Allow) != 0 {
+		t.Errorf("Allow = %v, want the non-nil empty list", f.Allow)
+	}
+
+	f, err = read(`root = "/repo"` + "\n" + `allow = [["/bin/sh", "-c", "make"]]` + "\n" + `allow_commands = [["ls"]]` + "\n")
+	if err != nil || len(f.Allow) != 1 || len(f.AllowCommands) != 1 {
+		t.Errorf("both keys: %+v, %v", f, err)
+	}
+
+	for name, content := range map[string]string{
+		"neither key":                `root = "/repo"` + "\n",
+		"allow_commands set twice":   `root = "/repo"` + "\n" + "allow_commands = []\nallow_commands = []\n",
+		"allow_commands not a list":  `root = "/repo"` + "\n" + `allow_commands = "ls"` + "\n",
+		"allow_commands empty entry": `root = "/repo"` + "\n" + "allow_commands = [[]]\n",
+	} {
+		if _, err := read(content); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}

@@ -316,23 +316,44 @@ as before ADR-0016 existed. The session.start call must also carry
 real process/container containment; kopicode never does this itself (ADR-0011 decision
 4). Omitting the acknowledgment is a usage error, not a silent proceed.
 
-A `--policy-file` has two keys, `root` (the absolute directory writes are confined to) and
-`allow` (a closed, exact-match set of permitted shell commands):
+A `--policy-file` has a `root` (the absolute directory writes are confined to) and one or both
+of two allow keys.
+
+**`allow_commands`** (ADR-0018) is what to reach for. Each entry is a command name and its
+leading arguments, matched on whole tokens, and a command line is permitted only if *every*
+command in it matches:
+
+```toml
+root = "/abs/path/to/the/repository"
+allow_commands = [["uv", "run", "pytest"], ["git", "status"], ["ls"], ["head"]]
+```
+
+`cd /repo && uv run pytest -v 2>&1 | head -100` is permitted by that file; `uv run pytest; rm -rf x`,
+`uv run pytest | tee f` and `ls $(make)` are not, because `rm`, `tee` and `make` are not listed.
+`cd` inside `root`, a redirect that writes inside `root` or to `/dev/null`, and `2>&1` need no
+entry; the filters a model pipes into (`head`, `tail`, `grep`) do. The never-allow rules of
+[`"auto"`](#auto-adr-0017) still apply on top, so an entry can narrow what runs but never widen it
+past them. An entry that starts other commands (`env`, `xargs`, `sh`, `eval`, `sudo`, `find`, …)
+is refused when the file loads. An entry is a statement that you trust that command with whatever
+arguments it is given: `["python"]` permits `python -c`, so write the narrowest prefix that serves.
+
+**`allow`** is the original exact-match set, for a caller that knows the precise line it will
+issue. `run_shell` executes `/bin/sh -c <command-line>`, so an entry is written in exactly that
+argv shape and matched byte-for-byte; it is the right tool for a line that must not vary, and the
+only way to permit one of the never-allow commands:
 
 ```toml
 root = "/abs/path/to/the/repository"
 allow = [["/bin/sh", "-c", "go test ./..."]]
 ```
 
-`run_shell` executes `/bin/sh -c <command-line>`, so an `allow` entry that permits a shell
-command is written in exactly that argv shape and the command line is matched byte-for-byte
-— `[["go", "test", "./..."]]` never matches. Matching is deliberately exact (no prefix, no
-tokenising), so list every command the run will issue; a variation the model emits (an added
-flag, a `cd sub &&` prefix) is a different command line and is refused. This is by design,
-not an oversight to loosen: see
-[ADR-0016](adr/0016-live-remote-consent-for-agent-orchestrated-sessions.md)'s Context
-section for why the project has rejected loosening this match three times, and reaches
-for `"remote_interactive"` instead when a fixed allowlist is the wrong shape for the task.
+`[["go", "test", "./..."]]` never matches there, and any variation the model emits (an added flag, a
+`cd sub &&` prefix) is a different line and is refused. Prefix-matching the *characters* of the line
+is something the project has rejected four times (see
+[ADR-0016](adr/0016-live-remote-consent-for-agent-orchestrated-sessions.md)'s Context, and
+[ADR-0018](adr/0018-tokenized-allowlist.md) for why tokens succeed where characters cannot). For
+open-ended work where the commands cannot be known in advance, `"auto"` or `"remote_interactive"`
+is the better fit.
 
 Every resulting `permission_decided` event is attributed `source: "policy"`.
 

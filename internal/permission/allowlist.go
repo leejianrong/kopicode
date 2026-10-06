@@ -39,6 +39,12 @@ type AllowlistPolicy struct {
 	root     string
 	resolver Resolver
 	allow    [][]string
+
+	// commands are the tokenized allow_commands entries (ADR-0018), and scan is
+	// the scanner configuration they are matched with. Both are empty for a
+	// policy with only exact-match entries, which behaves exactly as before.
+	commands []allowEntry
+	scan     *AutoPolicy
 }
 
 // NewAllowlist builds the policy: root is the declared write-confinement
@@ -53,6 +59,24 @@ type AllowlistPolicy struct {
 // here is a legitimate declaration in its own right: "this invocation may
 // write inside its declared root, and may never run a shell command at all."
 func NewAllowlist(root string, resolver Resolver, allow [][]string) (*AllowlistPolicy, error) {
+	return NewAllowlistCommands(root, resolver, allow, nil)
+}
+
+// NewAllowlistCommands is [NewAllowlist] plus ADR-0018's tokenized entries.
+//
+// commands is a set of command prefixes, each a command name and its leading
+// arguments. A `run_shell` command line is tokenized (see shellscan.go) and is
+// permitted only when *every* command in it — each segment of a `;`, `&&`, `||`
+// or pipe, each `$( )` substitution, each command inside a `sh -c` — matches an
+// entry on its tokens, so an allowed first command cannot carry an unlisted one
+// behind it. The built-in never-allow rules of ADR-0017 still apply on top: a
+// declared entry can narrow what runs, never widen it past them, which is why
+// an entry such as ["git","push"] cannot be used to force-push. A caller that
+// genuinely needs one of those writes an exact-match `allow` entry for it.
+//
+// Entries that name a command which runs other commands (a wrapper, a shell,
+// eval, sudo) are refused: the nested command would go unmatched.
+func NewAllowlistCommands(root string, resolver Resolver, allow, commands [][]string) (*AllowlistPolicy, error) {
 	if root == "" {
 		return nil, errors.New("permission: root is required")
 	}
@@ -71,7 +95,14 @@ func NewAllowlist(root string, resolver Resolver, allow [][]string) (*AllowlistP
 		}
 		cp[i] = append([]string(nil), argv...)
 	}
-	return &AllowlistPolicy{root: abs, resolver: resolver, allow: cp}, nil
+	entries, err := parseAllowCommands(commands)
+	if err != nil {
+		return nil, err
+	}
+	return &AllowlistPolicy{
+		root: abs, resolver: resolver, allow: cp,
+		commands: entries, scan: &AutoPolicy{root: abs, resolver: resolver},
+	}, nil
 }
 
 // Root returns the resolved root the policy confines writes to.
@@ -90,17 +121,20 @@ func (p *AllowlistPolicy) Decide(_ context.Context, req Request) (Decision, erro
 				Reason:  "shell command has no argv",
 			}, nil
 		}
-		if !p.commandAllowed(req.Action.Command) {
+		if p.commandAllowed(req.Action.Command) {
 			return Decision{
-				Verdict: VerdictDeny,
+				Verdict: VerdictAllow,
 				Source:  SourcePolicy,
-				Reason:  fmt.Sprintf("%q is not on the declared allowlist", req.Action.Command),
+				Reason:  "command matches the declared allowlist exactly",
 			}, nil
 		}
+		if len(p.commands) > 0 {
+			return p.decideCommands(req)
+		}
 		return Decision{
-			Verdict: VerdictAllow,
+			Verdict: VerdictDeny,
 			Source:  SourcePolicy,
-			Reason:  "command matches the declared allowlist exactly",
+			Reason:  fmt.Sprintf("%q is not on the declared allowlist", req.Action.Command),
 		}, nil
 
 	case KindWriteOutsideRoot:
@@ -130,6 +164,36 @@ func (p *AllowlistPolicy) Decide(_ context.Context, req Request) (Decision, erro
 			Reason:  fmt.Sprintf("no allowlist rule for %s", req.Kind),
 		}, nil
 	}
+}
+
+// decideCommands answers a run_shell request against the tokenized allow_commands
+// entries. Only the `/bin/sh -c <line>` shape run_shell produces can be analysed;
+// any other argv is refused.
+func (p *AllowlistPolicy) decideCommands(req Request) (Decision, error) {
+	deny := func(reason string) (Decision, error) {
+		return Decision{Verdict: VerdictDeny, Source: SourcePolicy, Reason: reason}, nil
+	}
+	argv := req.Action.Command
+	if len(argv) != 3 || argv[0] != "/bin/sh" || argv[1] != "-c" {
+		return deny(fmt.Sprintf("%q is not on the declared allowlist, and is not a /bin/sh -c command line "+
+			"that allow_commands could match", argv))
+	}
+	if req.Action.Dir == "" {
+		return deny("shell command has no working directory")
+	}
+	dir, err := p.resolver.Resolve(req.Action.Dir)
+	if err != nil {
+		return Decision{}, fmt.Errorf("resolving working directory %q: %w", req.Action.Dir, err)
+	}
+	sc := &autoScan{p: p.scan, cwds: []string{dir}, allow: p.commands, enforce: true}
+	if reason := sc.line(argv[2], 0); reason != "" {
+		return deny(reason + " — this will not be approved on retry")
+	}
+	return Decision{
+		Verdict: VerdictAllow,
+		Source:  SourcePolicy,
+		Reason:  "every command in the line matches the declared allow_commands",
+	}, nil
 }
 
 // commandAllowed reports whether argv exact-matches one of the declared

@@ -204,10 +204,18 @@ var (
 // every cd seen — so a relative path is judged against all of them. "?" means a
 // directory the scan could not determine, against which no relative path is
 // provably inside the root.
+//
+// With enforce set the scan additionally refuses any command that does not match
+// an entry of allow (the tokenized allowlist, [AllowlistPolicy]): the never-allow
+// rules still run first, so a declared entry can narrow what is permitted but
+// never widen it past them.
 type autoScan struct {
 	p     *AutoPolicy
 	cwds  []string
 	steps int
+
+	allow   []allowEntry
+	enforce bool
 }
 
 func (s *autoScan) tick() string {
@@ -287,6 +295,23 @@ func (s *autoScan) command(c shCommand, depth int) string {
 	}
 
 	name := path.Base(words[0].text)
+	if s.enforce && (name == "cd" || name == "pushd" || name == "popd") {
+		if r := s.cdInsideRoot(name, words[1:]); r != "" {
+			return r
+		}
+	}
+	if r := s.neverAllowed(words, name, depth); r != "" {
+		return r
+	}
+	if s.enforce && name != "cd" && name != "pushd" && name != "popd" {
+		return s.allowed(words)
+	}
+	return ""
+}
+
+// neverAllowed runs the built-in and caller never-allow rules over one command,
+// looking through a wrapper at every later word.
+func (s *autoScan) neverAllowed(words []shWord, name string, depth int) string {
 	if wrappers[name] {
 		if r := s.rules(words[:1], depth, true); r != "" {
 			return r
@@ -673,4 +698,118 @@ func matchesNever(e neverEntry, name string, args []shWord) bool {
 		}
 	}
 	return i == len(rest)
+}
+
+// --- the tokenized allowlist (ADR-0018) ---------------------------------------
+
+// allowEntry is one declared command prefix: a command name and the leading
+// arguments that must follow it.
+type allowEntry []string
+
+// allowed reports "" when words match some allow entry, or the reason they do
+// not. Matching is on tokens, never characters: an entry matches a command whose
+// first words equal it, so ["uv","run","pytest"] permits `uv run pytest -v` and
+// not `uv run pytestx`. The entry's own words must be written statically in the
+// command; a word computed at run time cannot stand in for one.
+func (s *autoScan) allowed(words []shWord) string {
+	for _, e := range s.allow {
+		if e.matches(words) {
+			return ""
+		}
+	}
+	return fmt.Sprintf("%s is not on the declared allowlist", renderWords(words))
+}
+
+func (e allowEntry) matches(words []shWord) bool {
+	if len(words) < len(e) {
+		return false
+	}
+	for i, tok := range e {
+		w := words[i]
+		if w.dynamic {
+			return false
+		}
+		if i == 0 && !strings.Contains(tok, "/") {
+			if path.Base(w.text) != tok {
+				return false
+			}
+			continue
+		}
+		if w.text != tok {
+			return false
+		}
+	}
+	return true
+}
+
+func renderWords(words []shWord) string {
+	parts := make([]string, 0, len(words))
+	for _, w := range words {
+		parts = append(parts, w.text)
+	}
+	return strings.Join(parts, " ")
+}
+
+// cdInsideRoot refuses a cd the allowlist cannot show stays inside the declared
+// root. cd is otherwise implicit — a line that changes directory and then runs an
+// allowed command is the ordinary shape of a model's command — but a cd that
+// leaves the root would make every relative path after it mean something else.
+func (s *autoScan) cdInsideRoot(name string, args []shWord) string {
+	if name == "popd" {
+		return "popd returns to a directory the scan cannot determine"
+	}
+	target := ""
+	for _, a := range args {
+		if !a.dynamic && (a.text == "-L" || a.text == "-P" || a.text == "--") {
+			continue
+		}
+		if a.dynamic || a.text == "-" || strings.HasPrefix(a.text, "~") {
+			return "cd to a directory computed at run time cannot be confined to the declared root"
+		}
+		target = a.text
+		break
+	}
+	if target == "" {
+		return "a bare cd goes to the home directory, outside the declared root"
+	}
+	for _, cwd := range s.cwds {
+		abs, ok := s.abs(cwd, target)
+		if !ok {
+			return "cd " + target + " cannot be resolved against the working directory"
+		}
+		if !contains(s.p.root, abs) {
+			return fmt.Sprintf("cd %s leaves the declared root %s", abs, s.p.root)
+		}
+	}
+	return ""
+}
+
+// parseAllowCommands validates declared allow_commands entries. An entry may not
+// name a command that runs another command — a wrapper, a shell, eval, a
+// privilege escalator — because matching stops at the entry's own words and the
+// nested command would go unchecked; the commands themselves are what to list.
+func parseAllowCommands(entries [][]string) ([]allowEntry, error) {
+	out := make([]allowEntry, 0, len(entries))
+	for i, e := range entries {
+		if len(e) == 0 {
+			return nil, fmt.Errorf("permission: allow_commands[%d] is empty; an entry needs at least a command name", i)
+		}
+		for _, tok := range e {
+			if tok == "" || strings.ContainsAny(tok, "\x00\n\r") {
+				return nil, fmt.Errorf("permission: allow_commands[%d] has an empty or malformed word", i)
+			}
+		}
+		name := path.Base(e[0])
+		switch {
+		case wrappers[name], shellInterpreters[name], privilegeEscalators[name],
+			name == "eval", name == "source", name == ".", name == "exec":
+			return nil, fmt.Errorf("permission: allow_commands[%d] names %q, which runs other commands; "+
+				"a command it starts would not be matched against the list, so list those commands instead", i, name)
+		case name == "cd", name == "pushd", name == "popd":
+			return nil, fmt.Errorf("permission: allow_commands[%d] names %q; cd inside the declared root is "+
+				"always permitted and needs no entry", i, name)
+		}
+		out = append(out, append(allowEntry(nil), e...))
+	}
+	return out, nil
 }
