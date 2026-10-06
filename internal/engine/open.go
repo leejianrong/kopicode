@@ -897,7 +897,7 @@ func gatePolicy(opts Options, root string, resolver permission.Resolver) (permis
 	if opts.Policy == nil {
 		return mustAskPolicy(opts.Consent, opts.ConsentMode), nil
 	}
-	return permission.NewAllowlist(opts.Policy.Root, resolver, opts.Policy.Allow)
+	return permission.NewAllowlistCommands(opts.Policy.Root, resolver, opts.Policy.Allow, opts.Policy.AllowCommands)
 }
 
 // mustAskPolicy builds the policy that forwards to Consent, attributing every

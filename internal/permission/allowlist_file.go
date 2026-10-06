@@ -85,6 +85,22 @@ import (
 // approved" is a legitimate declaration here, not a way to switch a required
 // gate off.
 //
+// # allow_commands: tokenized entries (ADR-0018)
+//
+// The exact-match `allow` above suits a caller that knows the exact command
+// lines its run will issue, and almost never matches a model that adds a `cd`,
+// a pipe or a flag (KAN-1404, issue #157). `allow_commands` is the other shape:
+//
+//	allow_commands = [["uv", "run", "pytest"], ["git", "status"], ["ls"], ["head"]]
+//
+// Each entry is a command name and its leading arguments. The command line is
+// tokenized and every command in it must match an entry on whole tokens, so
+// `cd /repo && uv run pytest -v 2>&1 | head -100` is permitted by the list above
+// and `uv run pytest; rm -rf x` is not. `cd` inside `root` is implicit. Entries
+// that start other commands (env, xargs, sh, eval, sudo) are refused, and the
+// built-in never-allow rules still apply on top. Either key may be given, or
+// both; at least one is required.
+//
 // # What it refuses, and why each refusal is better than a guess
 //
 //   - A `[table]` header. internal/harness's own reader treats one as "stop
@@ -121,6 +137,10 @@ type AllowlistFile struct {
 	// "no file was loaded" (the zero [AllowlistFile]) from "a file was
 	// loaded that permits no shell command at all."
 	Allow [][]string
+	// AllowCommands is the `allow_commands` key (ADR-0018): tokenized command
+	// prefixes, each a command name and its leading arguments, matched against
+	// every command in a `run_shell` line. Nil when the key is absent.
+	AllowCommands [][]string
 }
 
 // LoadAllowlistFile reads and parses the declared-allowlist file at path.
@@ -147,7 +167,7 @@ func LoadAllowlistFile(path string) (AllowlistFile, error) {
 func parseAllowlistFile(path, content string) (AllowlistFile, error) {
 	cfg := AllowlistFile{Path: path}
 	seen := map[string]bool{}
-	haveRoot, haveAllow := false, false
+	haveRoot, haveAllow, haveCommands := false, false, false
 
 	for i, raw := range strings.Split(content, "\n") {
 		lineNo := i + 1
@@ -205,9 +225,17 @@ func parseAllowlistFile(path, content string) (AllowlistFile, error) {
 			cfg.Allow = argv
 			haveAllow = true
 
+		case "allow_commands":
+			cmds, err := allowlistParseArgvArray(strings.TrimSpace(rest))
+			if err != nil {
+				return AllowlistFile{}, fmt.Errorf("%s:%d: allow_commands = %s: %w", path, lineNo, rest, err)
+			}
+			cfg.AllowCommands = cmds
+			haveCommands = true
+
 		default:
-			return AllowlistFile{}, fmt.Errorf("%s:%d: %q is not a key this file recognizes; only root and "+
-				"allow are — a key belonging to a different concern (.kopicode/config.toml's model/harness/"+
+			return AllowlistFile{}, fmt.Errorf("%s:%d: %q is not a key this file recognizes; only root, "+
+				"allow and allow_commands are — a key belonging to a different concern (.kopicode/config.toml's model/harness/"+
 				"verify, say) does not belong in a declared-allowlist file", path, lineNo, key)
 		}
 	}
@@ -215,7 +243,7 @@ func parseAllowlistFile(path, content string) (AllowlistFile, error) {
 	if !haveRoot {
 		return AllowlistFile{}, fmt.Errorf("%s: missing required key %q", path, "root")
 	}
-	if !haveAllow {
+	if !haveAllow && !haveCommands {
 		return AllowlistFile{}, fmt.Errorf("%s: missing required key %q; write %s if no shell command should "+
 			"ever be approved", path, "allow", `allow = []`)
 	}

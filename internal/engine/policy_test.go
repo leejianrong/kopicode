@@ -187,3 +187,32 @@ func TestPolicyFileEndToEndThroughOpen(t *testing.T) {
 		t.Errorf("second decision = %q, want deny (not on the declared allowlist)", decisions[1].Decision)
 	}
 }
+
+// TestOptionsPolicyAllowCommandsAnswersAVariedLine is issue #157 through Open: a
+// declared allow_commands entry permits the model's `cd … && echo … | head`
+// shaped line, which no exact-match entry could, and the decision is journalled
+// as the policy's.
+func TestOptionsPolicyAllowCommandsAnswersAVariedLine(t *testing.T) {
+	root := t.TempDir()
+	line := "cd " + root + " && echo hello | head -1"
+	replies := []scriptedReply{
+		{calls: []wireCall{nativeCall("call-1", tools.ToolRunShell, `{"command":`+strconv.Quote(line)+`}`)},
+			usage: wireUsage{Prompt: 10, Completion: 5, Total: 15}},
+		{text: "Understood.", usage: wireUsage{Prompt: 20, Completion: 4, Total: 24}},
+	}
+	prov := script(t, replies, oneAttemptPerTurn(2))
+
+	pf := &engine.PolicyFile{Root: root, Allow: [][]string{}, AllowCommands: [][]string{{"echo"}, {"head"}}}
+	s, _ := openWithProvider(t, prov, engine.Options{Policy: pf, ConsentMode: engine.ConsentUnattended})
+	if _, err := s.Run(t.Context(), "run it"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if err := s.Close(t.Context()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	dec := sole[journal.PermissionDecided](t, readJournal(t, s.Path()))
+	if dec.Decision != permission.VerdictAllow.String() || dec.Source != permission.SourcePolicy.String() {
+		t.Errorf("decision = %q from %q (%s), want allow from policy", dec.Decision, dec.Source, dec.Reason)
+	}
+}
