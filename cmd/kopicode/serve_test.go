@@ -1258,3 +1258,106 @@ func TestServeReadOnlyIsAUsageErrorUnderAuto(t *testing.T) {
 	}
 	h.close()
 }
+
+// askEvents returns the ask_answered events of a session.
+func askEvents(notes []map[string]any) []map[string]any {
+	var out []map[string]any
+	for _, n := range notes {
+		params, _ := n["params"].(map[string]any)
+		ev, _ := params["event"].(map[string]any)
+		if ev["kind"] == "ask_answered" {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+// TestServeRemoteAskPutsTheQuestionToTheClient (#173, ADR-0020): with
+// ask_mode "remote" the model's ask arrives as an ask.request carrying the
+// question and context, the client's text goes back to the model as the tool's
+// result, and the journal attributes the answer to "remote".
+func TestServeRemoteAskPutsTheQuestionToTheClient(t *testing.T) {
+	t.Setenv(engine.APIKeyEnv, "kopicode-test-credential")
+	srv := scriptedProvider(t,
+		sseToolCall("call-1", "ask", `{"question":"tabs or spaces?","context":"gofmt is not set up"}`),
+		sseBody("done"),
+	)
+	h := startServe(t, engine.Options{ProviderBaseURL: srv.URL})
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
+		"params": map[string]any{
+			"session": "s1", "dir": t.TempDir(), "prompt": "style the file",
+			"consent_mode": consentModeRemoteInteractive, "ask_mode": "remote",
+		}})
+
+	req := h.awaitRequest(methodAskRequest)
+	params, _ := req["params"].(map[string]any)
+	if params["session"] != "s1" || params["question"] != "tabs or spaces?" || params["context"] != "gofmt is not set up" {
+		t.Errorf("ask.request params = %v", params)
+	}
+	h.send(map[string]any{"jsonrpc": "2.0", "id": req["id"], "result": map[string]any{"text": "tabs"}})
+
+	if resp := h.awaitResponse(1); resp["error"] != nil {
+		t.Fatalf("session.start errored: %v", resp["error"])
+	}
+	evs := askEvents(h.notificationsFor("s1"))
+	if len(evs) != 1 || evs[0]["source"] != "remote" || evs[0]["text"] != "tabs" || evs[0]["reason"] == "refused" {
+		t.Errorf("ask_answered = %v, want one answer \"tabs\" with source remote", evs)
+	}
+	h.close()
+}
+
+// TestServeRemoteAskExpiryIsNotADenial: an unanswered question has no safe
+// default, so the wait running out gives the model the same "nobody could
+// answer" refusal the headless case does — journalled as refused, and the turn
+// goes on.
+func TestServeRemoteAskExpiryIsNotADenial(t *testing.T) {
+	t.Setenv(engine.APIKeyEnv, "kopicode-test-credential")
+	srv := scriptedProvider(t,
+		sseToolCall("call-1", "ask", `{"question":"which one?"}`),
+		sseBody("done"),
+	)
+	h := startServe(t, engine.Options{ProviderBaseURL: srv.URL})
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
+		"params": map[string]any{
+			"session": "s1", "dir": t.TempDir(), "prompt": "go", "consent_mode": consentModeRemoteInteractive,
+			"ask_mode": "remote", "consent_timeout": "1s",
+		}})
+	h.awaitRequest(methodAskRequest) // never answered
+	resp := h.awaitResponse(1)
+	if resp["error"] != nil {
+		t.Fatalf("session.start errored: %v", resp["error"])
+	}
+	if result, _ := resp["result"].(map[string]any); result["stop"] != "completed" {
+		t.Errorf("stop = %v, want completed: the turn should go on after an unanswered ask", result["stop"])
+	}
+	evs := askEvents(h.notificationsFor("s1"))
+	if len(evs) != 1 || evs[0]["reason"] != "refused" || evs[0]["text"] != "no human is present to answer this question" {
+		t.Errorf("ask_answered = %v, want one refusal with the nobody-could-answer text", evs)
+	}
+	h.close()
+}
+
+// TestServeAskModeIsValidated: remote ask needs the live consent client it rides
+// on, and only one non-default value exists.
+func TestServeAskModeIsValidated(t *testing.T) {
+	for name, extra := range map[string]map[string]any{
+		"auto":              {"consent_mode": consentModeAuto, "ask_mode": "remote"},
+		"unattended_policy": {"consent_mode": consentModeUnattendedPolicy, "containment_provided": true, "ask_mode": "remote"},
+		"unknown value":     {"consent_mode": consentModeRemoteInteractive, "ask_mode": "sometimes"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := startServe(t, engine.Options{})
+			params := map[string]any{"session": "s1", "dir": t.TempDir(), "prompt": "hi"}
+			for k, v := range extra {
+				params[k] = v
+			}
+			h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart, "params": params})
+			resp := h.awaitResponse(1)
+			rpcErr, _ := resp["error"].(map[string]any)
+			if rpcErr == nil || !numEq(rpcErr["code"], codeUsageError) {
+				t.Fatalf("got %v, want a usage error", resp)
+			}
+			h.close()
+		})
+	}
+}

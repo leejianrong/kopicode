@@ -90,6 +90,11 @@ type StartParams struct {
 	// supplying it under any other mode is a usage error.
 	NeverAllow []string
 
+	// AskMode is "" (today's behaviour: the process ask policy, else the fixed
+	// refusal) or AskModeRemote (ADR-0020): the model's ask is put to the
+	// client live. Only meaningful under ConsentRemoteInteractive.
+	AskMode string
+
 	// ReadOnly refuses every file write for the session (ADR-0019). It is a
 	// usage error under ConsentAuto, which would run shell unasked.
 	ReadOnly bool
@@ -121,6 +126,13 @@ type TurnResult struct {
 	Turns    int
 }
 
+// AskModeRemote is the one non-default StartParams.AskMode.
+const AskModeRemote = "remote"
+
+// RemoteAsk builds the live answerer for one session's ask tool (ADR-0020), with
+// the same timeout meaning as [RemoteConsent]: zero is the process default.
+type RemoteAsk func(sessionID string, timeout time.Duration) engine.Answerer
+
 // RemoteConsent builds the live consenter for one session (ADR-0016), or is nil
 // when the front end has no way to ask its peer — in which case a session
 // declaring remote_interactive is refused rather than left to deny everything.
@@ -132,6 +144,8 @@ type Manager struct {
 	base   engine.Options
 	stderr io.Writer
 	remote RemoteConsent
+	// remoteAsk is nil for a front end with no live ask (kopicode mcp).
+	remoteAsk RemoteAsk
 
 	// mu guards the sessions map and every mutable field of a managed session —
 	// its queue, its current-turn cancel handle and its closed flag — and backs
@@ -145,6 +159,10 @@ type Manager struct {
 	// step, so two concurrent starts for one id cannot both open a session.
 	startMu sync.Mutex
 }
+
+// SetRemoteAsk gives the manager a live ask, called once after New and before
+// any session starts.
+func (m *Manager) SetRemoteAsk(f RemoteAsk) { m.remoteAsk = f }
 
 // New builds a Manager. base carries what every session inherits (the declared
 // policies, the provider base URL); Dir, Selection and the consent fields are
@@ -465,6 +483,28 @@ func (m *Manager) buildConsentOptions(p StartParams, opts *engine.Options) *Erro
 	default:
 		return errf(KindUsage, "a consent_mode of %q, %q or %q is required; got %q",
 			ConsentRemoteInteractive, ConsentUnattendedPolicy, ConsentAuto, p.ConsentMode)
+	}
+
+	switch p.AskMode {
+	case "":
+	case AskModeRemote:
+		if p.ConsentMode != ConsentRemoteInteractive {
+			return errf(KindUsage, "ask_mode %q needs consent_mode %q: a session with no live client for "+
+				"permissions has none for questions either (ADR-0020); got %q",
+				AskModeRemote, ConsentRemoteInteractive, p.ConsentMode)
+		}
+		if m.remoteAsk == nil {
+			return errf(KindUsage, "ask_mode %q needs a way to ask the client, and this front end has none", AskModeRemote)
+		}
+		// An explicit per-session opt-in outranks the process-wide --ask-policy-file,
+		// the way remote_interactive outranks --policy-file: left set beside the live
+		// answerer, Open would refuse the pair as two answerers for one question.
+		opts.AskPolicy = nil
+		opts.Ask = m.remoteAsk(p.ID, p.ConsentTimeout)
+		opts.AskMode = engine.AskRemote
+		return nil
+	default:
+		return errf(KindUsage, "ask_mode %q is not recognised; the only value is %q (or omit it)", p.AskMode, AskModeRemote)
 	}
 
 	if opts.AskPolicy == nil {

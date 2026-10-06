@@ -61,6 +61,11 @@ const (
 	// AskUnattended says nobody is present; Answerer answers on its own — the
 	// headless `run --print` surface's denyHeadlessAsk, for instance.
 	AskUnattended
+	// AskRemote says a person answers through a live peer — `kopicode serve`'s
+	// ask.request (ADR-0020). Attributed "remote", as consent is
+	// (permission.SourceRemote): the surface does not get to assert it is a
+	// human, only that the answer arrived over the wire.
+	AskRemote
 )
 
 // The journal wire values for journal.AskAnswered.Source, kept here rather
@@ -71,6 +76,7 @@ const (
 const (
 	askSourceUser   = "user"
 	askSourcePolicy = "policy"
+	askSourceRemote = "remote"
 )
 
 // noAnswerer is [Config.Ask]'s default when nothing was wired — a caller that
