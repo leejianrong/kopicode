@@ -840,6 +840,11 @@ func (s *server) buildConsentOptions(p startParams, opts *engine.Options) *rpcEr
 		opts.ConsentMode = engine.ConsentUnattended
 
 	case consentModeRemoteInteractive:
+		// --policy-file belongs to unattended_policy sessions. Left set beside
+		// the live consenter it makes engine.Open refuse the session as two
+		// answerers for one question, so a process started with one could never
+		// open a remote_interactive session at all.
+		opts.Policy = nil
 		rc := newRemoteConsenter(s, p.Session)
 		opts.Consent = rc.Ask
 		opts.ConsentMode = engine.ConsentRemote

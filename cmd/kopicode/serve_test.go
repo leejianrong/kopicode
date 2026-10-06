@@ -1033,3 +1033,24 @@ func TestServeNeverAllowIsAUsageErrorUnlessAuto(t *testing.T) {
 		})
 	}
 }
+
+// TestServeRemoteInteractiveIgnoresTheProcessPolicyFile: --policy-file belongs
+// to unattended_policy sessions, so a process started with one must still open
+// a remote_interactive session rather than have engine.Open refuse the pair of
+// answerers (the live consenter and the declared policy).
+func TestServeRemoteInteractiveIgnoresTheProcessPolicyFile(t *testing.T) {
+	t.Setenv(engine.APIKeyEnv, "kopicode-test-credential")
+	srv := scriptedProvider(t, sseBody("done"))
+	h := startServe(t, engine.Options{
+		ProviderBaseURL: srv.URL,
+		Policy:          &engine.PolicyFile{Root: t.TempDir(), Allow: [][]string{{"true"}}},
+	})
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
+		"params": map[string]any{
+			"session": "s1", "dir": t.TempDir(), "prompt": "hi", "consent_mode": consentModeRemoteInteractive,
+		}})
+	if resp := h.awaitResponse(1); resp["error"] != nil {
+		t.Fatalf("remote_interactive session beside a process-level policy file errored: %v", resp["error"])
+	}
+	h.close()
+}
