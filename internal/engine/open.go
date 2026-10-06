@@ -259,6 +259,12 @@ type Options struct {
 	// [permission.SourcePolicy] on its own, independent of ConsentMode.
 	Policy *PolicyFile
 
+	// ReadOnly makes the session refuse every file write (ADR-0019): the gate
+	// denies a write tool outright, in every consent mode, without asking
+	// anyone. Shell is not made read-only, so it is refused together with
+	// [ConsentAuto], which would run shell unasked; see [Open].
+	ReadOnly bool
+
 	// AutoNeverAllow is the caller's additions to [ConsentAuto]'s never-allow
 	// list (ADR-0017): "command [token ...]" entries appended to the built-in
 	// list, never replacing or narrowing it. It is meaningful only under
@@ -574,6 +580,10 @@ func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session,
 			"is also set; auto mode is its own answerer and this package will not guess which of two a "+
 			"caller meant (docs/adr/0017-auto-consent-mode.md)", ErrConfig)
 	}
+	if opts.ReadOnly && opts.ConsentMode == ConsentAuto {
+		return nil, fmt.Errorf("%w: Options.ReadOnly with ConsentAuto; auto runs shell inside the root unasked and a "+
+			"shell line can write, so the session would not be read-only (docs/adr/0019-read-only-sessions.md)", ErrConfig)
+	}
 	if len(opts.AutoNeverAllow) > 0 && opts.ConsentMode != ConsentAuto {
 		return nil, fmt.Errorf("%w: Options.AutoNeverAllow is set but Options.ConsentMode is not ConsentAuto; "+
 			"nothing would consult the list (docs/adr/0017-auto-consent-mode.md)", ErrConfig)
@@ -747,6 +757,7 @@ func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session,
 	if err != nil {
 		return fail(fmt.Errorf("engine: building the consent gate: %w", err))
 	}
+	gate.SetReadOnly(opts.ReadOnly)
 
 	// A session outside a repository is legitimate — no snapshots, no head on
 	// the record — so this failure is not fatal for Open. What is not
