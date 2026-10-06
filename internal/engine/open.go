@@ -580,7 +580,7 @@ func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session,
 	}
 	if opts.ConsentMode == ConsentAuto {
 		if err := permission.ValidateNeverAllow(opts.AutoNeverAllow); err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrConfig, err)
+			return nil, fmt.Errorf("%w: %w", ErrConfig, err)
 		}
 	}
 	if opts.AskPolicy != nil && opts.Ask != nil {

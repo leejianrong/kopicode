@@ -412,7 +412,7 @@ func shellScript(args []shWord) (script string, ok, dynamic bool) {
 		}
 		t := a.text
 		switch {
-		case t == "--" || !(strings.HasPrefix(t, "-") || strings.HasPrefix(t, "+")):
+		case t == "--" || (!strings.HasPrefix(t, "-") && !strings.HasPrefix(t, "+")):
 			return "", false, false // a script file, or the end of the options
 		case t == "-o" || t == "+o" || t == "-O" || t == "+O":
 			i++ // takes an option name
