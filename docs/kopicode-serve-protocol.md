@@ -166,6 +166,26 @@ did not complete cleanly — the working-tree lock is released, and the id is fr
 
 **Result**: `{ "session": "...", "closed": true }`.
 
+## `server.hello`
+
+Asks what this binary supports, so a client can require a minimum without scraping
+`kopicode serve --help`. No params. The result is the same object `kopicode version --json`
+prints:
+
+```json
+--> { "jsonrpc": "2.0", "id": 1, "method": "server.hello" }
+<-- { "jsonrpc": "2.0", "id": 1, "result": { "version": "v0.3.0", "commit": "…", "tree_state": "clean",
+      "source": "ldflags", "protocol": 1, "features": ["allow_commands", "consent_mode.auto", …] } }
+```
+
+`version` is a git describe for humans and must not be parsed; `tree_state` is the machine-readable
+dirty bit. `protocol` moves only for a change that breaks an existing client. `features` is a sorted
+list of stable lower-case dotted names, added in the change that ships a capability, never renamed,
+and removed only with a protocol bump. Current names: `allow_commands`, `consent_mode.auto`,
+`consent_mode.remote_interactive`, `consent_mode.unattended_policy`, `consent_request.command`,
+`consent_timeout.flag`, `consent_timeout.session`, `mcp`, `server.hello`, `session.close`.
+`cmd/kopicode/capabilities_test.go` ties the list to the consent modes and methods in the code.
+
 ## `consent.request` (server → client, ADR-0016)
 
 Sent only for a session whose `consent_mode` is `"remote_interactive"`. Every

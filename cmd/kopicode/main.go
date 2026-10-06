@@ -78,7 +78,7 @@ var commandHelp = []struct{ name, desc string }{
 	{"serve", "hold a process open and drive sessions over JSON-RPC on stdio"},
 	{"mcp", "serve kopicode as an MCP server on stdio, for MCP-capable agents"},
 	{"sessions", "list this repository's past sessions (ids for --resume / --fork)"},
-	{"version", "print the build version and commit"},
+	{"version", "print the build version and commit (--json: with protocol and features)"},
 }
 
 // usage prints the top-level overview: what kopicode is, how it is invoked, and
@@ -165,7 +165,22 @@ func command(args []string) (string, []string) {
 // version prints the identity the engine journals on SessionStarted, by the
 // same call. Two ways of asking a binary who it is would eventually disagree,
 // and the one nobody looks at would be the one in the record.
-func version(_ []string, stdout, _ io.Writer) int {
+func version(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("kopicode version", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	asJSON := fs.Bool("json", false, "print the identity, serve protocol version and feature list as one JSON object")
+	if err := fs.Parse(args); err != nil {
+		return exitUsage
+	}
+	if *asJSON {
+		b, err := marshalCapabilities(currentCapabilities())
+		if err != nil {
+			say(stderr, "kopicode: %v\n", err)
+			return exitHarness
+		}
+		say(stdout, "%s\n", b)
+		return exitSuccess
+	}
 	say(stdout, "%s\n", build.Current())
 	return exitSuccess
 }
