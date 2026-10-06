@@ -184,8 +184,8 @@ kopicode mechanism behaved as designed, and the classifier still bucketed it `ha
 per its deliberately conservative rule. This is the harness's first honest number, not
 a flattering one.
 
-**What doesn't exist yet:** the recorder is driven by `kopibench run --record-dir`, but only two
-tasks are recorded so far; the three older shipped fixtures are still hand-authored. The
+**What doesn't exist yet:** the recorder is driven by `kopibench run --record-dir`, but only ten
+of thirteen tasks are recorded: three finished correctly and then ran to the turn cap, which `Validate` refuses as a cut-off session; the three older shipped fixtures are still hand-authored. The
 other gaps this paragraph used to list have since closed — verify against the code, not
 this note: three models are registered (`internal/harness/registry.go`) and paired A/B
 numbers exist (`docs/paired-ab-*`); `slog` runs inside the engine
