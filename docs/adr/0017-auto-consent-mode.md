@@ -1,6 +1,6 @@
 # ADR-0017: An `auto` consent mode for serve/mcp sessions, with a hard never-allow list
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-06)
 - **Date:** 2026-10-06
 - **Deciders:** Jian (leejianrong2@gmail.com)
 

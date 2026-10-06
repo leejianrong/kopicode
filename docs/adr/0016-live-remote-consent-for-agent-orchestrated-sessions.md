@@ -1,11 +1,11 @@
 # ADR-0016: Live remote consent, and an explicit consent-mode declaration, for agent-orchestrated sessions
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-06)
 - **Date:** 2026-09-19
 - **Deciders:** Jian (leejianrong2@gmail.com)
 
 Drafted by an agent during the same 2026-09-19 planning session as
-[ADR-0015](0015-mcp-server-front-end.md). Pending Jian's review.
+[ADR-0015](0015-mcp-server-front-end.md). Reviewed and accepted by Jian on 2026-10-06, after implementation.
 
 Amends [ADR-0009](0009-ask-tool-contract.md) (the `Consenter`/`ConsentMode` machinery)
 and [ADR-0011](0011-unattended-invocation-policy-gate.md) (the declared-allowlist
