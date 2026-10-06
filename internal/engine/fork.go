@@ -34,7 +34,7 @@ import (
 // # Journal duplication versus a reference
 //
 // See [journal.SessionForked]'s own doc comment for the argument in full;
-// the short version is that CLAUDE.md's "one session record, and it is the
+// the short version is that AGENTS.md's "one session record, and it is the
 // journal" reads as a promise about *this* session's own file, and a fork
 // that only recorded "ask session X about turn Y" would make good on that
 // promise only conditionally, on X still existing and being reachable from
@@ -68,7 +68,7 @@ import (
 // exactly the asymmetry with Resume that makes automatic restore the right
 // default for one and the wrong one for the other.
 //
-// The corollary CLAUDE.md's own "never touch the user's git state" promise
+// The corollary AGENTS.md's own "never touch the user's git state" promise
 // still holds even though this file rewrites files: Restore never resets
 // HEAD, never touches the index, never moves a branch or a stash — it
 // extracts a tree's blobs onto disk the same way `git archive | tar -x`

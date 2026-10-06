@@ -163,7 +163,7 @@ const directiveStem = "kopicode:allow-"
 
 const (
 	groundRules = ".claude/skills/agent-ground-rules/SKILL.md"
-	brief       = "CLAUDE.md, \"Boundaries that must not be crossed\""
+	brief       = "AGENTS.md, \"Boundaries that must not be crossed\""
 )
 
 // guidance is what the failure message says: why the rule exists, and the

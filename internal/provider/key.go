@@ -31,7 +31,7 @@ var ErrNoAPIKey = errors.New("provider: " + KeyEnv + " is unset")
 // happens to hold the key, an error that wraps the request, a debug log of the
 // client's configuration. Any of those puts the credential in the journal, in a
 // blob or on a terminal, and the rule is that it appears in none of them
-// (CLAUDE.md, "Commands").
+// (AGENTS.md, "Commands").
 //
 // So the value is unexported and every way the standard library has of turning
 // a value into text is overridden to return [Redacted]:

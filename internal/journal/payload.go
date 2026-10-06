@@ -612,7 +612,7 @@ func (SessionEnded) Type() Type { return TypeSessionEnded }
 // The alternative — record SourceSessionID and SourceTurn here and nothing
 // else, leaving a reader to open the source session's own directory to see
 // what actually happened up to the fork point — was considered and rejected.
-// CLAUDE.md's boundary is "one session record, and it is the journal; do not
+// AGENTS.md's boundary is "one session record, and it is the journal; do not
 // build a parallel transcript", and a forked session whose own file cannot
 // answer "what did this session's model see before it said X" without
 // chasing a second, separate directory (one that may since have been

@@ -245,7 +245,7 @@ func interactive(args []string, _, stderr io.Writer) int {
 
 	// Which rung of the precedence chain answered is diagnostics, not session
 	// content: the journal records the resolved values because those identify
-	// the arm (ADR-0007 §Consequences, and CLAUDE.md on slog never duplicating
+	// the arm (ADR-0007 §Consequences, and AGENTS.md on slog never duplicating
 	// the journal).
 	slog.Debug("arm resolved", "selection", selection)
 

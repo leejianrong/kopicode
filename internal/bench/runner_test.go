@@ -442,7 +442,7 @@ func TestOracleTimeoutIsReportedRatherThanCountedAsAFailure(t *testing.T) {
 	}
 }
 
-// TestOracleOutputIsKeptWhole holds CLAUDE.md's rule where it bites hardest: the
+// TestOracleOutputIsKeptWhole holds AGENTS.md's rule where it bites hardest: the
 // output justifying a "fail" verdict lives in the tree that is about to be
 // deleted, so it is written out before reclamation and never clipped.
 func TestOracleOutputIsKeptWhole(t *testing.T) {

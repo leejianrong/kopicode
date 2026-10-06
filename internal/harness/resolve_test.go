@@ -319,7 +319,7 @@ func TestBindDeclaresBothFlagsOnce(t *testing.T) {
 
 // TestSelectionLogsNoCredential.
 //
-// OPENROUTER_API_KEY must never reach a log line (CLAUDE.md). A Selection has
+// OPENROUTER_API_KEY must never reach a log line (AGENTS.md). A Selection has
 // nowhere to put one, and LogValue is written out field by field rather than
 // reflected, so this is a check on the shape staying that way rather than on the
 // current fields.

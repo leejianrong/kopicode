@@ -12,7 +12,7 @@
 // It returns a [Selection]: the resolved model id, the provider pin, the
 // harness configuration and its hash. The engine loop writes those onto
 // journal.SessionStarted. Nothing here imports internal/journal — packages
-// return data, the engine journals (CLAUDE.md, "Boundaries that must not be
+// return data, the engine journals (AGENTS.md, "Boundaries that must not be
 // crossed") — and nothing here opens a file for writing, which is what lets
 // ADR-0007 decision 4 hold: resolution happens before the journal exists, so a
 // session that never started leaves no record behind.
@@ -360,7 +360,7 @@ const NaiveV2ConfigName = "naive-verify-only"
 // that first run's axis count down. It offers [Config.ToolSet] with
 // "edit_file" removed — [Config.ToolCatalogue] loses the matching entry, held
 // to that by internal/engine's TestHarnessToolCatalogueMatchesEngineCatalogue
-// — leaving `edit_file_fuzzy` as the only edit tool. CLAUDE.md's boundary
+// — leaving `edit_file_fuzzy` as the only edit tool. AGENTS.md's boundary
 // still holds: no new, unsafe edit path is invented, since `edit_file_fuzzy`
 // already exists and every use already marks the session `unattributed` by
 // design (ADR-0006 §3).

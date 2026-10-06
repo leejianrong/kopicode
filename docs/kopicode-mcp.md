@@ -11,13 +11,15 @@ is unchanged.
 
 ```bash
 # Claude Code
-claude mcp add kopicode -e OPENROUTER_API_KEY -- kopicode mcp
+claude mcp add kopicode -- kopicode mcp
 
-# any MCP client that takes a command: command "kopicode", args ["mcp"],
-# and OPENROUTER_API_KEY in the server's environment
+# any MCP client that takes a command: command "kopicode", args ["mcp"]
 ```
 
-The credential is read once from the process environment, as on every surface. The MCP wire
+The credential is read once from the process environment, as on every surface, so the
+client must launch kopicode with `OPENROUTER_API_KEY` in it. If it does not pass yours through,
+use its env option (Claude Code: `-e OPENROUTER_API_KEY=...`, which stores the key in that
+client's config). The MCP wire
 carries no credential and no per-session override.
 
 `kopicode mcp` takes the same process-level flags as `serve`: `--policy-file`,

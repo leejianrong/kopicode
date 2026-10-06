@@ -17,7 +17,7 @@
 // case of it: its near-miss report quotes file content the model may never have
 // read, and it renders line numbers without anchors for exactly that reason.
 //
-// **Bounds are declared, never silent.** CLAUDE.md forbids clipping the
+// **Bounds are declared, never silent.** AGENTS.md forbids clipping the
 // diagnostic output that justifies a fix. Where a bound is unavoidable — a file
 // too large to hold in a context window, a directory with fifty thousand
 // entries — the tool either refuses outright with a message naming the size, or

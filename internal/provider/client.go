@@ -242,7 +242,7 @@ func WithRetry(r Retry) ClientOption {
 // how long the backoff was — to lg.
 //
 // Diagnostics only. The journal owns session content and slog never duplicates
-// it (CLAUDE.md, "Boundaries that must not be crossed"), so nothing here logs a
+// it (AGENTS.md, "Boundaries that must not be crossed"), so nothing here logs a
 // message, a reply or a tool call. Nil is ignored and the default discards.
 func WithLogger(lg *slog.Logger) ClientOption {
 	return func(c *Client) {
@@ -506,7 +506,7 @@ func retryable(err error) bool {
 // Whole, and never truncated: the body of a failed provider call is the
 // diagnostic — the rate-limit window, the moderation reason, the model id it did
 // not recognise — and clipping it exactly where a reader looks is the specific
-// failure this project designs out (CLAUDE.md, "Boundaries that must not be
+// failure this project designs out (AGENTS.md, "Boundaries that must not be
 // crossed").
 func drain(resp *http.Response) error {
 	defer resp.Body.Close() //nolint:errcheck // the response failed; a close error adds nothing to report.

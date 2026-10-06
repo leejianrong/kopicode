@@ -51,7 +51,7 @@ import (
 // wirename_internal_test.go's logic would have to live somewhere either side
 // import from, and both directions are already refused: putting it under
 // internal/ and importing it from this test file needs a fourth allowlist
-// entry, which CLAUDE.md is explicit needs an ADR rather than a helper
+// entry, which AGENTS.md is explicit needs an ADR rather than a helper
 // extraction; putting it under cmd/ and importing it from
 // internal/parse would trip TestEngineDoesNotImportSurfaces the same test file
 // enforces the other way. So this is not a boundary chosen for this card's

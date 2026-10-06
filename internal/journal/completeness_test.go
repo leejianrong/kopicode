@@ -25,7 +25,7 @@ import (
 // zeroExemption names one payload field whose zero value is meaningful and
 // therefore not evidence of a forgotten fixture. The reason is mandatory and
 // checked: an entry with an empty Reason is treated as not exempting anything,
-// the same discipline CLAUDE.md's subprocess waivers apply to
+// the same discipline AGENTS.md's subprocess waivers apply to
 // //kopicode:allow-nodir and //kopicode:allow-noenv comments with no reason.
 type zeroExemption struct {
 	Type   journal.Type
@@ -41,7 +41,7 @@ var zeroExemptions = []zeroExemption{
 		Type: journal.TypeSessionStarted,
 		Path: "Provider.AllowFallbacks",
 		Reason: "AllowFallbacks is false on every real benchmark request " +
-			"(docs/adr/0005, CLAUDE.md 'Pin the provider on every benchmark " +
+			"(docs/adr/0005, AGENTS.md 'Pin the provider on every benchmark " +
 			"request'); true in a fixture would misrepresent production " +
 			"traffic, so false is the correct value here, not an oversight.",
 	},

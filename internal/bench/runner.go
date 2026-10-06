@@ -495,7 +495,7 @@ func (r *Runner) runTask(ctx context.Context, env taskEnv, task corpus.Task) (re
 const OracleLogName = "oracle.log"
 
 // writeOracleLog keeps the oracle's whole output next to the journal, with a
-// header naming what ran and what it said. Never truncated: CLAUDE.md's rule
+// header naming what ran and what it said. Never truncated: AGENTS.md's rule
 // about tool output is a rule about the diagnostic that justifies a verdict,
 // and this is that diagnostic for the only verdict a bench run produces.
 func writeOracleLog(dir string, o OracleResult) error {

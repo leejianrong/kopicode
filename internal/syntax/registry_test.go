@@ -245,7 +245,7 @@ func TestEveryDeclaredSkipExplainsItself(t *testing.T) {
 // TestEveryStepNamesItsDirectoryAndBuildsItsEnvironment is this package's
 // version of the rule internal/arch enforces for git.
 //
-// CLAUDE.md's rule is written about git because that is what corrupted this
+// AGENTS.md's rule is written about git because that is what corrupted this
 // repository, but the reason generalises: a subprocess that inherits its
 // working directory runs wherever the harness happened to be, and one that
 // inherits its environment does whatever GOFLAGS, GOOS, PYTHONPATH or
@@ -335,7 +335,7 @@ func reasonFor(name string) string {
 }
 
 // TestTheStripListCoversTheCredential is the one entry that is not about
-// correctness of a verdict. CLAUDE.md: the provider key appears in no journal,
+// correctness of a verdict. AGENTS.md: the provider key appears in no journal,
 // no blob, no log — and the cheapest guarantee is that the process which could
 // print it never has it.
 func TestTheStripListCoversTheCredential(t *testing.T) {

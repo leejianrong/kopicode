@@ -107,7 +107,7 @@ type ShellResult struct {
 	LeftRunning bool
 
 	// Stdout and Stderr are the captured streams, whole. Neither is truncated
-	// and neither is bounded — CLAUDE.md's rule is that clipping the diagnostic
+	// and neither is bounded — AGENTS.md's rule is that clipping the diagnostic
 	// output which justifies a fix is the specific failure being designed out,
 	// and the journal's blob spill is what handles size.
 	Stdout string
@@ -298,7 +298,7 @@ func (s *Set) stopGroup(cmd *exec.Cmd, waited <-chan error) (string, error) {
 // and whatever the project's toolchain reads, and an allowlist would break
 // real builds for no gain — the command itself is arbitrary, so this is not a
 // sandbox and pretending otherwise would be the dishonest version. The one
-// unconditional removal is the one thing CLAUDE.md says must appear in no
+// unconditional removal is the one thing AGENTS.md says must appear in no
 // journal, no blob and no log.
 //
 // home is [Set.Home]. It is empty on the REPL path, so a real user's shell

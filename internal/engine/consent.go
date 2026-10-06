@@ -18,7 +18,7 @@ import (
 // Nothing here is about presentation. The engine decides *that* consent is
 // required and what an answer means; wording, colour, key bindings and whether
 // the question is even a line prompt belong to the surface, and this type is
-// the whole of what crosses (internal/permission's package doc, CLAUDE.md).
+// the whole of what crosses (internal/permission's package doc, AGENTS.md).
 type ConsentRequest struct {
 	// Kind names the rule that fired.
 	Kind string

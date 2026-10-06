@@ -60,7 +60,7 @@ func Bind(fs *flag.FlagSet) *Overrides {
 // It is diagnostics and not session content: the journal records the *resolved*
 // model, pin and hash, because those identify the arm, and which of flag, config
 // or default supplied them belongs to slog (ADR-0007 §Consequences, and
-// CLAUDE.md on slog never duplicating the journal).
+// AGENTS.md on slog never duplicating the journal).
 type Source string
 
 const (

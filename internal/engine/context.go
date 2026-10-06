@@ -21,7 +21,7 @@ import (
 //
 // Two consequences worth stating, because both are easy to "fix" wrongly:
 //
-//   - **Nothing here truncates.** CLAUDE.md's rule about tool output is not only
+//   - **Nothing here truncates.** AGENTS.md's rule about tool output is not only
 //     about the journal; a context assembler that drops a large tool result to
 //     save tokens is the same boundary crossed from the inside, and it removes
 //     the diagnostic output that justified a fix from the one place the model

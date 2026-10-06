@@ -250,7 +250,7 @@ type Result struct {
 	StoppedBy string
 
 	// Output is the model-facing rendering: a headline, then the command's
-	// complete combined output. Nothing is truncated — CLAUDE.md's rule is that
+	// complete combined output. Nothing is truncated — AGENTS.md's rule is that
 	// clipping the diagnostic output which justifies a fix is the specific
 	// failure being designed out — and oversized payloads are the journal's blob
 	// spill to handle.

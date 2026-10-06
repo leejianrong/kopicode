@@ -25,7 +25,7 @@ import (
 // — the append happens first and only what was recorded is announced. So this
 // file accumulates nothing, holds no session state, and has no way to print
 // something the journal does not hold. That is ADR-0002 decision 2 and the
-// sibei-flow ADR-0013 lesson CLAUDE.md cites, and it is why the projection below
+// sibei-flow ADR-0013 lesson AGENTS.md cites, and it is why the projection below
 // is field-for-field rather than a second vocabulary: a translation table would
 // be the place the two accounts drift.
 //

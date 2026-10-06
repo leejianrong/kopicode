@@ -208,7 +208,7 @@ func TestADeadHoldersLockDoesNotBrickTheTree(t *testing.T) {
 
 // helperEnv is the environment the re-executed test binary runs under.
 //
-// Built rather than inherited, per CLAUDE.md and internal/arch/subprocess_test.go:
+// Built rather than inherited, per AGENTS.md and internal/arch/subprocess_test.go:
 // this process is a test binary, so an inherited GOFLAGS or TMPDIR changes what
 // the child does while the command still reads correctly. The helper needs
 // exactly one variable to know what it is, plus PATH so that the operating

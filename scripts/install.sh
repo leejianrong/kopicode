@@ -6,13 +6,13 @@
 #
 # Plain POSIX sh, not bash: the whole point of a curl-|-sh installer is that it
 # runs on whatever shell the user's system default `sh` happens to be, and
-# CLAUDE.md's "dependencies stay near-zero" applies here too — no new
+# AGENTS.md's "dependencies stay near-zero" applies here too — no new
 # language runtime, no bashisms, just the same subset install-hooks.sh uses.
 #
 # What this deliberately does NOT do: guess. A repo whose release workflow
 # has run zero times, an unsupported OS/arch, or a download that fails all
 # fail loudly with a specific message rather than silently doing nothing or
-# fabricating a plausible-looking path. See CLAUDE.md's "never fabricate a
+# fabricating a plausible-looking path. See AGENTS.md's "never fabricate a
 # plausible default" discipline (internal/build's version resolution is the
 # worked example) — this script is the same discipline applied to an install
 # script instead of a Go binary.
@@ -25,7 +25,7 @@ API_URL="https://api.github.com/repos/${REPO}/releases/latest"
 # the bench runner.
 BIN_LIST="${INSTALL_BIN:-kopicode}"
 
-# Matches CLAUDE.md's own assumption about what is already on the user's
+# Matches AGENTS.md's own assumption about what is already on the user's
 # PATH (`~/go/bin` for golangci-lint/gopls/gitleaks) — a user-writable bin
 # directory under $HOME rather than a system path that needs sudo.
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"

@@ -595,7 +595,7 @@ func fuzzySummary(reason RejectReason, floor float64, matches []FuzzyMatch, tota
 // Nothing here is clipped. The regions echoed back are the same height as the
 // text the model itself supplied, so the report is bounded by an input the
 // model already spent the tokens on — there is no file-sized dump to guard
-// against, and CLAUDE.md's rule against truncating the diagnostic output that
+// against, and AGENTS.md's rule against truncating the diagnostic output that
 // justifies a fix applies with full force to a near-miss report, which is the
 // only thing the model has to retry from.
 func fuzzyDetail(path string, rej *EditRejection, floor float64, total int) string {

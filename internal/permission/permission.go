@@ -1,7 +1,7 @@
 // Package permission decides whether an action the model proposed needs
 // consent, and what the answer means.
 //
-// The line this package exists to hold is the one CLAUDE.md states as a
+// The line this package exists to hold is the one AGENTS.md states as a
 // structural promise: the engine decides *that* permission is required and what
 // a decision means, never *how* it is asked. So nothing here formats a prompt,
 // reads a key, writes to a terminal or knows that a terminal exists. The REPL

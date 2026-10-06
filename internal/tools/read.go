@@ -140,7 +140,7 @@ func (s *Set) ReadFile(ctx context.Context, req ReadRequest) (string, error) {
 // the sentence that declares it when it is not the whole file.
 //
 // The notice is not decoration. A window returned without one is a truncation,
-// and CLAUDE.md's rule is that the tool says when it applied a bound.
+// and AGENTS.md's rule is that the tool says when it applied a bound.
 func (s *Set) window(req ReadRequest, total int) (start, end int, notice string, err error) {
 	start = 0
 	if req.Offset > 0 {

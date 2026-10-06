@@ -269,7 +269,7 @@ func TestBlobsAreContentAddressed(t *testing.T) {
 // output, and 200 KiB does not go in the line. If the spill ran before the
 // scrub, or hashed before it, OPENROUTER_API_KEY would sit in
 // .kopicode/blobs/<sha256> under a name derived from it, having never touched
-// events.jsonl. CLAUDE.md is explicit: not in the journal, not in a blob.
+// events.jsonl. AGENTS.md is explicit: not in the journal, not in a blob.
 func TestSecretNeverReachesABlob(t *testing.T) {
 	// Low-entropy on purpose: a fixture, not a key, and it should not look like
 	// one to a secret scanner either.

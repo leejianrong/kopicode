@@ -176,7 +176,7 @@ func TestEngineDoesNotImportSurfaces(t *testing.T) {
 //
 // The direction that matters most is parse importing journal, because it is the
 // tempting one: a package that produces events wants to emit them. The engine
-// journals; packages return data (CLAUDE.md, "Boundaries that must not be
+// journals; packages return data (AGENTS.md, "Boundaries that must not be
 // crossed"). The reverse direction is banned too, so that "just for a test" does
 // not make journal depend on the taxonomy it is supposed to outlive — an old
 // session must stay readable after parse renames a Kind, which it cannot do if
@@ -334,7 +334,7 @@ func TestWireContractPairsDoNotImportEachOther(t *testing.T) {
 							"%s and %s share a vocabulary of strings, not a dependency edge:\n"+
 							"the engine journals, packages return data, and an old session has to stay\n"+
 							"readable after the taxonomy on the other side is renamed\n"+
-							"see CLAUDE.md \"Boundaries that must not be crossed\" and the comment on\n"+
+							"see AGENTS.md \"Boundaries that must not be crossed\" and the comment on\n"+
 							"journal.ToolCallRepaired.Classification",
 						rel, imp, pkg, sides[1-i],
 					)

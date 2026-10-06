@@ -92,7 +92,7 @@ jobs:
       # repository through the built-in GITHUB_TOKEN, so this needs no
       # third-party Action and no credential beyond the one the runner
       # already has scoped to this run. That keeps the "dependencies stay
-      # near-zero" instinct CLAUDE.md states for Go modules applied to the
+      # near-zero" instinct AGENTS.md states for Go modules applied to the
       # CI-Action surface too, rather than reaching for
       # softprops/action-gh-release for what is a two-command job.
       - name: Publish GitHub release

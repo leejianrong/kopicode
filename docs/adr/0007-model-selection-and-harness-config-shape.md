@@ -30,7 +30,7 @@ asserted in none.**
   *installation*: no runtime on the host, no dependency resolution. Shipping four
   binaries, one per model, satisfies R15 exactly as well as shipping one. R15 does not
   reach model coverage and was never meant to.
-- The [README](../../README.md) model table lists four models with roles: a slice-1
+- The [background doc](../background.md#models-prices-and-the-provider-pin) model table lists four models with roles: a slice-1
   target, two A/B candidates, and a frontier ceiling.
 - ADR-0005's paired-McNemar method compares *arms*. If a model is a build-time choice,
   running one A/B means building and shipping two artifacts and trusting that they

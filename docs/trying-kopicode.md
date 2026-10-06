@@ -2,7 +2,7 @@
 
 A first-session guide: what to point kopicode at, what to type, and what you should
 see happen. It assumes you have already installed kopicode and set
-`OPENROUTER_API_KEY` — if not, do the [README quickstart](../README.md#quickstart)
+`OPENROUTER_API_KEY` — if not, do the [README quick start](../README.md#quick-start)
 first (steps 1–2).
 
 Everything below uses the default model, `qwen/qwen3-coder-next`. A one-line fix costs
@@ -85,7 +85,7 @@ tune a harness.
 
 - **The consent prompt.** Editing files inside the project is not gated — that's the
   agent's job. But if the model decides to run a *shell command* itself, kopicode stops
-  and asks; a bare Enter denies. See the [README](../README.md#4-first-run) for the exact
+  and asks; a bare Enter denies. See the [README](../README.md#quick-start) for the exact
   prompt and what `y`/`a` do. (Forced verification — kopicode running the project's own
   test command — runs automatically and is not the same as a model-authored shell call.)
   Any CLI already on your `PATH` and pre-authenticated — `gh`, `docker`, a cloud tool —

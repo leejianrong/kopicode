@@ -20,7 +20,7 @@ package procgroup
 //
 // A real fix is a Job Object with JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, which
 // kills by membership rather than by ancestry. That needs
-// golang.org/x/sys/windows, and CLAUDE.md wants a reason in the PR before a
+// golang.org/x/sys/windows, and AGENTS.md wants a reason in the PR before a
 // dependency lands; until a Windows user asks for it the honest position is the
 // one written here.
 
@@ -75,7 +75,7 @@ func Kill(cmd *exec.Cmd) (string, error) {
 
 // taskkill shells out to end the process tree rooted at cmd's process. Shelling
 // out is the rule here, not a shortcut: the linking alternative is CGo or a new
-// dependency, and CLAUDE.md rules out the first outright.
+// dependency, and AGENTS.md rules out the first outright.
 func taskkill(cmd *exec.Cmd, force bool) (string, error) {
 	if cmd.Process == nil || cmd.Process.Pid <= 0 {
 		return "", nil

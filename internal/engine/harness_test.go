@@ -22,7 +22,7 @@ import (
 	"github.com/leejianrong/kopicode/internal/tools"
 )
 
-// This file is the engine's test seam, built the way CLAUDE.md says the primary
+// This file is the engine's test seam, built the way AGENTS.md says the primary
 // one is: the engine driven through its public interface by the mock/replay
 // provider, against a temp working tree, with an injected clock and an injected
 // session id. Nothing here reaches into the loop's state; every assertion is

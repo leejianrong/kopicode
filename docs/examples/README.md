@@ -25,7 +25,7 @@ top-level `key = "value"` lines and comments only, per
 [ADR-0007](../adr/0007-model-selection-and-harness-config-shape.md) decision 2.
 The keys it reads:
 
-- `model` — a registered model id (see the main [README](../../README.md#3-pick-a-model)
+- `model` — a registered model id (see the main [README](../../README.md#usage)
   for the current list).
 - `harness` — a registered harness config name, when overriding the one the
   model resolves to by default.
@@ -84,6 +84,6 @@ than under `.kopicode/` (which holds machine-internal state kopicode writes).
 
 ## See also
 
-- [Main README — Quickstart](../../README.md#quickstart)
+- [Main README — Quick start](../../README.md#quick-start)
 - [Architecture Decision Records](../adr/)
 - [PRD](../PRD.md)

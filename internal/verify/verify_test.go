@@ -327,7 +327,7 @@ func TestPlanDoesNotAliasTheConfiguredCommand(t *testing.T) {
 
 // --- the subprocess -----------------------------------------------------
 
-// TestTheCommandRunsInTheRepositoryRoot is the Dir half of CLAUDE.md's
+// TestTheCommandRunsInTheRepositoryRoot is the Dir half of AGENTS.md's
 // subprocess rule, checked by observing where the command actually landed rather
 // than by reading the field.
 func TestTheCommandRunsInTheRepositoryRoot(t *testing.T) {
@@ -406,7 +406,7 @@ func TestTheRecordedCommandIsNotThisMachinesPath(t *testing.T) {
 	}
 }
 
-// TestOutputIsNeverTruncated is CLAUDE.md's rule, which this package is one of
+// TestOutputIsNeverTruncated is AGENTS.md's rule, which this package is one of
 // the likeliest places to break: a test suite's output is the largest thing the
 // loop journals.
 func TestOutputIsNeverTruncated(t *testing.T) {
