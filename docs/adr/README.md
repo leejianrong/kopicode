@@ -1,7 +1,7 @@
 # Decisions of record
 
 Each ADR records a decision and why. If a document contradicts an ADR, the ADR wins.
-Eighteen exist. Two reverse earlier plans that still appear in older project notes, and
+Twenty exist. Two reverse earlier plans that still appear in older project notes, and
 five are amendments layered on top of earlier ones (one of which amends two prior ADRs at
 once). Read the relevant one before proposing a change to what it settles.
 
@@ -25,6 +25,8 @@ once). Read the relevant one before proposing a change to what it settles.
 | [0016](0016-live-remote-consent-for-agent-orchestrated-sessions.md) *(Accepted)* | **Live remote consent.** Amends 0009/0011: a new `RemoteConsenter` bubbles permission decisions live over the wire instead of a pre-declared allowlist, plus an explicit `consent_mode` a caller must declare (`remote_interactive` vs. `unattended_policy` with a required containment acknowledgment). Does not loosen ADR-0011's exact-match allowlist. |
 | [0017](0017-auto-consent-mode.md) *(Accepted)* | **An `auto` consent mode.** Amends 0016: a third `consent_mode` where the harness answers itself — shell inside `root` is allowed, a fixed never-allow list (`sudo`, `rm` outside `root`, forced `git push`, download piped into a shell, redirection outside `root`) is denied with a reason. Tokenized and fail-closed, not substring-matched; callers may add entries, never remove one. Journalled as `source: "auto"`. Not a sandbox. |
 | [0018](0018-tokenized-allowlist.md) *(Accepted)* | **A tokenized allowlist.** Amends 0011: `allow_commands` in the policy file — command prefixes matched on whole tokens, a line permitted only if *every* command in it matches, ADR-0017's never-allow rules still on top. Answers #157 without the character-prefix matching 0008/0011/0016 rejected. |
+| [0019](0019-read-only-sessions.md) *(Proposed)* | **Read-only sessions.** `read_only: true` on `session.start` denies in-root file edits in the gate, in every mode that accepts it; refused under `auto`. Shell is not made read-only and the docs say so. Answers #176. |
+| [0020](0020-live-ask-over-serve.md) *(Proposed)* | **Live `ask` over serve.** An opt-in `ask.request` server-to-client request beside `consent.request`; expiry is "nobody could answer", not a denial; journalled as source `remote`. Answers #173. |
 
 Satay's natural consumer in this suite is **cuttlefish** (unattended, triggered,
 credential-holding, not started), not kopicode. Do not reintroduce it here.
