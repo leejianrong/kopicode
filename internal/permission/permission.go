@@ -228,6 +228,14 @@ const (
 	// a guarantee this mechanism cannot check, and SourcePolicy would
 	// misrepresent a live, ad hoc answer as a pre-declared rule match.
 	SourceRemote
+
+	// SourceAuto is the harness's `auto` consent mode answering for itself
+	// (ADR-0017): nobody was asked, and no caller-declared rule matched — the
+	// decision came from an allow-inside-the-root default and a fixed
+	// never-allow list. It is distinct from [SourcePolicy] so an audit can tell
+	// "the caller declared this command allowed" from "the mode allowed it
+	// because nothing forbade it".
+	SourceAuto
 )
 
 var sourceText = map[Source]string{
@@ -235,6 +243,7 @@ var sourceText = map[Source]string{
 	SourceUser:        "user",
 	SourcePolicy:      "policy",
 	SourceRemote:      "remote",
+	SourceAuto:        "auto",
 }
 
 // String returns the journal wire value for the source.

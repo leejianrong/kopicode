@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -867,4 +868,168 @@ func TestServeCloseWaitsForTheTurnsAlreadyAccepted(t *testing.T) {
 		t.Errorf("close = %v, want closed true", closed)
 	}
 	h.close()
+}
+
+// --- ADR-0017: consent_mode "auto" ------------------------------------------
+
+// permissionDecisions returns every permission_decided record announced for a
+// session, as the wire carries it: decision, source and reason.
+func permissionDecisions(notes []map[string]any) []map[string]any {
+	var out []map[string]any
+	for _, n := range notes {
+		params, _ := n["params"].(map[string]any)
+		ev, _ := params["event"].(map[string]any)
+		if ev["kind"] == "permission_decided" {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+// TestServeAutoAllowsAnOrdinaryShellWithoutAsking is the point of the mode: a
+// session declaring consent_mode "auto" runs a shell command with no
+// consent.request on the wire, and the decision that let it run is journalled
+// as an auto decision rather than as a user's, a policy file's or a remote's.
+func TestServeAutoAllowsAnOrdinaryShellWithoutAsking(t *testing.T) {
+	t.Setenv(engine.APIKeyEnv, "kopicode-test-credential")
+	srv := scriptedProvider(t,
+		sseToolCall("call-1", "run_shell", `{"command":"echo hi"}`),
+		sseBody("done"),
+	)
+	h := startServe(t, engine.Options{ProviderBaseURL: srv.URL})
+
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
+		"params": map[string]any{
+			"session": "s1", "dir": t.TempDir(), "prompt": "run a command",
+			"consent_mode": consentModeAuto,
+		}})
+	resp := h.awaitResponse(1) // would hang here if the server were waiting on a consent reply
+	if resp["error"] != nil {
+		t.Fatalf("session.start errored: %v", resp["error"])
+	}
+	if result, _ := resp["result"].(map[string]any); result["stop"] != "completed" {
+		t.Errorf("stop = %v, want completed: %v", result["stop"], resp)
+	}
+
+	notes := h.notificationsFor("s1")
+	if !hasKind(eventKinds(notes), "tool_result") {
+		t.Errorf("no tool_result; the allowed command never ran: %v", eventKinds(notes))
+	}
+	decisions := permissionDecisions(notes)
+	if len(decisions) != 1 {
+		t.Fatalf("permission_decided records = %d, want 1: %v", len(decisions), decisions)
+	}
+	if decisions[0]["decision"] != "allow" || decisions[0]["source"] != "auto" {
+		t.Errorf("decision = %v from %v, want allow from auto", decisions[0]["decision"], decisions[0]["source"])
+	}
+	h.close()
+}
+
+// TestServeAutoRefusesANeverAllowCommandWithAReason: a sudo command is not run
+// and not asked about; it is refused, on the record, with the rule that fired.
+func TestServeAutoRefusesANeverAllowCommandWithAReason(t *testing.T) {
+	t.Setenv(engine.APIKeyEnv, "kopicode-test-credential")
+	srv := scriptedProvider(t,
+		sseToolCall("call-1", "run_shell", `{"command":"sudo rm -rf /var/lib"}`),
+		sseBody("understood"),
+	)
+	h := startServe(t, engine.Options{ProviderBaseURL: srv.URL})
+
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
+		"params": map[string]any{
+			"session": "s1", "dir": t.TempDir(), "prompt": "do it",
+			"consent_mode": consentModeAuto,
+		}})
+	resp := h.awaitResponse(1)
+	if resp["error"] != nil {
+		t.Fatalf("session.start errored: %v", resp["error"])
+	}
+
+	decisions := permissionDecisions(h.notificationsFor("s1"))
+	if len(decisions) != 1 {
+		t.Fatalf("permission_decided records = %d, want 1: %v", len(decisions), decisions)
+	}
+	d := decisions[0]
+	if d["decision"] != "deny" || d["source"] != "auto" {
+		t.Errorf("decision = %v from %v, want deny from auto", d["decision"], d["source"])
+	}
+	if reason, _ := d["reason"].(string); !strings.Contains(reason, "sudo") {
+		t.Errorf("reason = %q, want it to name the rule that fired (sudo)", reason)
+	}
+	h.close()
+}
+
+// TestServeAutoHonoursACallerNeverAllowEntry: never_allow adds to the built-in
+// list for this session.
+func TestServeAutoHonoursACallerNeverAllowEntry(t *testing.T) {
+	t.Setenv(engine.APIKeyEnv, "kopicode-test-credential")
+	srv := scriptedProvider(t,
+		sseToolCall("call-1", "run_shell", `{"command":"terraform apply -auto-approve"}`),
+		sseBody("understood"),
+	)
+	h := startServe(t, engine.Options{ProviderBaseURL: srv.URL})
+
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
+		"params": map[string]any{
+			"session": "s1", "dir": t.TempDir(), "prompt": "deploy",
+			"consent_mode": consentModeAuto, "never_allow": []string{"terraform apply"},
+		}})
+	h.awaitResponse(1)
+
+	decisions := permissionDecisions(h.notificationsFor("s1"))
+	if len(decisions) != 1 || decisions[0]["decision"] != "deny" {
+		t.Fatalf("decisions = %v, want one deny", decisions)
+	}
+	if reason, _ := decisions[0]["reason"].(string); !strings.Contains(reason, "terraform apply") {
+		t.Errorf("reason = %q, want it to name the caller's entry", reason)
+	}
+	h.close()
+}
+
+// TestServeAutoIgnoresTheProcessPolicyFile: --policy-file belongs to
+// unattended_policy sessions. A process started with one must still be able to
+// open an auto session, rather than have engine.Open refuse the two answerers.
+func TestServeAutoIgnoresTheProcessPolicyFile(t *testing.T) {
+	t.Setenv(engine.APIKeyEnv, "kopicode-test-credential")
+	srv := scriptedProvider(t, sseBody("done"))
+	h := startServe(t, engine.Options{
+		ProviderBaseURL: srv.URL,
+		Policy:          &engine.PolicyFile{Root: t.TempDir(), Allow: [][]string{{"true"}}},
+	})
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
+		"params": map[string]any{
+			"session": "s1", "dir": t.TempDir(), "prompt": "hi", "consent_mode": consentModeAuto,
+		}})
+	if resp := h.awaitResponse(1); resp["error"] != nil {
+		t.Fatalf("auto session beside a process-level policy file errored: %v", resp["error"])
+	}
+	h.close()
+}
+
+// TestServeNeverAllowIsAUsageErrorUnlessAuto: a caller that sent a never-allow
+// list is relying on it, so a mode that would not consult it is refused rather
+// than quietly less safe than the caller believes. A malformed entry is refused
+// the same way, before anything is opened.
+func TestServeNeverAllowIsAUsageErrorUnlessAuto(t *testing.T) {
+	for name, extra := range map[string]map[string]any{
+		"remote_interactive": {"consent_mode": consentModeRemoteInteractive, "never_allow": []string{"terraform apply"}},
+		"unattended_policy":  {"consent_mode": consentModeUnattendedPolicy, "containment_provided": true, "never_allow": []string{"x"}},
+		"auto, empty entry":  {"consent_mode": consentModeAuto, "never_allow": []string{" "}},
+		"auto, shell syntax": {"consent_mode": consentModeAuto, "never_allow": []string{"rm -rf; ls"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := startServe(t, engine.Options{})
+			params := map[string]any{"session": "s1", "dir": t.TempDir(), "prompt": "hi"}
+			for k, v := range extra {
+				params[k] = v
+			}
+			h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart, "params": params})
+			resp := h.awaitResponse(1)
+			rpcErr, _ := resp["error"].(map[string]any)
+			if rpcErr == nil || !numEq(rpcErr["code"], codeUsageError) {
+				t.Fatalf("got %v, want a usage error", resp)
+			}
+			h.close()
+		})
+	}
 }

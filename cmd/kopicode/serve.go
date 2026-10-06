@@ -100,7 +100,7 @@ import (
 //
 // # Permissions: a required per-session consent_mode (ADR-0016)
 //
-// Every session.start must declare consent_mode, one of two values, with no
+// Every session.start must declare consent_mode, one of three values, with no
 // default that grants capability (mirroring ADR-0011 decision 3's own "an
 // unconfigured invocation is exactly as safe as before" posture):
 //
@@ -116,6 +116,14 @@ import (
 //     package never does that itself). Omitting consent_mode entirely, or
 //     requesting "unattended_policy" without the acknowledgment, is a startup
 //     usage error, refused before engine.Open runs.
+//   - "auto" (ADR-0017) — the harness answers itself, from a fixed rule: a shell
+//     command whose directory is inside the session root, and which matches
+//     nothing on a built-in never-allow list (sudo, rm outside the root, a
+//     forced git push, a download piped into a shell, a redirection outside the
+//     root), is allowed without a consent.request; a match is refused with a
+//     reason, and so is every write outside the root. The list is not a sandbox
+//     and cannot be shortened; session.start may add to it with never_allow.
+//     Every decision is journalled as source "auto".
 //
 // --ask-policy-file (KAN-1028) is untouched by this and stays process-level:
 // ADR-0016 only reopens the Consenter/permission half of consent, not the ask
@@ -154,12 +162,13 @@ const (
 	methodConsentRequest = "consent.request" // server → client request
 )
 
-// The two consent_mode values session.start accepts (ADR-0016 decision 3).
-// There is no third "default" value: consent_mode is required, and a missing
-// or unrecognised one is a usage error, not a fallback.
+// The consent_mode values session.start accepts (ADR-0016 decision 3, ADR-0017).
+// There is no "default" value: consent_mode is required, and a missing or
+// unrecognised one is a usage error, not a fallback.
 const (
 	consentModeRemoteInteractive = "remote_interactive"
 	consentModeUnattendedPolicy  = "unattended_policy"
+	consentModeAuto              = "auto"
 )
 
 // JSON-RPC error codes. The first four are the spec's reserved values; the
@@ -252,7 +261,8 @@ type startParams struct {
 	HarnessConfig string `json:"harness_config"`
 
 	// ConsentMode is ADR-0016 decision 3's required declaration:
-	// consentModeRemoteInteractive or consentModeUnattendedPolicy. There is no
+	// consentModeRemoteInteractive, consentModeUnattendedPolicy or
+	// consentModeAuto (ADR-0017). There is no
 	// default — omitting it, or naming anything else, is a startup usage error
 	// (codeUsageError), refused before engine.Open runs. See buildConsentOptions.
 	ConsentMode string `json:"consent_mode"`
@@ -264,6 +274,12 @@ type startParams struct {
 	// when ConsentMode is consentModeRemoteInteractive, which carries no
 	// equivalent requirement.
 	ContainmentProvided bool `json:"containment_provided"`
+
+	// NeverAllow adds entries ("command [token ...]") to consentModeAuto's
+	// built-in never-allow list; it cannot remove or narrow one. Supplying it
+	// under any other consent_mode is a usage error: nothing would consult it,
+	// and a caller who sent a never-allow list is relying on it.
+	NeverAllow []string `json:"never_allow"`
 }
 
 type submitParams struct {
@@ -792,7 +808,25 @@ func (s *server) handleCancel(req rpcRequest) {
 // AskPolicy from the process flags still wins where set, and the fixed
 // headless refusal still answers otherwise, exactly as before this ADR.
 func (s *server) buildConsentOptions(p startParams, opts *engine.Options) *rpcError {
+	if len(p.NeverAllow) > 0 && p.ConsentMode != consentModeAuto {
+		return &rpcError{Code: codeUsageError, Message: fmt.Sprintf(
+			"session.start's never_allow only applies to consent_mode %q; this session declared %q "+
+				"and nothing would consult the list", consentModeAuto, p.ConsentMode)}
+	}
+
 	switch p.ConsentMode {
+	case consentModeAuto:
+		if err := engine.ValidateAutoNeverAllow(p.NeverAllow); err != nil {
+			return &rpcError{Code: codeUsageError, Message: "session.start's never_allow: " + err.Error()}
+		}
+		// The process-level --policy-file belongs to unattended_policy sessions
+		// (ADR-0011) and stays out of this one: engine.Open refuses a Policy
+		// beside ConsentAuto rather than guessing which answerer was meant.
+		opts.Policy = nil
+		opts.Consent = nil
+		opts.ConsentMode = engine.ConsentAuto
+		opts.AutoNeverAllow = p.NeverAllow
+
 	case consentModeUnattendedPolicy:
 		if !p.ContainmentProvided {
 			return &rpcError{Code: codeUsageError, Message: fmt.Sprintf(
@@ -812,8 +846,8 @@ func (s *server) buildConsentOptions(p startParams, opts *engine.Options) *rpcEr
 
 	default:
 		return &rpcError{Code: codeUsageError, Message: fmt.Sprintf(
-			"session.start needs a consent_mode of %q or %q; got %q",
-			consentModeRemoteInteractive, consentModeUnattendedPolicy, p.ConsentMode)}
+			"session.start needs a consent_mode of %q, %q or %q; got %q",
+			consentModeRemoteInteractive, consentModeUnattendedPolicy, consentModeAuto, p.ConsentMode)}
 	}
 
 	if opts.AskPolicy == nil {

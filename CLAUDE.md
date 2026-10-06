@@ -219,8 +219,8 @@ a deliberate human act. Don't add an install step that assumes a compiler.
 
 ## Decisions of record — read before proposing anything
 
-Sixteen ADRs exist; two reverse earlier plans that still appear in older project
-notes, and three are amendments layered on top of earlier ones (one of which amends
+Seventeen ADRs exist; two reverse earlier plans that still appear in older project
+notes, and four are amendments layered on top of earlier ones (one of which amends
 two prior ADRs at once). If a document
 contradicts an ADR, the ADR wins.
 
@@ -242,6 +242,7 @@ contradicts an ADR, the ADR wins.
 | [0014](docs/adr/0014-skills-mechanism.md) *(Proposed)* | **A skills mechanism — a documented directory, no new tool.** Reusable task instructions under `.agents/skills/<name>/SKILL.md` (a multi-vendor convention), discovered and read with the existing `read_file`/`list_dir`/`grep`; one system-prompt sentence points the model there. No engine loader, no dispatch or catalogue change. EPIC-132. |
 | [0015](docs/adr/0015-mcp-server-front-end.md) *(Proposed)* | **An MCP server front end.** A fourth `cmd/kopicode` subcommand (`mcp`), reusing `serve`'s session core over a new `cmd/kopicode/session` package, so any MCP-capable agent orchestrator can drive kopicode with zero bespoke client code. Additive — `serve`'s wire is unchanged. |
 | [0016](docs/adr/0016-live-remote-consent-for-agent-orchestrated-sessions.md) *(Proposed)* | **Live remote consent.** Amends 0009/0011: a new `RemoteConsenter` bubbles permission decisions live over the wire instead of a pre-declared allowlist, plus an explicit `consent_mode` a caller must declare (`remote_interactive` vs. `unattended_policy` with a required containment acknowledgment). Does not loosen ADR-0011's exact-match allowlist. |
+| [0017](docs/adr/0017-auto-consent-mode.md) *(Proposed)* | **An `auto` consent mode.** Amends 0016: a third `consent_mode` where the harness answers itself — shell inside `root` is allowed, a fixed never-allow list (`sudo`, `rm` outside `root`, forced `git push`, download piped into a shell, redirection outside `root`) is denied with a reason. Tokenized and fail-closed, not substring-matched; callers may add entries, never remove one. Journalled as `source: "auto"`. Not a sandbox. |
 
 Satay's natural consumer in this suite is **cuttlefish** (unattended, triggered,
 credential-holding, not started), not kopicode. Do not reintroduce it here.
