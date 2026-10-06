@@ -164,6 +164,11 @@ quickstart:
   child and runs a sequence of tasks without paying startup cost each time
   ([ADR-0013](docs/adr/0013-agent-controlled-resident-session-surface.md)). The wire
   is documented in [`docs/kopicode-serve-protocol.md`](docs/kopicode-serve-protocol.md).
+- `kopicode mcp` — the same sessions as an MCP server on stdio, so an MCP-capable agent
+  (Claude Code, for one: `claude mcp add kopicode -e OPENROUTER_API_KEY -- kopicode mcp`)
+  can run coding tasks with no bespoke client
+  ([ADR-0015](docs/adr/0015-mcp-server-front-end.md)). Four tools, session events as
+  progress notifications; see [`docs/kopicode-mcp.md`](docs/kopicode-mcp.md).
 
 Both refuse shell and out-of-project writes by default, with nobody at a terminal to
 consent; a `--policy-file` ([ADR-0011](docs/adr/0011-unattended-invocation-policy-gate.md))
@@ -295,7 +300,7 @@ being CGo; the resolution sketch is stdlib `go/ast` for Go plus an optional exte
 | Context compaction: a verification-truthfulness fix accepted, supersession-based compaction rejected | [0012](docs/adr/0012-context-compaction-strategy.md) |
 | `kopicode serve`, a resident session surface over stdio (NDJSON JSON-RPC) | [0013](docs/adr/0013-agent-controlled-resident-session-surface.md) |
 | A skills mechanism: a documented `.agents/skills/` directory, no new tool | [0014](docs/adr/0014-skills-mechanism.md) *(Proposed)* |
-| An MCP server front end, reusing `serve`'s session core | [0015](docs/adr/0015-mcp-server-front-end.md) *(Proposed)* |
+| An MCP server front end, reusing `serve`'s session core | [0015](docs/adr/0015-mcp-server-front-end.md) *(Proposed; implemented)* |
 | Live remote consent for agent-orchestrated sessions; an explicit consent-mode declaration | [0016](docs/adr/0016-live-remote-consent-for-agent-orchestrated-sessions.md) *(Proposed)* |
 
 Two of these reverse earlier plans in this repo, and three more amend earlier ones

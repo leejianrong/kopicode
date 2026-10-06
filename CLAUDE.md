@@ -164,6 +164,12 @@ not this list:
   a different continuation from turn N requires the tree to actually be at turn N's
   state. The source session's history is copied into the fork's own journal (not
   referenced), so the forked session's record is self-contained.
+- **`cmd/kopicode/session`** — the protocol-independent session core (ADR-0015 decision 3):
+  the registry of open sessions, one FIFO worker per session, start/submit/cancel/close
+  against `engine.Open`, consent-mode resolution, shutdown. Results come back through
+  callbacks and events through an `engine.Observer`, so it holds no transcript and imports
+  only the engine. `serve` and `mcp` are the two skins over it; the schema-1 `record`
+  projection stays in `print.go`.
 - **`cmd/kopicode/lineedit`** — the raw-mode line editor behind the prompt, driven
   headless through a two-method `Terminal` seam so escape-sequence decoding is testable
   without a real tty. The non-TTY path emits no escape byte at all.
@@ -240,7 +246,7 @@ contradicts an ADR, the ADR wins.
 | [0012](docs/adr/0012-context-compaction-strategy.md) | **Context compaction.** Decision 1 (a smaller verification-truthfulness fix) **Accepted**; decision 2 (a supersession-based compaction strategy) **Rejected** on review. |
 | [0013](docs/adr/0013-agent-controlled-resident-session-surface.md) | **`kopicode serve`, a resident session surface over stdio.** NDJSON JSON-RPC 2.0, N concurrent `engine.Open` sessions in one process, credentials via env only, reusing ADR-0011's policy flags and adding an opt-in `--ask-policy-file` (a sibling to consent, per ADR-0009). No engine-boundary change. EPIC-131. |
 | [0014](docs/adr/0014-skills-mechanism.md) *(Proposed)* | **A skills mechanism — a documented directory, no new tool.** Reusable task instructions under `.agents/skills/<name>/SKILL.md` (a multi-vendor convention), discovered and read with the existing `read_file`/`list_dir`/`grep`; one system-prompt sentence points the model there. No engine loader, no dispatch or catalogue change. EPIC-132. |
-| [0015](docs/adr/0015-mcp-server-front-end.md) *(Proposed)* | **An MCP server front end.** A fourth `cmd/kopicode` subcommand (`mcp`), reusing `serve`'s session core over a new `cmd/kopicode/session` package, so any MCP-capable agent orchestrator can drive kopicode with zero bespoke client code. Additive — `serve`'s wire is unchanged. |
+| [0015](docs/adr/0015-mcp-server-front-end.md) *(Proposed; implemented)* | **An MCP server front end.** A fourth `cmd/kopicode` subcommand (`mcp`), reusing `serve`'s session core over a new `cmd/kopicode/session` package, so any MCP-capable agent orchestrator can drive kopicode with zero bespoke client code. Additive — `serve`'s wire is unchanged. |
 | [0016](docs/adr/0016-live-remote-consent-for-agent-orchestrated-sessions.md) *(Proposed)* | **Live remote consent.** Amends 0009/0011: a new `RemoteConsenter` bubbles permission decisions live over the wire instead of a pre-declared allowlist, plus an explicit `consent_mode` a caller must declare (`remote_interactive` vs. `unattended_policy` with a required containment acknowledgment). Does not loosen ADR-0011's exact-match allowlist. |
 | [0017](docs/adr/0017-auto-consent-mode.md) *(Proposed)* | **An `auto` consent mode.** Amends 0016: a third `consent_mode` where the harness answers itself — shell inside `root` is allowed, a fixed never-allow list (`sudo`, `rm` outside `root`, forced `git push`, download piped into a shell, redirection outside `root`) is denied with a reason. Tokenized and fail-closed, not substring-matched; callers may add entries, never remove one. Journalled as `source: "auto"`. Not a sandbox. |
 
@@ -340,7 +346,8 @@ not manage or see. Brief such an agent to `treehouse get --lease` explicitly ins
 ## Module map
 
 ```
-cmd/kopicode/        both surfaces — main package: `repl`, `run --print`, `version`
+cmd/kopicode/        the front ends — main package: `repl`, `run --print`, `serve`, `mcp`, `sessions`, `version`
+  session/           the session lifecycle `serve` and `mcp` share: registry, per-session queue, consent modes
   lineedit/          raw-mode line editing for the prompt: history, arrows, Ctrl-A/E/K/U
   repl/              the interactive surface: streaming, consent prompt, Ctrl-C
 cmd/kopibench/       headless bench runner — main package
@@ -468,6 +475,8 @@ rather than recorded from a real run.
 - [`docs/kopicode-serve-protocol.md`](docs/kopicode-serve-protocol.md) — the
   `kopicode serve` wire: NDJSON JSON-RPC 2.0, the three methods, the event
   notification, the error codes, and the policy/ask flags
+- [`docs/kopicode-mcp.md`](docs/kopicode-mcp.md) — `kopicode mcp`: the four tools, progress
+  notifications, cancellation, and how consent modes map onto MCP
 - [`docs/run-print-protocol.md`](docs/run-print-protocol.md) — the `run --print` wire
   for a headless consumer: the NDJSON schema, the full stable `exit_code`/`reason`
   vocabulary, and where the underlying failure detail (a provider's HTTP status and

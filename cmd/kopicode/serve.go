@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	sessioncore "github.com/leejianrong/kopicode/cmd/kopicode/session"
 	"github.com/leejianrong/kopicode/internal/engine"
 )
 
@@ -166,9 +167,9 @@ const (
 // There is no "default" value: consent_mode is required, and a missing or
 // unrecognised one is a usage error, not a fallback.
 const (
-	consentModeRemoteInteractive = "remote_interactive"
-	consentModeUnattendedPolicy  = "unattended_policy"
-	consentModeAuto              = "auto"
+	consentModeRemoteInteractive = sessioncore.ConsentRemoteInteractive
+	consentModeUnattendedPolicy  = sessioncore.ConsentUnattendedPolicy
+	consentModeAuto              = sessioncore.ConsentAuto
 )
 
 // JSON-RPC error codes. The first four are the spec's reserved values; the
@@ -337,14 +338,26 @@ type eventParams struct {
 // base options every session inherits, and hands the run loop the process's own
 // stdio.
 func serveCmd(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("kopicode serve", flag.ContinueOnError)
+	base, code, ok := residentOptions("serve", "a task arrives over the wire as session.start's prompt, "+
+		"not on the command line", args, stderr)
+	if !ok {
+		return code
+	}
+	return serve(context.Background(), os.Stdin, stdout, stderr, base)
+}
+
+// residentOptions parses the process-level flags the two resident front ends
+// (`serve` and `mcp`) share and builds the base options every session inherits.
+// ok is false when the process should exit with code instead of running.
+func residentOptions(name, noArgsHint string, args []string, stderr io.Writer) (base engine.Options, code int, ok bool) {
+	fs := flag.NewFlagSet("kopicode "+name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	debug := fs.Bool("debug", false, "engine diagnostics on stderr")
 	// Reused verbatim from `run --print` (ADR-0011 decision 5 / ADR-0013
 	// decision 5): a declared allowlist answering shell/write consent, or the
 	// refuse-everything default when unset.
 	policyFile := fs.String("policy-file", "", "load a declared-allowlist policy file (ADR-0011) governing "+
-		"shell/write consent for every session; unset means refuse everything")
+		"shell/write consent for every unattended_policy session; unset means refuse everything")
 	// ADR-0013 decision 6 / KAN-1028: the orchestrator's standing answer for an
 	// ask call nobody can answer, or the fixed headless refusal when unset.
 	askPolicyFile := fs.String("ask-policy-file", "", "load an ask-policy file (ADR-0013) whose note answers "+
@@ -353,19 +366,17 @@ func serveCmd(args []string, stdout, stderr io.Writer) int {
 		// flag has already printed the error and the usage. A help request is not
 		// an error: -h/--help exits 0, everything else is a usage error.
 		if errors.Is(err, flag.ErrHelp) {
-			return exitSuccess
+			return base, exitSuccess, false
 		}
-		return exitUsage
+		return base, exitUsage, false
 	}
 	setupLogging(*debug, stderr)
 
 	if fs.NArg() != 0 {
-		say(stderr, "kopicode: `serve` takes no positional arguments; a task arrives over the wire as "+
-			"session.start's prompt, not on the command line\n")
-		return exitUsage
+		say(stderr, "kopicode: `%s` takes no positional arguments; %s\n", name, noArgsHint)
+		return base, exitUsage, false
 	}
 
-	var base engine.Options
 	// Loaded up front, the same ordering ADR-0007 decision 4 holds every other
 	// surface to: a malformed policy file is the caller's own mistake, refused
 	// before any session is opened or any request is read.
@@ -373,7 +384,7 @@ func serveCmd(args []string, stdout, stderr io.Writer) int {
 		pf, err := engine.LoadPolicyFile(*policyFile)
 		if err != nil {
 			say(stderr, "kopicode: %v\n", err)
-			return exitUsage
+			return base, exitUsage, false
 		}
 		base.Policy = &pf
 	}
@@ -381,12 +392,11 @@ func serveCmd(args []string, stdout, stderr io.Writer) int {
 		ap, err := engine.LoadAskPolicyFile(*askPolicyFile)
 		if err != nil {
 			say(stderr, "kopicode: %v\n", err)
-			return exitUsage
+			return base, exitUsage, false
 		}
 		base.AskPolicy = &ap
 	}
-
-	return serve(context.Background(), os.Stdin, stdout, stderr, base)
+	return base, exitSuccess, true
 }
 
 // serve is the run loop, taking its streams and base options in the open so a
@@ -397,12 +407,12 @@ func serveCmd(args []string, stdout, stderr io.Writer) int {
 // base carries what every session inherits (Policy, AskPolicy, ProviderBaseURL);
 // Dir and Selection are per-session, resolved from each session.start.
 func serve(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, base engine.Options) int {
-	s := &server{
-		ctx:      ctx,
-		base:     base,
-		stderr:   stderr,
-		sessions: map[string]*servedSession{},
-	}
+	s := &server{stderr: stderr}
+	// The Manager is the session lifecycle both resident front ends share
+	// (ADR-0015 decision 3); this file is only the JSON-RPC skin over it.
+	s.mgr = sessioncore.New(ctx, base, stderr, func(id string) engine.Consenter {
+		return newRemoteConsenter(s, id).Ask
+	})
 	s.enc = json.NewEncoder(stdout)
 	// Off, for the reason journal.Marshal and print.go's emitter both give: the
 	// default rewrites <, > and & as \uXXXX, so a diff or tool output would read
@@ -411,11 +421,10 @@ func serve(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, base 
 	return s.run(stdin)
 }
 
-// server holds the resident state: the open sessions and the locks that keep
-// the wire and the turn loop honest.
+// server is the JSON-RPC skin: it frames the wire and maps sessioncore.Manager's
+// outcomes onto it. The sessions themselves live in the Manager.
 type server struct {
-	ctx    context.Context
-	base   engine.Options
+	mgr    *sessioncore.Manager
 	stderr io.Writer
 
 	// enc and encMu serialize every write to stdout. Notifications come off a
@@ -424,50 +433,14 @@ type server struct {
 	enc   *json.Encoder
 	encMu sync.Mutex
 
-	// mu guards the sessions map and every mutable field of a servedSession —
-	// its queue, its current-turn cancel handle and its closed flag — and backs
-	// each session's cond. wg tracks the per-session worker goroutines so
-	// shutdown waits for them before closing anything.
-	mu       sync.Mutex
-	sessions map[string]*servedSession
-	wg       sync.WaitGroup
-
 	// consentMu, consentSeq and pending back every remoteConsenter's blocking
-	// round trip (ADR-0016, see serve_consent.go). Deliberately a separate lock
-	// from mu: a consent wait has nothing to do with session bookkeeping, and
-	// sharing one lock would make a turn blocked on a remote answer contend
-	// with the read loop dispatching session.cancel for an unrelated session.
+	// round trip (ADR-0016, see serve_consent.go). Deliberately its own lock: a
+	// consent wait has nothing to do with session bookkeeping, and a turn
+	// blocked on a remote answer must not contend with the read loop
+	// dispatching session.cancel for an unrelated session.
 	consentMu  sync.Mutex
 	consentSeq int64
 	pending    map[string]chan consentReply
-}
-
-// servedSession is one open engine session and its queue of turns to run. A
-// single worker goroutine drains the queue in order, so a session's turns
-// serialize; different sessions' workers run concurrently. Every field below the
-// two immutable ones is guarded by server.mu.
-type servedSession struct {
-	id   string          // immutable
-	sess *engine.Session // immutable after the worker is spawned
-
-	// cond signals the worker when a turn is queued or when the session is
-	// closing. Its L is &server.mu, so the worker waits and the read loop
-	// enqueues under the one lock that also guards the fields below.
-	cond    *sync.Cond
-	queue   []turnJob          // turns waiting to run, oldest first
-	cancel  context.CancelFunc // the running turn's cancel, or nil between turns
-	closed  bool               // shutdown asked this worker to drain and exit
-	closing bool               // a session.close is queued; no further turns are accepted
-}
-
-// turnJob is one queued turn: the request whose id its result answers, the
-// prompt to run, and whether it is the session's opening turn (which alone
-// carries the record path back, the way session.start's response does).
-type turnJob struct {
-	reqID   json.RawMessage
-	prompt  string
-	isStart bool
-	isClose bool // a session.close, not a turn: the worker ends the session
 }
 
 // run reads one JSON message per line until stdin closes, dispatching each, then
@@ -487,7 +460,7 @@ func (s *server) run(stdin io.Reader) int {
 			break
 		}
 	}
-	s.shutdown()
+	s.mgr.Shutdown()
 	return exitSuccess
 }
 
@@ -538,12 +511,36 @@ func (s *server) handleLine(line string) {
 	}
 }
 
-// dispatchStart opens a session and queues its first turn, all on the read-loop
-// goroutine. engine.Open runs inline — it is a fast, Assembler-free local step —
-// so the working-tree lock and its collision (codeSessionLocked) are decided
-// here, before any worker exists. Only after Open succeeds is the session
-// registered and its worker spawned, so a failed Open leaves nothing behind and
-// its id stays free to retry.
+// rpcErrorFor maps a sessioncore.Manager refusal onto this wire's error codes.
+func rpcErrorFor(e *sessioncore.Error) (int, string) {
+	switch e.Kind {
+	case sessioncore.KindUsage:
+		return codeUsageError, e.Message
+	case sessioncore.KindUnknownSession:
+		return codeUnknownSession, e.Message
+	case sessioncore.KindSessionExists:
+		return codeSessionExists, e.Message
+	case sessioncore.KindSessionLocked:
+		return codeSessionLocked, e.Message
+	case sessioncore.KindInternal:
+		return codeInternalError, e.Message
+	default:
+		return codeOpenFailed, e.Message
+	}
+}
+
+func (s *server) writeSessionError(id json.RawMessage, e *sessioncore.Error) {
+	code, msg := rpcErrorFor(e)
+	s.writeError(id, code, msg)
+}
+
+func turnResultOf(r sessioncore.TurnResult) turnResult {
+	return turnResult{Session: r.Session, Record: r.Record, Stop: r.Stop, ExitCode: r.ExitCode, Turns: r.Turns}
+}
+
+// dispatchStart opens a session and queues its first turn, on the read-loop
+// goroutine. The response is written by the session's worker when the opening
+// turn settles.
 func (s *server) dispatchStart(req rpcRequest) {
 	var p startParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
@@ -562,66 +559,20 @@ func (s *server) dispatchStart(req rpcRequest) {
 		return
 	}
 
-	// The read loop is the only goroutine that registers, so this early check and
-	// the insert below cannot race: a duplicate id is refused before a needless
-	// Open, which the reused-id case (a live session, a second start) relies on.
-	s.mu.Lock()
-	_, exists := s.sessions[p.Session]
-	s.mu.Unlock()
-	if exists {
-		s.writeError(req.ID, codeSessionExists, fmt.Sprintf("session %q is already open in this process", p.Session))
-		return
+	id := req.ID
+	if err := s.mgr.Start(sessioncore.StartParams{
+		ID: p.Session, Dir: p.Dir, Prompt: p.Prompt,
+		Model: p.Model, Harness: p.Harness, HarnessConfig: p.HarnessConfig,
+		ConsentMode: p.ConsentMode, ContainmentProvided: p.ContainmentProvided, NeverAllow: p.NeverAllow,
+	}, s.notifier(p.Session), sessioncore.Turn{Done: func(r sessioncore.TurnResult) {
+		s.writeResult(id, turnResultOf(r))
+	}}); err != nil {
+		s.writeSessionError(req.ID, err)
 	}
-
-	selection, err := engine.ResolveSelection(p.Dir, engine.SelectionOverrides{
-		Model:         p.Model,
-		Harness:       p.Harness,
-		HarnessConfig: p.HarnessConfig,
-	})
-	if err != nil {
-		code := codeOpenFailed
-		if engine.IsSelectionUsageError(err) {
-			code = codeUsageError
-		}
-		s.writeError(req.ID, code, err.Error())
-		return
-	}
-
-	opts := s.base
-	opts.Dir = p.Dir
-	opts.SessionID = p.Session
-	opts.Selection = selection
-	opts.Events = s.notifier(p.Session)
-	if rerr := s.buildConsentOptions(p, &opts); rerr != nil {
-		s.writeError(req.ID, rerr.Code, rerr.Message)
-		return
-	}
-
-	sess, err := engine.Open(s.ctx, opts)
-	if err != nil {
-		code := codeOpenFailed
-		if errors.Is(err, engine.ErrSessionLocked) {
-			code = codeSessionLocked
-		}
-		s.writeError(req.ID, code, err.Error())
-		return
-	}
-
-	ss := &servedSession{id: p.Session, sess: sess}
-	ss.cond = sync.NewCond(&s.mu)
-	ss.queue = []turnJob{{reqID: req.ID, prompt: p.Prompt, isStart: true}}
-	s.mu.Lock()
-	s.sessions[p.Session] = ss
-	s.mu.Unlock()
-
-	s.wg.Add(1)
-	go s.worker(ss)
 }
 
 // dispatchSubmit queues the next turn on an already-open session. It never runs
-// the turn itself and never rejects a busy session: the session's worker runs
-// queued turns one at a time, in order, so a submit while a turn is in flight
-// waits its place rather than failing.
+// the turn itself and never rejects a busy session.
 func (s *server) dispatchSubmit(req rpcRequest) {
 	var p submitParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
@@ -636,30 +587,17 @@ func (s *server) dispatchSubmit(req rpcRequest) {
 		s.writeError(req.ID, codeInvalidParams, "session.submit needs a prompt: the next turn's task")
 		return
 	}
-
-	s.mu.Lock()
-	ss := s.sessions[p.Session]
-	if ss == nil {
-		s.mu.Unlock()
-		s.writeError(req.ID, codeUnknownSession, fmt.Sprintf("no open session %q; start one with "+
-			"session.start first", p.Session))
-		return
+	id := req.ID
+	if err := s.mgr.Submit(p.Session, p.Prompt, sessioncore.Turn{Done: func(r sessioncore.TurnResult) {
+		s.writeResult(id, turnResultOf(r))
+	}}); err != nil {
+		s.writeSessionError(req.ID, err)
 	}
-	if ss.closing {
-		s.mu.Unlock()
-		s.writeError(req.ID, codeUnknownSession, fmt.Sprintf("session %q is closing; start a new "+
-			"one with session.start", p.Session))
-		return
-	}
-	ss.queue = append(ss.queue, turnJob{reqID: req.ID, prompt: p.Prompt})
-	ss.cond.Signal()
-	s.mu.Unlock()
 }
 
 // dispatchClose queues the end of a session behind the turns it has already
-// accepted, so they finish and answer first. It runs inline on the read loop and
-// never waits: the worker does the closing, so a slow turn ahead of it cannot
-// stall the loop that session.cancel needs.
+// accepted. It never waits, so a slow turn ahead of it cannot stall the loop
+// that session.cancel needs.
 func (s *server) dispatchClose(req rpcRequest) {
 	var p closeParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
@@ -670,99 +608,21 @@ func (s *server) dispatchClose(req rpcRequest) {
 		s.writeError(req.ID, codeInvalidParams, "session.close needs a session id")
 		return
 	}
-
-	s.mu.Lock()
-	ss := s.sessions[p.Session]
-	if ss == nil || ss.closing {
-		s.mu.Unlock()
-		s.writeError(req.ID, codeUnknownSession, fmt.Sprintf("no open session %q to close", p.Session))
-		return
-	}
-	ss.closing = true
-	ss.queue = append(ss.queue, turnJob{reqID: req.ID, isClose: true})
-	ss.cond.Signal()
-	s.mu.Unlock()
-}
-
-// finishClose ends one session on its own worker. The session leaves the map
-// first, under the lock, so a concurrent shutdown cannot close it a second time
-// and its id is reusable the moment SessionEnded is written; Close then writes
-// SessionEnded (announced to the client through the session's own observer) and
-// releases the working-tree lock before the response goes out.
-func (s *server) finishClose(ss *servedSession, job turnJob) {
-	s.mu.Lock()
-	delete(s.sessions, ss.id)
-	ss.closed = true
-	s.mu.Unlock()
-
-	if err := ss.sess.Close(s.ctx); err != nil {
-		say(s.stderr, "kopicode: closing session %q: %v\n", ss.id, err)
-		s.writeError(job.reqID, codeInternalError, fmt.Sprintf("closing session %q: %v", ss.id, err))
-		return
-	}
-	s.writeResult(job.reqID, closeResult{Session: ss.id, Closed: true})
-}
-
-// worker drains one session's queue in order until the session is closed. Each
-// turn gets its own cancellable context, installed as the session's current-turn
-// cancel before it runs and cleared after, so a session.cancel always finds the
-// turn running now. Between turns the worker waits on the session's cond, woken
-// by an enqueue or by shutdown.
-func (s *server) worker(ss *servedSession) {
-	defer s.wg.Done()
-	for {
-		s.mu.Lock()
-		for len(ss.queue) == 0 && !ss.closed {
-			ss.cond.Wait()
-		}
-		if ss.closed {
-			// Shutdown: abandon any queued turns (their client's stdin has closed)
-			// and exit. A turn already running finished above before we got here.
-			ss.queue = nil
-			s.mu.Unlock()
+	id := req.ID
+	if err := s.mgr.Close(p.Session, func(e *sessioncore.Error) {
+		if e != nil {
+			s.writeSessionError(id, e)
 			return
 		}
-		job := ss.queue[0]
-		ss.queue = ss.queue[1:]
-		if job.isClose {
-			s.mu.Unlock()
-			s.finishClose(ss, job)
-			return
-		}
-		turnCtx, cancel := context.WithCancel(s.ctx)
-		ss.cancel = cancel
-		s.mu.Unlock()
-
-		res, _ := ss.sess.Run(turnCtx, job.prompt)
-		cancel()
-
-		s.mu.Lock()
-		ss.cancel = nil
-		s.mu.Unlock()
-
-		result := turnResult{
-			Session:  ss.id,
-			Stop:     res.Stop.String(),
-			ExitCode: res.Stop.ExitCode(),
-			Turns:    res.Turns,
-		}
-		if job.isStart {
-			// Only the opening turn reports where the journal was opened, exactly
-			// as session.start's response does and session.submit's does not.
-			result.Record = ss.sess.Path()
-		}
-		s.writeResult(job.reqID, result)
+		s.writeResult(id, closeResult{Session: p.Session, Closed: true})
+	}); err != nil {
+		s.writeSessionError(req.ID, err)
 	}
 }
 
 // handleCancel cancels a session's in-flight turn. It runs inline on the read
-// loop — the whole point of running turns on their own worker goroutines — so a
-// cancel reaches the turn it targets while that turn is still running, never
-// queued behind it. It cancels the turn running now and only that one: a turn
-// still queued keeps its place. A session with no turn in flight (idle between
-// turns) has a nil cancel and the signal is a no-op, but it is still
-// acknowledged — the ack says the signal was delivered to the session, the same
-// as it did before queuing.
+// loop so a cancel reaches the turn it targets while that turn is still running,
+// never queued behind it.
 func (s *server) handleCancel(req rpcRequest) {
 	var p cancelParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
@@ -773,97 +633,11 @@ func (s *server) handleCancel(req rpcRequest) {
 		s.writeError(req.ID, codeInvalidParams, "session.cancel needs a session id")
 		return
 	}
-
-	s.mu.Lock()
-	ss := s.sessions[p.Session]
-	var cancel context.CancelFunc
-	if ss != nil {
-		cancel = ss.cancel
-	}
-	s.mu.Unlock()
-
-	if ss == nil {
-		s.writeError(req.ID, codeUnknownSession, fmt.Sprintf("no open session %q to cancel", p.Session))
+	if err := s.mgr.Cancel(p.Session); err != nil {
+		s.writeSessionError(req.ID, err)
 		return
 	}
-	if cancel != nil {
-		cancel()
-	}
 	s.writeResult(req.ID, cancelResult{Session: p.Session, Cancelled: true})
-}
-
-// --- consent modes (ADR-0016) ------------------------------------------------
-
-// buildConsentOptions resolves session.start's required consent_mode into the
-// Consent/ConsentMode fields engine.Open reads, replacing the old
-// process-wide, unconditional applyUnattendedAnswerers. It returns a non-nil
-// *rpcError for a missing or unrecognised consent_mode, or a
-// consentModeUnattendedPolicy request with no containment_provided
-// acknowledgment — every case a startup usage error, decided and returned
-// before engine.Open is ever called, the same ordering ADR-0007 decision 4
-// holds every other surface to.
-//
-// Ask/AskMode are wired identically under both modes — ADR-0016 reopens only
-// the Consenter/permission half of consent, not the ask tool's, so a declared
-// AskPolicy from the process flags still wins where set, and the fixed
-// headless refusal still answers otherwise, exactly as before this ADR.
-func (s *server) buildConsentOptions(p startParams, opts *engine.Options) *rpcError {
-	if len(p.NeverAllow) > 0 && p.ConsentMode != consentModeAuto {
-		return &rpcError{Code: codeUsageError, Message: fmt.Sprintf(
-			"session.start's never_allow only applies to consent_mode %q; this session declared %q "+
-				"and nothing would consult the list", consentModeAuto, p.ConsentMode)}
-	}
-
-	switch p.ConsentMode {
-	case consentModeAuto:
-		if err := engine.ValidateAutoNeverAllow(p.NeverAllow); err != nil {
-			return &rpcError{Code: codeUsageError, Message: "session.start's never_allow: " + err.Error()}
-		}
-		// The process-level --policy-file belongs to unattended_policy sessions
-		// (ADR-0011) and stays out of this one: engine.Open refuses a Policy
-		// beside ConsentAuto rather than guessing which answerer was meant.
-		opts.Policy = nil
-		opts.Consent = nil
-		opts.ConsentMode = engine.ConsentAuto
-		opts.AutoNeverAllow = p.NeverAllow
-
-	case consentModeUnattendedPolicy:
-		if !p.ContainmentProvided {
-			return &rpcError{Code: codeUsageError, Message: fmt.Sprintf(
-				"session.start's consent_mode is %q but containment_provided is not true; ADR-0011 "+
-					"decision 4 requires the caller to explicitly acknowledge it is supplying real "+
-					"process/container containment for this session", consentModeUnattendedPolicy)}
-		}
-		// Policy (ADR-0011's declared allowlist, from --policy-file) answers
-		// instead of Consent when it is set on s.base; Consent stays nil either
-		// way. No human is attributed a decision either path (KAN-885).
-		opts.ConsentMode = engine.ConsentUnattended
-
-	case consentModeRemoteInteractive:
-		// --policy-file belongs to unattended_policy sessions. Left set beside
-		// the live consenter it makes engine.Open refuse the session as two
-		// answerers for one question, so a process started with one could never
-		// open a remote_interactive session at all.
-		opts.Policy = nil
-		rc := newRemoteConsenter(s, p.Session)
-		opts.Consent = rc.Ask
-		opts.ConsentMode = engine.ConsentRemote
-
-	default:
-		return &rpcError{Code: codeUsageError, Message: fmt.Sprintf(
-			"session.start needs a consent_mode of %q, %q or %q; got %q",
-			consentModeRemoteInteractive, consentModeUnattendedPolicy, consentModeAuto, p.ConsentMode)}
-	}
-
-	if opts.AskPolicy == nil {
-		// No declared ask policy: dead-end ask the way headless does, attributed
-		// to the policy since nobody was asked (ADR-0009 decision 4).
-		opts.Ask = denyHeadlessAsk
-		opts.AskMode = engine.AskUnattended
-	}
-	// When AskPolicy is set, Ask must stay nil — Open refuses both at once — and
-	// mustAnswerer attributes the answer to the policy on its own (KAN-1028).
-	return nil
 }
 
 // --- writing the wire -------------------------------------------------------
@@ -912,42 +686,4 @@ func idOrNull(id json.RawMessage) json.RawMessage {
 		return json.RawMessage("null")
 	}
 	return id
-}
-
-// --- shutdown ---------------------------------------------------------------
-
-// shutdown ends every open session once the client's stdin has closed. It marks
-// each session closed, cancels its in-flight turn and wakes its worker, waits
-// for the workers to drain and exit, then closes each session so its
-// SessionEnded is written — the record's other bookend, owed even to a session
-// that was mid-turn when the client went away.
-func (s *server) shutdown() {
-	s.mu.Lock()
-	for _, ss := range s.sessions {
-		ss.closed = true
-		if ss.cancel != nil {
-			ss.cancel()
-		}
-		ss.cond.Signal()
-	}
-	s.mu.Unlock()
-
-	s.wg.Wait()
-
-	s.mu.Lock()
-	open := make([]*servedSession, 0, len(s.sessions))
-	for _, ss := range s.sessions {
-		open = append(open, ss)
-	}
-	s.sessions = map[string]*servedSession{}
-	s.mu.Unlock()
-
-	for _, ss := range open {
-		if ss.sess == nil {
-			continue
-		}
-		if err := ss.sess.Close(s.ctx); err != nil {
-			say(s.stderr, "kopicode: closing session %q: %v\n", ss.id, err)
-		}
-	}
 }
