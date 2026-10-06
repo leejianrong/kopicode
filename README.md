@@ -17,8 +17,8 @@ flowchart LR
     engine --> repo["your repo<br/>+ git shadow refs<br/>+ the session journal"]
 ```
 
-**Status:** v0.2, with recorded runs on real repositories in
-[`docs/dogfood-runs/`](docs/dogfood-runs/). One model is measured end to end; two more are
+**Status:** v0.3, with recorded runs on real repositories in
+[`docs/dogfood-runs/`](docs/dogfood-runs/). Two models are measured on the corpus; four are
 registered. There is no sandbox: an approved shell command runs with your
 privileges ([why](docs/adr/0008-shell-isolation-accepted-risk.md)). Questions and bugs go in
 the [issue tracker](https://github.com/leejianrong/kopicode/issues).
@@ -52,15 +52,15 @@ allow? [y]es / [N]o / [a]lways for this exact request:
 
 `y` allows this call; anything else, including Enter, denies; `a` allows that exact request
 for the session (an exact match, never a directory or a command prefix). `Ctrl-C` cancels the
-turn in flight without ending the session. Your first task is best a small, well-described
+turn in flight without ending the session; `/exit` (or `/quit`) ends it. Your first task is best a small, well-described
 bug in a repo with tests: [`docs/trying-kopicode.md`](docs/trying-kopicode.md) walks through
 two real ones. A one-line fix cost about $0.04.
 
 ## Usage
 
 **Interactively**, as above. Pick a model with `--model` (default `qwen/qwen3-coder-next`;
-`minimax/minimax-m2` and `z-ai/glm-5.2` are also registered, and an unknown id is refused at
-startup with the list printed). Pin a repository's choice so everyone gets the same one:
+`minimax/minimax-m2`, `z-ai/glm-5.2` and the cheap `deepseek/deepseek-v3.2` are also
+registered, and an unknown id is refused at startup with the list printed). Pin a repository's choice so everyone gets the same one:
 
 ```toml
 # .kopicode/config.toml
@@ -91,8 +91,15 @@ does not pass yours through, give it the key with the client's own option (for C
 `-e OPENROUTER_API_KEY=...`, which stores the key in that client's config).
 
 `kopicode serve` is the same sessions over NDJSON JSON-RPC for an orchestrator that spawns
-kopicode as a child. See [`docs/kopicode-mcp.md`](docs/kopicode-mcp.md) and
+kopicode as a child; `kopicode version --json` lists the protocol version and the features
+your binary supports, so a client can require one. See [`docs/kopicode-mcp.md`](docs/kopicode-mcp.md) and
 [`docs/kopicode-serve-protocol.md`](docs/kopicode-serve-protocol.md).
+
+A session is bounded: each prompt gets at most **20 model calls** (the turn cap) and the
+session at most 2M tokens. A task that needs more ends with `stop: max_turns` rather than
+running on; the work done so far stays in the tree, and replying continues it with a fresh
+allowance. To raise the cap for a repository, declare `max_turns` in a harness config
+([`docs/harness-tuning.md`](docs/harness-tuning.md)).
 
 ## How unattended sessions are kept safe
 
@@ -141,7 +148,7 @@ mock provider with `make bench-smoke`.
 | `model`, `harness`, `harness_config` | `.kopicode/config.toml` or flags | flags win |
 | turn cap and other bounds | a declared harness config (`--harness-config`) | for example `max_turns = 40` when a session stops with `max_turns`; local-only, never anchors a published number. See [`docs/harness-tuning.md`](docs/harness-tuning.md) |
 | per-language examples | [`docs/examples/`](docs/examples/) | Go, JavaScript/TypeScript, Python, multi-language |
-| reusable task instructions | `.agents/skills/<name>/SKILL.md` | the same convention Claude Code, Codex and Cursor read ([ADR-0014](docs/adr/0014-skills-mechanism.md)) |
+| reusable task instructions | `.agents/skills/<name>/SKILL.md` | the same convention Claude Code, Codex and Cursor read. The model is told to look there and may read a skill on its own; there is no `/skill` command to invoke one ([ADR-0014](docs/adr/0014-skills-mechanism.md)) |
 
 `kopicode sessions` lists past sessions; `--resume <id>` and `--fork <id>:<turn>` continue or
 branch one. Every session is a journal under `.kopicode/sessions/`; everything printed is
