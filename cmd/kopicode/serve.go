@@ -160,6 +160,7 @@ const (
 	methodSessionSubmit  = "session.submit"
 	methodSessionCancel  = "session.cancel"
 	methodSessionClose   = "session.close"
+	methodServerHello    = "server.hello"    // capabilities, see capabilities.go
 	methodSessionEvent   = "session.event"   // server → client notification
 	methodConsentRequest = "consent.request" // server → client request
 )
@@ -524,9 +525,11 @@ func (s *server) handleLine(line string) {
 		s.handleCancel(req)
 	case methodSessionClose:
 		s.dispatchClose(req)
+	case methodServerHello:
+		s.writeResult(req.ID, currentCapabilities())
 	default:
 		s.writeError(req.ID, codeMethodNotFound, fmt.Sprintf("unknown method %q; this surface has "+
-			"session.start, session.submit, session.cancel and session.close", req.Method))
+			"session.start, session.submit, session.cancel, session.close and server.hello", req.Method))
 	}
 }
 
