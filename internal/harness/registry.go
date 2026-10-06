@@ -137,6 +137,25 @@ var registry = []Entry{
 		},
 		Validated: "2026-08-18",
 	},
+	{
+		// A/B candidate, cheap open-weight (the first DeepSeek row), and the
+		// model the first recorded fixtures were taken under (KAN-774). fp8 is
+		// the best real quantization on offer. AtlasCloud is the cheapest fp8
+		// endpoint that reports both `seed` and `tools` and actually served
+		// traffic: GMICloud, cheaper, answered a first request and then
+		// returned 400 "model deprecated" (2026-10-06). SiliconFlow does not
+		// report `seed`. Full
+		// argument and the endpoint table: docs/provider-pin.md
+		// §deepseek/deepseek-v3.2.
+		ModelID:       "deepseek/deepseek-v3.2",
+		HarnessConfig: DefaultConfigName,
+		Pin: provider.Pin{
+			Order:          []string{"atlas-cloud/fp8"},
+			AllowFallbacks: false,
+			Quantizations:  []string{"fp8"},
+		},
+		Validated: "2026-10-06",
+	},
 }
 
 // Lookup returns the registry row for a model id, and whether it exists.

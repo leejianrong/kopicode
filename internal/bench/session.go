@@ -92,6 +92,17 @@ type EngineAgent struct {
 	// Fixture names the recording a mock run replays. Empty means
 	// [SmokeFixture].
 	Fixture string
+	// RecordDir, when set on a live run, records every task's real traffic as a
+	// fixture in this directory (KAN-774). Ignored for a mock run, which has no
+	// traffic to record.
+	RecordDir string
+	// RecordPrefix is prepended to the task id to name each recording. Empty
+	// means "recorded_".
+	RecordPrefix string
+
+	// recordBaseURL points a recording client at an httptest server. Unexported
+	// for the same reason testProvider is: only this package's tests need it.
+	recordBaseURL string
 
 	// testProvider overrides a.provider's dispatch entirely when set,
 	// bypassing Provider and Fixture. It exists for
@@ -242,6 +253,18 @@ func (a EngineAgent) runSession(ctx context.Context, spec SessionSpec) (SessionO
 	// rather than in place of it.
 	closeErr := eng.Close(ctx)
 
+	// Written after Close, not after Run: a streamed reply is only complete
+	// once its body has been read to the end or closed.
+	if rp, ok := prov.(recordingProvider); ok {
+		prefix := a.RecordPrefix
+		if prefix == "" {
+			prefix = "recorded_"
+		}
+		if _, err := rp.finish(a.RecordDir, RecordedName(prefix, spec.Task.ID), spec.Selection.ModelID); err != nil {
+			closeErr = errors.Join(closeErr, err)
+		}
+	}
+
 	out := SessionOutcome{Stop: res.Stop.Reason(), Turns: res.Turns, Tokens: res.Tokens}
 	return out, errors.Join(runErr, closeErr)
 }
@@ -295,6 +318,10 @@ func (a EngineAgent) provider(spec SessionSpec, jrn journal.Journal) (engine.Pro
 		key, err := provider.APIKeyFromEnv()
 		if err != nil {
 			return nil, fmt.Errorf("bench: %w", err)
+		}
+		if a.RecordDir != "" {
+			return newRecordingClient(key, spec.Task.ID, a.recordBaseURL,
+				provider.WithRetryObserver(journalRetryObserver(jrn)))
 		}
 		c, err := provider.NewClient(key, provider.WithRetryObserver(journalRetryObserver(jrn)))
 		if err != nil {
