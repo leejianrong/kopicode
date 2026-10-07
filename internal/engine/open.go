@@ -273,6 +273,15 @@ type Options struct {
 	// that does not consult it believes it is protected when it is not.
 	AutoNeverAllow []string
 
+	// Switchable lets the session change between asking [Options.Consent] and
+	// auto mode while it runs (ADR-0023); see [Session.SetAuto]. It needs a
+	// Consent (the asking side) and is refused with [ConsentAuto] or Policy,
+	// which are already one fixed answerer. [Options.AutoNeverAllow] then
+	// applies to the auto side.
+	Switchable bool
+	// StartAuto starts a [Options.Switchable] session in auto mode.
+	StartAuto bool
+
 	// Provider overrides the model provider. Nil builds the live OpenRouter
 	// client from OPENROUTER_API_KEY.
 	//
@@ -433,9 +442,27 @@ type Session struct {
 	engine  *Engine
 	closers []func() error
 
+	// mode is the consent switch of a [Options.Switchable] session, else nil.
+	mode *permission.Switch
+
 	id  string
 	dir string
 }
+
+// SetAuto switches a [Options.Switchable] session into auto mode (true) or back
+// to asking (false), from the next permission request on (ADR-0023). It reports
+// false when the session was not opened switchable, in which case nothing
+// changed: a session's mode is otherwise fixed at open.
+func (s *Session) SetAuto(on bool) bool {
+	if s.mode == nil {
+		return false
+	}
+	s.mode.SetAuto(on)
+	return true
+}
+
+// Auto reports whether the session is answering consent itself.
+func (s *Session) Auto() bool { return s.mode != nil && s.mode.Auto() }
 
 // ID reports the session identifier, generated or supplied.
 func (s *Session) ID() string { return s.id }
@@ -588,7 +615,23 @@ func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session,
 		return nil, fmt.Errorf("%w: Options.ReadOnly with ConsentAuto; auto runs shell inside the root unasked and a "+
 			"shell line can write, so the session would not be read-only (docs/adr/0019-read-only-sessions.md)", ErrConfig)
 	}
-	if len(opts.AutoNeverAllow) > 0 && opts.ConsentMode != ConsentAuto {
+	if (opts.Switchable || opts.StartAuto) && (opts.Consent == nil || opts.Policy != nil || opts.ConsentMode == ConsentAuto) {
+		return nil, fmt.Errorf("%w: Options.Switchable needs a Consent to ask and neither Policy nor ConsentAuto, "+
+			"which are already one fixed answerer (docs/adr/0023-repl-auto-mode.md)", ErrConfig)
+	}
+	if opts.StartAuto && !opts.Switchable {
+		return nil, fmt.Errorf("%w: Options.StartAuto is set without Options.Switchable", ErrConfig)
+	}
+	if opts.Switchable && opts.ReadOnly {
+		return nil, fmt.Errorf("%w: Options.Switchable with ReadOnly; a session that can enter auto runs shell "+
+			"unasked and would not be read-only (docs/adr/0019-read-only-sessions.md)", ErrConfig)
+	}
+	if opts.Switchable {
+		if err := permission.ValidateNeverAllow(opts.AutoNeverAllow); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrConfig, err)
+		}
+	}
+	if len(opts.AutoNeverAllow) > 0 && opts.ConsentMode != ConsentAuto && !opts.Switchable {
 		return nil, fmt.Errorf("%w: Options.AutoNeverAllow is set but Options.ConsentMode is not ConsentAuto; "+
 			"nothing would consult the list (docs/adr/0017-auto-consent-mode.md)", ErrConfig)
 	}
@@ -756,6 +799,18 @@ func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session,
 	policy, err := gatePolicy(opts, set.Root.Path(), set.Root.Resolver())
 	if err != nil {
 		return fail(fmt.Errorf("engine: building the consent policy: %w", err))
+	}
+	if opts.Switchable {
+		auto, aerr := permission.NewAuto(set.Root.Path(), set.Root.Resolver(), opts.AutoNeverAllow)
+		if aerr != nil {
+			return fail(fmt.Errorf("engine: building the auto policy: %w", aerr))
+		}
+		sw, serr := permission.NewSwitch(policy, auto, opts.StartAuto)
+		if serr != nil {
+			return fail(fmt.Errorf("engine: building the consent switch: %w", serr))
+		}
+		s.mode = sw
+		policy = sw
 	}
 	gate, err := permission.New(set.Root.Path(), set.Root.Resolver(), policy)
 	if err != nil {

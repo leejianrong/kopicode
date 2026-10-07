@@ -153,6 +153,12 @@ type Config struct {
 	// yields a usable hint.
 	MaxTurns int
 
+	// Mode reads and sets the consent mode for /mode (ADR-0023): auto reports
+	// whether the session is answering consent itself, and set switches it,
+	// returning false when the session cannot. Optional; nil makes /mode say
+	// there is nothing to switch.
+	Mode ModeControl
+
 	// Usage reports the session's usage for /context. Optional; nil makes
 	// /context say there is nothing to report.
 	Usage UsageFunc
@@ -183,6 +189,7 @@ type Loop struct {
 	sig      <-chan os.Signal
 	maxTurns int
 	usage    UsageFunc
+	mode     ModeControl
 
 	// promptEndsLine records whether the line editor finishes the line
 	// itself. Its raw-mode path always does and its plain path never does;
@@ -236,6 +243,7 @@ func New(cfg Config) (*Loop, error) {
 		sig:            cfg.Interrupts,
 		maxTurns:       cfg.MaxTurns,
 		usage:          cfg.Usage,
+		mode:           cfg.Mode,
 		promptEndsLine: term.IsInteractive(),
 	}, nil
 }
@@ -304,7 +312,8 @@ func (l *Loop) loop(ctx context.Context) (engine.Stop, error) {
 			return engine.StopHarnessError, fmt.Errorf("repl: reading the prompt: %w", err)
 		}
 
-		switch command(line) {
+		cmd, arg := command(line)
+		switch cmd {
 		case commandNone:
 		case commandBlank:
 			continue
@@ -312,6 +321,9 @@ func (l *Loop) loop(ctx context.Context) (engine.Stop, error) {
 			return engine.StopCompleted, nil
 		case commandContext:
 			l.showContext()
+			continue
+		case commandMode:
+			l.switchMode(arg)
 			continue
 		}
 
@@ -436,17 +448,25 @@ const (
 	commandBlank
 	commandExit
 	commandContext
+	commandMode
 )
 
-func command(line string) lineCommand {
-	switch strings.ToLower(strings.TrimSpace(line)) {
-	case "":
-		return commandBlank
-	case "/exit", "/quit":
-		return commandExit
-	case "/context":
-		return commandContext
-	default:
-		return commandNone
+func command(line string) (lineCommand, string) {
+	fields := strings.Fields(strings.ToLower(line))
+	if len(fields) == 0 {
+		return commandBlank, ""
 	}
+	switch fields[0] {
+	case "/exit", "/quit":
+		if len(fields) == 1 {
+			return commandExit, ""
+		}
+	case "/context":
+		if len(fields) == 1 {
+			return commandContext, ""
+		}
+	case "/mode":
+		return commandMode, strings.Join(fields[1:], " ")
+	}
+	return commandNone, ""
 }

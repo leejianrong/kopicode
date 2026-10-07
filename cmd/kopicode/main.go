@@ -192,6 +192,7 @@ func interactive(args []string, _, stderr io.Writer) int {
 	overrides := engine.BindSelectionFlags(fs)
 	engine.BindLimitFlags(fs, overrides)
 	overrides.Interactive = true
+	mode := fs.String("mode", repl.ModeDefault, "consent mode to start in: default (ask before shell and outside writes) or auto (see /mode)")
 	debug := fs.Bool("debug", false, "engine diagnostics on stderr")
 	// --resume is deliberately minimal: the id of an existing session, and
 	// nothing to help find one. `kopicode sessions` (KAN-941) is what finds
@@ -266,7 +267,11 @@ func interactive(args []string, _, stderr io.Writer) int {
 	// the journal).
 	slog.Debug("arm resolved", "selection", selection)
 
-	opts := engine.Options{Dir: dir, Selection: selection}
+	if *mode != repl.ModeDefault && *mode != repl.ModeAuto {
+		say(stderr, "kopicode: --mode %q: the modes are default and auto\n", *mode)
+		return exitUsage
+	}
+	opts := engine.Options{Dir: dir, Selection: selection, StartAuto: *mode == repl.ModeAuto}
 	std := stdio(stderr)
 	switch {
 	case forkSrc != nil:
@@ -436,6 +441,10 @@ func openAndDriveSession(std streams, opts engine.Options, open func(context.Con
 		},
 		Close: func(ctx context.Context) error { return sess.Close(ctx) },
 		Usage: func() engine.Usage { return sess.Usage() },
+		Mode: repl.ModeControl{
+			Auto: func() bool { return sess.Auto() },
+			Set:  func(auto bool) bool { return sess.SetAuto(auto) },
+		},
 	})
 	if err != nil {
 		say(stderr, "kopicode: %v\n", err)
@@ -444,6 +453,11 @@ func openAndDriveSession(std streams, opts engine.Options, open func(context.Con
 
 	opts.Events = loop.Render
 	opts.Consent = loop.Ask
+	// Switchable keeps loop.Ask as the asking side and adds auto beside it, so
+	// /mode can move between them mid-session (ADR-0023). The consent mode stays
+	// ConsentInteractive: a decision a person made is still stamped user, and
+	// one auto made is stamped auto.
+	opts.Switchable = true
 	// opts.ConsentMode is left at its zero value, engine.ConsentInteractive: a
 	// human is answering through loop.Ask, so every PermissionDecided this
 	// session journals is stamped permission.SourceUser (KAN-885).
@@ -491,6 +505,9 @@ func openAndDriveSession(std streams, opts engine.Options, open func(context.Con
 	// SessionStarted said them, and the surface renders it. What the record
 	// cannot say is where it is, so that is the one line added here.
 	loop.Notice("record: " + sess.Path())
+	if sess.Auto() {
+		loop.Notice("mode: auto. " + repl.AutoWarning())
+	}
 
 	stop, err := loop.Run(ctx)
 	if err != nil {
