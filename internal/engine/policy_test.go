@@ -68,8 +68,8 @@ func TestOptionsPolicyRefusesAliveConsenter(t *testing.T) {
 		// requireProviderCredential ever runs, so this test never needs a
 		// working provider to prove its point.
 		Policy: pf,
-		Consent: func(context.Context, engine.ConsentRequest) (engine.ConsentAnswer, error) {
-			return engine.ConsentDeny, nil
+		Consent: func(context.Context, engine.ConsentRequest) (engine.ConsentReply, error) {
+			return engine.Reply(engine.ConsentDeny), nil
 		},
 	})
 	if err == nil {

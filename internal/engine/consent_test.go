@@ -77,13 +77,44 @@ func shellConsentEvents(t *testing.T, consent engine.Consenter, mode engine.Cons
 // path does), a decision that came back through Consent must be recorded as a
 // human's.
 func TestReplConsentIsAttributedToTheUser(t *testing.T) {
-	events := shellConsentEvents(t, func(context.Context, engine.ConsentRequest) (engine.ConsentAnswer, error) {
-		return engine.ConsentDeny, nil
+	events := shellConsentEvents(t, func(context.Context, engine.ConsentRequest) (engine.ConsentReply, error) {
+		return engine.Reply(engine.ConsentDeny), nil
 	}, engine.ConsentInteractive)
 
 	dec := sole[journal.PermissionDecided](t, events)
 	if dec.Source != permission.SourceUser.String() {
 		t.Errorf("source = %q, want %q — the REPL's Consent speaks for a human", dec.Source, permission.SourceUser)
+	}
+}
+
+// TestADenialNoteReachesTheJournalAndTheModel. "No, use uv" is a refusal that
+// carries a suggestion: the journal records the note on the decision, and the
+// observation the model reads says what the user wants instead — otherwise a
+// bare "permission denied" sends it to retry or to route around the refusal.
+func TestADenialNoteReachesTheJournalAndTheModel(t *testing.T) {
+	events := shellConsentEvents(t, func(context.Context, engine.ConsentRequest) (engine.ConsentReply, error) {
+		return engine.Deny("use uv and a venv"), nil
+	}, engine.ConsentInteractive)
+
+	dec := sole[journal.PermissionDecided](t, events)
+	if dec.Decision != "deny" || dec.Note != "use uv and a venv" {
+		t.Errorf("decision = %q note = %q, want a deny carrying the note", dec.Decision, dec.Note)
+	}
+
+	res := sole[journal.ToolResult](t, events)
+	if out := res.Output.Inline; !strings.Contains(out, "use uv and a venv") {
+		t.Errorf("the model's observation does not carry the user's suggestion:\n%s", out)
+	}
+}
+
+// TestANoteOnAnApprovalIsDropped. A note means something only on a refusal.
+func TestANoteOnAnApprovalIsDropped(t *testing.T) {
+	events := shellConsentEvents(t, func(context.Context, engine.ConsentRequest) (engine.ConsentReply, error) {
+		return engine.ConsentReply{Answer: engine.ConsentAllow, Note: "ignored"}, nil
+	}, engine.ConsentInteractive)
+
+	if dec := sole[journal.PermissionDecided](t, events); dec.Note != "" {
+		t.Errorf("an approval journaled note %q, want none", dec.Note)
 	}
 }
 
@@ -96,8 +127,8 @@ func TestReplConsentIsAttributedToTheUser(t *testing.T) {
 // attributed to no one at all, and either corrupts the one session record
 // there is.
 func TestHeadlessConsentIsAttributedToPolicyNotAUser(t *testing.T) {
-	events := shellConsentEvents(t, func(context.Context, engine.ConsentRequest) (engine.ConsentAnswer, error) {
-		return engine.ConsentDeny, nil
+	events := shellConsentEvents(t, func(context.Context, engine.ConsentRequest) (engine.ConsentReply, error) {
+		return engine.Reply(engine.ConsentDeny), nil
 	}, engine.ConsentUnattended)
 
 	dec := sole[journal.PermissionDecided](t, events)
@@ -166,8 +197,8 @@ func TestANilConsenterRefuses(t *testing.T) {
 func TestAConsenterErrorIsARefusal(t *testing.T) {
 	boom := errors.New("stdin closed")
 	verdict, err := engine.AskForTest(t.Context(),
-		func(context.Context, engine.ConsentRequest) (engine.ConsentAnswer, error) {
-			return engine.ConsentAllow, boom
+		func(context.Context, engine.ConsentRequest) (engine.ConsentReply, error) {
+			return engine.Reply(engine.ConsentAllow), boom
 		},
 		engine.ConsentRequest{Kind: "run_shell"},
 	)
@@ -185,8 +216,8 @@ func TestAConsenterErrorIsARefusal(t *testing.T) {
 // no.
 func TestAnUndeclaredAnswerIsNotAnApproval(t *testing.T) {
 	verdict, err := engine.AskForTest(t.Context(),
-		func(context.Context, engine.ConsentRequest) (engine.ConsentAnswer, error) {
-			return engine.ConsentAnswer(200), nil
+		func(context.Context, engine.ConsentRequest) (engine.ConsentReply, error) {
+			return engine.Reply(engine.ConsentAnswer(200)), nil
 		},
 		engine.ConsentRequest{Kind: "run_shell"},
 	)
@@ -215,8 +246,8 @@ func TestTheAnswersMapOntoTheJournalsVocabulary(t *testing.T) {
 		}
 
 		verdict, err := engine.AskForTest(t.Context(),
-			func(context.Context, engine.ConsentRequest) (engine.ConsentAnswer, error) {
-				return answer, nil
+			func(context.Context, engine.ConsentRequest) (engine.ConsentReply, error) {
+				return engine.Reply(answer), nil
 			},
 			engine.ConsentRequest{Kind: "run_shell"},
 		)
@@ -247,9 +278,9 @@ func TestDenyIsTheZeroAnswer(t *testing.T) {
 // only read, so the record must hold no permission events at all.
 func TestConsentIsNotAskedForAReadOnlySession(t *testing.T) {
 	asked := 0
-	events := consentEvents(t, func(context.Context, engine.ConsentRequest) (engine.ConsentAnswer, error) {
+	events := consentEvents(t, func(context.Context, engine.ConsentRequest) (engine.ConsentReply, error) {
 		asked++
-		return engine.ConsentAllow, nil
+		return engine.Reply(engine.ConsentAllow), nil
 	})
 
 	if asked != 0 {

@@ -158,10 +158,14 @@ func (g *Gate) Check(ctx context.Context, a Action) (Outcome, error) {
 // refusal renders a denial for the error message, falling back when the policy
 // gave no reason.
 func refusal(dec Decision) string {
-	if dec.Reason == "" {
-		return "refused"
+	msg := dec.Reason
+	if msg == "" {
+		msg = "refused"
 	}
-	return dec.Reason
+	if dec.Note != "" {
+		msg += "; the user suggests instead: " + dec.Note
+	}
+	return msg
 }
 
 // classify applies the fixed rules. It reports whether consent is required and,

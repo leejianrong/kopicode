@@ -51,11 +51,11 @@ type verdictAsker struct {
 	seen []permission.Request
 }
 
-func (a *verdictAsker) Ask(_ context.Context, req permission.Request) (permission.Verdict, error) {
+func (a *verdictAsker) Ask(_ context.Context, req permission.Request) (permission.Reply, error) {
 	a.mu.Lock()
 	a.seen = append(a.seen, req)
 	a.mu.Unlock()
-	return a.verdict, a.err
+	return permission.Reply{Verdict: a.verdict}, a.err
 }
 
 func (a *verdictAsker) requests() []permission.Request {

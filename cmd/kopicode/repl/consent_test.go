@@ -12,11 +12,11 @@ import (
 
 // ask runs one turn that puts c to the user, with reply already typed, and
 // returns the answer, what the user saw, and the error.
-func ask(t *testing.T, typed string, ctxFn func(context.Context) context.Context, c engine.ConsentRequest) (engine.ConsentAnswer, string, error) {
+func ask(t *testing.T, typed string, ctxFn func(context.Context) context.Context, c engine.ConsentRequest) (engine.ConsentReply, string, error) {
 	t.Helper()
 
 	var out strings.Builder
-	var answer engine.ConsentAnswer
+	var answer engine.ConsentReply
 	var askErr error
 
 	loop, err := repl.New(repl.Config{
@@ -51,17 +51,25 @@ func TestConsentAnswers(t *testing.T) {
 	tests := []struct {
 		name  string
 		typed string
-		want  engine.ConsentAnswer
+		want  engine.ConsentReply
 	}{
-		{"y allows once", "y\n", engine.ConsentAllow},
-		{"yes allows once", "yes\n", engine.ConsentAllow},
-		{"case does not matter", "Y\n", engine.ConsentAllow},
-		{"a allows for the session", "a\n", engine.ConsentAllowSession},
-		{"always allows for the session", "always\n", engine.ConsentAllowSession},
-		{"n denies", "n\n", engine.ConsentDeny},
-		{"enter denies", "\n", engine.ConsentDeny},
-		{"whitespace denies", "   \n", engine.ConsentDeny},
-		{"a typo denies", "yeah ok\n", engine.ConsentDeny},
+		{"y allows once", "y\n", engine.Reply(engine.ConsentAllow)},
+		{"yes allows once", "yes\n", engine.Reply(engine.ConsentAllow)},
+		{"case does not matter", "Y\n", engine.Reply(engine.ConsentAllow)},
+		{"a allows for the session", "a\n", engine.Reply(engine.ConsentAllowSession)},
+		{"always allows for the session", "always\n", engine.Reply(engine.ConsentAllowSession)},
+		{"n denies", "n\n", engine.Deny("")},
+		{"no denies", "No\n", engine.Deny("")},
+		{"enter denies", "\n", engine.Deny("")},
+		{"whitespace denies", "   \n", engine.Deny("")},
+		// Free text is a refusal carrying a suggestion, never an approval.
+		{"text is a suggestion", "use uv and a venv\n", engine.Deny("use uv and a venv")},
+		{"no, then text", "no, use uv and a venv\n", engine.Deny("use uv and a venv")},
+		{"n: then text", "n: use uv\n", engine.Deny("use uv")},
+		{"a sentence starting yes is not a yes", "yes, but use uv first\n", engine.Deny("yes, but use uv first")},
+		{"a sentence starting always is not an always", "always use uv\n", engine.Deny("always use uv")},
+		{"a word starting with no is not no", "nothing\n", engine.Deny("nothing")},
+		{"a typo is a suggestion, not a yes", "yeah ok\n", engine.Deny("yeah ok")},
 	}
 
 	for _, tc := range tests {
@@ -71,9 +79,18 @@ func TestConsentAnswers(t *testing.T) {
 				t.Fatalf("Ask: %v", err)
 			}
 			if got != tc.want {
-				t.Errorf("answer = %v, want %v", got, tc.want)
+				t.Errorf("reply = %+v, want %+v", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestASuggestionIsShownBack. The user sees the text that will reach the model,
+// so a mistyped "yess" is visibly a note and not a yes.
+func TestASuggestionIsShownBack(t *testing.T) {
+	_, out, _ := ask(t, "use uv\n", nil, shellRequest)
+	if !strings.Contains(out, "suggestion sent: use uv") {
+		t.Errorf("the suggestion was not echoed:\n%s", out)
 	}
 }
 
@@ -83,8 +100,8 @@ func TestConsentAnswers(t *testing.T) {
 func TestAnUnanswerableQuestionIsNotAYes(t *testing.T) {
 	t.Run("input ended", func(t *testing.T) {
 		got, out, err := ask(t, "", nil, shellRequest)
-		if got != engine.ConsentDeny {
-			t.Errorf("answer = %v, want %v", got, engine.ConsentDeny)
+		if got.Answer != engine.ConsentDeny {
+			t.Errorf("answer = %v, want %v", got.Answer, engine.ConsentDeny)
 		}
 		if !errors.Is(err, repl.ErrNoConsent) {
 			t.Errorf("err = %v, want it to wrap %v", err, repl.ErrNoConsent)
@@ -101,9 +118,9 @@ func TestAnUnanswerableQuestionIsNotAYes(t *testing.T) {
 			return c
 		}
 		got, out, err := ask(t, "y\n", cancelled, shellRequest)
-		if got != engine.ConsentDeny {
+		if got.Answer != engine.ConsentDeny {
 			t.Errorf("answer = %v, want %v — a turn the user just interrupted must not be "+
-				"the turn that gets consent", got, engine.ConsentDeny)
+				"the turn that gets consent", got.Answer, engine.ConsentDeny)
 		}
 		if !errors.Is(err, repl.ErrNoConsent) {
 			t.Errorf("err = %v, want it to wrap %v", err, repl.ErrNoConsent)
@@ -126,6 +143,7 @@ func TestTheQuestionSaysWhatIsBeingConsentedTo(t *testing.T) {
 		"[y]es",
 		"[N]o",
 		"[a]lways",
+		"type what to do instead",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the consent prompt does not contain %q:\n%s", want, out)

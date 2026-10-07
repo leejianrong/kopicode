@@ -101,7 +101,9 @@ stop.
   MCP **elicitation** (`elicitation/create`, with an `allow` / `allow_session` / `deny` choice),
   and the turn blocks on the answer for up to 60 seconds (`--consent-timeout`, 1s to 24h). A decline, a cancel, an error or a
   timeout all deny. Needs a client that declared the `elicitation` capability in `initialize`;
-  `kopicode_start` refuses this mode otherwise. Decisions are journalled `source: "remote"`.
+  `kopicode_start` refuses this mode otherwise. Decisions are journalled `source: "remote"`. The form
+  also has an optional `note`: with `deny`, what the agent should do instead, shown to the model in
+  the denial and journalled on the decision.
 - **`unattended_policy`** — the process's `--policy-file` allowlist answers (ADR-0011); needs
   `containment_provided: true`. Journalled `source: "policy"`.
 

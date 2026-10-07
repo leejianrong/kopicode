@@ -414,6 +414,7 @@ func (e *Engine) journalPermission(ctx context.Context, turn int, out permission
 		Decision:  out.Decision.Verdict.String(),
 		Source:    out.Decision.Source.String(),
 		Reason:    out.Decision.Reason,
+		Note:      out.Decision.Note,
 	})
 	return err
 }

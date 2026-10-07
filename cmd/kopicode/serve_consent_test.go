@@ -63,7 +63,7 @@ func awaitPendingConsentID(t *testing.T, srv *server) string {
 }
 
 type consentOutcome struct {
-	answer engine.ConsentAnswer
+	answer engine.ConsentReply
 	err    error
 }
 
@@ -98,14 +98,17 @@ func TestRemoteConsenterDecodesEveryReplyShape(t *testing.T) {
 		name   string
 		result string
 		errMsg string
-		want   engine.ConsentAnswer
+		want   engine.ConsentReply
 	}{
-		{name: "allow", result: `{"answer":"allow"}`, want: engine.ConsentAllow},
-		{name: "allow_session", result: `{"answer":"allow_session"}`, want: engine.ConsentAllowSession},
-		{name: "deny", result: `{"answer":"deny"}`, want: engine.ConsentDeny},
-		{name: "an unrecognised answer denies", result: `{"answer":"maybe"}`, want: engine.ConsentDeny},
-		{name: "a missing answer denies", result: `{}`, want: engine.ConsentDeny},
-		{name: "an error reply denies", errMsg: "the orchestrator refused to decide", want: engine.ConsentDeny},
+		{name: "allow", result: `{"answer":"allow"}`, want: engine.Reply(engine.ConsentAllow)},
+		{name: "allow_session", result: `{"answer":"allow_session"}`, want: engine.Reply(engine.ConsentAllowSession)},
+		{name: "deny", result: `{"answer":"deny"}`, want: engine.Deny("")},
+		{name: "an unrecognised answer denies", result: `{"answer":"maybe"}`, want: engine.Deny("")},
+		{name: "a missing answer denies", result: `{}`, want: engine.Deny("")},
+		{name: "a deny with a note carries it", result: `{"answer":"deny","note":"use uv and a venv"}`, want: engine.Deny("use uv and a venv")},
+		{name: "an unrecognised answer keeps its note", result: `{"answer":"maybe","note":"ask first"}`, want: engine.Deny("ask first")},
+		{name: "a note beside an allow is dropped", result: `{"answer":"allow","note":"ignored"}`, want: engine.Reply(engine.ConsentAllow)},
+		{name: "an error reply denies", errMsg: "the orchestrator refused to decide", want: engine.Deny("")},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -154,8 +157,8 @@ func TestRemoteConsenterTimesOutAsACleanDeny(t *testing.T) {
 		t.Fatalf("a timeout must not be reported as an error (it would drop SourceRemote attribution "+
 			"from the journal — see remoteConsenter.Ask's doc comment): %v", out.err)
 	}
-	if out.answer != engine.ConsentDeny {
-		t.Errorf("answer = %v, want ConsentDeny", out.answer)
+	if out.answer.Answer != engine.ConsentDeny {
+		t.Errorf("answer = %v, want ConsentDeny", out.answer.Answer)
 	}
 }
 
@@ -176,8 +179,8 @@ func TestRemoteConsenterDeniesWithAnErrorOnCancellation(t *testing.T) {
 	if out.err == nil {
 		t.Fatal("Ask on a cancelled context returned no error")
 	}
-	if out.answer != engine.ConsentDeny {
-		t.Errorf("answer = %v, want ConsentDeny", out.answer)
+	if out.answer.Answer != engine.ConsentDeny {
+		t.Errorf("answer = %v, want ConsentDeny", out.answer.Answer)
 	}
 }
 
@@ -194,8 +197,8 @@ func TestRemoteConsenterRefusesAnAlreadyCancelledContextWithoutAsking(t *testing
 	if err == nil {
 		t.Fatal("Ask on an already-cancelled context returned no error")
 	}
-	if answer != engine.ConsentDeny {
-		t.Errorf("answer = %v, want ConsentDeny", answer)
+	if answer.Answer != engine.ConsentDeny {
+		t.Errorf("answer = %v, want ConsentDeny", answer.Answer)
 	}
 	srv.consentMu.Lock()
 	n := len(srv.pending)

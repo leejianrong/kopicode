@@ -47,11 +47,13 @@ outside the project. Edits inside the project are the agent's job and are not ga
 ```
 [perm] run_shell needs your consent
        command: go test ./...
-allow? [y]es / [N]o / [a]lways for this exact request:
+allow? [y]es / [N]o / [a]lways for this exact request, or type what to do instead:
 ```
 
-`y` allows this call; anything else, including Enter, denies; `a` allows that exact request
-for the session (an exact match, never a directory or a command prefix). `Ctrl-C` cancels the
+`y` allows this call; `a` allows that exact request for the session (an exact match, never a
+directory or a command prefix); Enter or `n` denies. Anything else you type also denies, and
+the text goes to the model as a suggestion: `use uv and a venv` (or `no, use uv`) refuses the call and
+tells the agent what you want instead. A sentence that starts with "yes" is still a suggestion, never a yes. `Ctrl-C` cancels the
 turn in flight without ending the session; `/exit` (or `/quit`) ends it. Your first task is best a small, well-described
 bug in a repo with tests: [`docs/trying-kopicode.md`](docs/trying-kopicode.md) walks through
 two real ones. A one-line fix cost about $0.04.

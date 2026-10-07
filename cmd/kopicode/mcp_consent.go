@@ -43,6 +43,7 @@ type elicitResult struct {
 	Action  string `json:"action"` // accept, decline or cancel
 	Content struct {
 		Decision string `json:"decision"`
+		Note     string `json:"note"`
 	} `json:"content"`
 }
 
@@ -56,15 +57,20 @@ const elicitSchema = `{
       "title": "Decision",
       "description": "allow permits this one action; allow_session also permits the identical action again for this session; deny refuses it.",
       "enum": ["allow", "allow_session", "deny"]
+    },
+    "note": {
+      "type": "string",
+      "title": "Instead",
+      "description": "Optional. With deny: what the agent should do instead, e.g. use a virtual environment. It is shown to the agent."
     }
   },
   "required": ["decision"]
 }`
 
 // Ask satisfies engine.Consenter.
-func (c *elicitConsenter) Ask(ctx context.Context, req engine.ConsentRequest) (engine.ConsentAnswer, error) {
+func (c *elicitConsenter) Ask(ctx context.Context, req engine.ConsentRequest) (engine.ConsentReply, error) {
 	if err := ctx.Err(); err != nil {
-		return engine.ConsentDeny, err
+		return engine.Deny(""), err
 	}
 
 	id, waiter := c.srv.registerElicit()
@@ -97,26 +103,26 @@ func (c *elicitConsenter) Ask(ctx context.Context, req engine.ConsentRequest) (e
 	case <-timer:
 		slog.WarnContext(ctx, "mcp consent timed out", "session", c.session, "kind", req.Kind,
 			"tool", req.Tool, "timeout", c.timeout)
-		return engine.ConsentDeny, nil
+		return engine.Deny(""), nil
 	case <-ctx.Done():
-		return engine.ConsentDeny, ctx.Err()
+		return engine.Deny(""), ctx.Err()
 	}
 }
 
 // decodeElicitReply maps a reply onto an answer. Anything but an accepted
 // allow / allow_session — a decline, a cancel, an error, a missing result, an
 // unrecognised choice — is a refusal.
-func decodeElicitReply(r elicitReply) engine.ConsentAnswer {
+func decodeElicitReply(r elicitReply) engine.ConsentReply {
 	if r.Result == nil || r.Result.Action != "accept" {
-		return engine.ConsentDeny
+		return engine.Deny("")
 	}
 	switch r.Result.Content.Decision {
 	case "allow":
-		return engine.ConsentAllow
+		return engine.Reply(engine.ConsentAllow)
 	case "allow_session":
-		return engine.ConsentAllowSession
+		return engine.Reply(engine.ConsentAllowSession)
 	default:
-		return engine.ConsentDeny
+		return engine.Deny(r.Result.Content.Note)
 	}
 }
 

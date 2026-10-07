@@ -332,6 +332,12 @@ type Decision struct {
 	// Reason is optional, and is the answerer's reason rather than the
 	// policy's rule: "outside the task worktree", "user declined".
 	Reason string
+
+	// Note is what the answerer said to do instead, in their own words: "use
+	// uv and a venv". It is carried on a refusal only — a note on an approval
+	// is dropped by [AskPolicy], not forwarded — and it reaches the model in the
+	// denial it reads, so a "no" can redirect the work and not only stop it.
+	Note string
 }
 
 // Outcome is what [Gate.Check] returns.
