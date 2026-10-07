@@ -1,3 +1,7 @@
+
+
+https://github.com/user-attachments/assets/c85718fa-2d2d-4c0d-8151-833ca1d6fe24
+
 # kopicode
 
 A terminal coding agent, and a harness you can tune per model. kopicode is built to make
