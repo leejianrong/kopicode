@@ -36,14 +36,14 @@ func AskForTest(ctx context.Context, c Consenter, req ConsentRequest) (string, e
 		"run_shell":          permission.KindRunShell,
 		"write_outside_root": permission.KindWriteOutsideRoot,
 	}
-	v, err := asker{consent: c}.Ask(ctx, permission.Request{
+	r, err := asker{consent: c}.Ask(ctx, permission.Request{
 		Kind:     kinds[req.Kind],
 		Reason:   req.Reason,
 		Detail:   req.Detail,
 		Resolved: req.Resolved,
 		Action:   permission.Action{Tool: req.Tool},
 	})
-	return v.String(), err
+	return r.Verdict.String(), err
 }
 
 // ReplayHistoryForTest exposes resume.go's replayHistory to the external test

@@ -22,7 +22,7 @@ import (
 
 // ErrNoConsent is returned when the question could not be put to anybody: the
 // input ended, the turn was cancelled, or the terminal broke. The [Answer] is
-// [engine.ConsentDeny] in every such case.
+// a refusal in every such case.
 //
 // An unanswerable question is not a yes. That is the one rule this function
 // has, and it is why the error and the deny always travel together.
@@ -41,9 +41,9 @@ var ErrNoConsent = errors.New("repl: consent could not be obtained")
 // it is a signal that cancels the turn's context, and the check after the read
 // catches it. In neither case can an interrupted turn be the turn that gets
 // consent.
-func (l *Loop) Ask(ctx context.Context, c engine.ConsentRequest) (engine.ConsentAnswer, error) {
+func (l *Loop) Ask(ctx context.Context, c engine.ConsentRequest) (engine.ConsentReply, error) {
 	if err := ctx.Err(); err != nil {
-		return engine.ConsentDeny, fmt.Errorf("%w: %w", ErrNoConsent, err)
+		return engine.Deny(""), fmt.Errorf("%w: %w", ErrNoConsent, err)
 	}
 
 	l.Progress("")
@@ -52,12 +52,12 @@ func (l *Loop) Ask(ctx context.Context, c engine.ConsentRequest) (engine.Consent
 
 	answer, err := l.readAnswer(c)
 	if err != nil {
-		return engine.ConsentDeny, err
+		return engine.Deny(""), err
 	}
 	if cerr := ctx.Err(); cerr != nil {
 		// Answered, but the turn it belonged to is gone. Honouring it would
 		// run the command the user just interrupted.
-		return engine.ConsentDeny, fmt.Errorf("%w: %w", ErrNoConsent, cerr)
+		return engine.Deny(""), fmt.Errorf("%w: %w", ErrNoConsent, cerr)
 	}
 	return answer, nil
 }
@@ -93,7 +93,7 @@ func label(kind string) string {
 
 // consentPrompt states every option and which one Enter picks. The capital N
 // is the convention for "this is what you get for free", and free must be no.
-const consentPrompt = "allow? [y]es / [N]o / [a]lways for this exact request: "
+const consentPrompt = "allow? [y]es / [N]o / [a]lways for this exact request, or type what to do instead: "
 
 // readAnswer asks once and interprets the reply.
 //
@@ -101,7 +101,7 @@ const consentPrompt = "allow? [y]es / [N]o / [a]lways for this exact request: "
 // be a loop a piped session cannot leave, and re-prompting a human who typed
 // something else is how a considered "no" becomes an accidental "yes" three
 // keystrokes later.
-func (l *Loop) readAnswer(c engine.ConsentRequest) (engine.ConsentAnswer, error) {
+func (l *Loop) readAnswer(c engine.ConsentRequest) (engine.ConsentReply, error) {
 	l.ed.SetPrompt(consentPrompt)
 	defer l.ed.SetPrompt(l.prompt)
 
@@ -110,29 +110,46 @@ func (l *Loop) readAnswer(c engine.ConsentRequest) (engine.ConsentAnswer, error)
 	switch {
 	case errors.Is(err, lineedit.ErrInterrupted):
 		l.tag("perm", "denied: interrupted")
-		return engine.ConsentDeny, fmt.Errorf("%w: interrupted", ErrNoConsent)
+		return engine.Deny(""), fmt.Errorf("%w: interrupted", ErrNoConsent)
 	case errors.Is(err, io.EOF):
 		l.tag("perm", "denied: no input to ask")
-		return engine.ConsentDeny, fmt.Errorf("%w: %w", ErrNoConsent, io.EOF)
+		return engine.Deny(""), fmt.Errorf("%w: %w", ErrNoConsent, io.EOF)
 	case err != nil:
 		l.tag("perm", "denied: "+err.Error())
-		return engine.ConsentDeny, fmt.Errorf("%w: %w", ErrNoConsent, err)
+		return engine.Deny(""), fmt.Errorf("%w: %w", ErrNoConsent, err)
 	}
 
 	answer := interpret(reply)
-	l.tag("perm", fmt.Sprintf("%s: %s", orUnknown(c.Tool), answer))
+	if answer.Note != "" {
+		l.tag("perm", fmt.Sprintf("%s: %s, suggestion sent: %s", orUnknown(c.Tool), answer.Answer, answer.Note))
+	} else {
+		l.tag("perm", fmt.Sprintf("%s: %s", orUnknown(c.Tool), answer.Answer))
+	}
 	return answer, nil
 }
 
-// interpret maps a typed reply onto an answer. Anything that is not an
-// affirmative is a refusal, including an empty line and including a typo.
-func interpret(reply string) engine.ConsentAnswer {
-	switch strings.ToLower(strings.TrimSpace(reply)) {
+// interpret maps a typed reply onto an answer.
+//
+// Only an exact y/yes or a/always approves. An empty line and n/no refuse
+// with nothing to say. Any other text is a refusal that carries the text as a
+// suggestion to the model — "use uv and a venv" — so a sentence the user typed
+// is never read as an approval, however it starts: "yes, but use uv" is a
+// suggestion, not a yes. A leading "n"/"no" is dropped from the note so
+// "no, use uv" and "use uv" say the same thing.
+func interpret(reply string) engine.ConsentReply {
+	text := strings.TrimSpace(reply)
+	switch strings.ToLower(text) {
 	case "y", "yes":
-		return engine.ConsentAllow
+		return engine.Reply(engine.ConsentAllow)
 	case "a", "always":
-		return engine.ConsentAllowSession
-	default:
-		return engine.ConsentDeny
+		return engine.Reply(engine.ConsentAllowSession)
+	case "", "n", "no":
+		return engine.Deny("")
 	}
+	lead, rest, _ := strings.Cut(text, " ")
+	switch strings.ToLower(strings.TrimRight(lead, ",:;.")) {
+	case "n", "no":
+		return engine.Deny(strings.Trim(rest, ",:;. "))
+	}
+	return engine.Deny(text)
 }

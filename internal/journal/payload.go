@@ -474,6 +474,11 @@ type PermissionDecided struct {
 	// indistinguishable from either.
 	Source string `json:"source"`
 	Reason string `json:"reason,omitempty"`
+	// Note is what the answerer said to do instead, on a deny: "use uv and a
+	// venv". It is the same text the model was shown, so a replayed session
+	// reads what the live one did. Absent on every other decision, and on a bare
+	// "no".
+	Note string `json:"note,omitempty"`
 }
 
 func (PermissionDecided) Type() Type { return TypePermissionDecided }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // Policy answers the requests classification decided must be asked.
@@ -33,7 +34,16 @@ type Policy interface {
 // package can be linked into a headless binary without dragging a terminal in
 // with it.
 type Asker interface {
-	Ask(ctx context.Context, req Request) (Verdict, error)
+	Ask(ctx context.Context, req Request) (Reply, error)
+}
+
+// Reply is an [Asker]'s answer: a verdict, and for a refusal what the answerer
+// would rather happen. The zero Reply is [VerdictUnspecified], which the gate
+// denies.
+type Reply struct {
+	Verdict Verdict
+	// Note is free text from the answerer, meaningful only with [VerdictDeny].
+	Note string
 }
 
 // AskPolicy forwards every request to an [Asker] and attributes the answer to
@@ -87,11 +97,17 @@ func NewAsk(asker Asker, source Source) (*AskPolicy, error) {
 // question as a yes is the failure mode this whole package exists to make
 // impossible.
 func (p *AskPolicy) Decide(ctx context.Context, req Request) (Decision, error) {
-	v, err := p.asker.Ask(ctx, req)
+	r, err := p.asker.Ask(ctx, req)
 	if err != nil {
 		return Decision{}, fmt.Errorf("asking about %s: %w", req.Kind, err)
 	}
-	return Decision{Verdict: v, Source: p.source}, nil
+	d := Decision{Verdict: r.Verdict, Source: p.source}
+	if r.Verdict == VerdictDeny {
+		// A note rides a refusal only. On an approval there is nothing for the
+		// model to be told it did not already get by the command running.
+		d.Note = strings.TrimSpace(r.Note)
+	}
+	return d, nil
 }
 
 // BenchPolicy is the non-interactive policy the bench runner supplies. It

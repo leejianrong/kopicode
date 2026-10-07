@@ -21,6 +21,7 @@ const serveProtocol = 1
 var features = []string{
 	"allow_commands",
 	"ask.request",
+	"consent.note",
 	"consent_mode.auto",
 	"consent_mode.remote_interactive",
 	"consent_mode.unattended_policy",

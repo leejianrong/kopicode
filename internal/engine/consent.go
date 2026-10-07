@@ -72,6 +72,25 @@ func (a ConsentAnswer) String() string {
 	}
 }
 
+// ConsentReply is what a [Consenter] returns: the answer, and for a refusal
+// what the user would rather happen.
+//
+// Note is free text, not interpreted by the engine. It is journaled on the
+// resulting PermissionDecided and put in front of the model in the denial it
+// reads, which is the point: a bare "no" stops the work, and "no, use uv and a
+// venv" redirects it. It means something only with [ConsentDeny]; the other
+// answers drop it.
+type ConsentReply struct {
+	Answer ConsentAnswer
+	Note   string
+}
+
+// Deny is the refusal reply, with an optional note.
+func Deny(note string) ConsentReply { return ConsentReply{Answer: ConsentDeny, Note: note} }
+
+// Reply wraps a bare answer, for a surface with nothing to add.
+func Reply(a ConsentAnswer) ConsentReply { return ConsentReply{Answer: a} }
+
 // Consenter answers a consent request.
 //
 // ctx is first because an interactive implementation blocks on a human, and a
@@ -79,7 +98,7 @@ func (a ConsentAnswer) String() string {
 // it. An implementation that cannot decide returns an error, which becomes a
 // refusal — treating an unanswerable question as a yes is the failure the whole
 // permission package exists to make impossible.
-type Consenter func(ctx context.Context, req ConsentRequest) (ConsentAnswer, error)
+type Consenter func(ctx context.Context, req ConsentRequest) (ConsentReply, error)
 
 // asker adapts a [Consenter] to internal/permission's own interface.
 type asker struct{ consent Consenter }
@@ -91,13 +110,14 @@ type asker struct{ consent Consenter }
 // would otherwise get whichever behaviour the zero value happened to imply, and
 // the one that runs model-authored shell unasked must never be reachable by
 // forgetting a field.
-func (a asker) Ask(ctx context.Context, req permission.Request) (permission.Verdict, error) {
+func (a asker) Ask(ctx context.Context, req permission.Request) (permission.Reply, error) {
+	deny := permission.Reply{Verdict: permission.VerdictDeny}
 	if a.consent == nil {
-		return permission.VerdictDeny, fmt.Errorf(
+		return deny, fmt.Errorf(
 			"engine: no Consenter was supplied, so %s cannot be approved by anyone", req.Kind)
 	}
 
-	answer, err := a.consent(ctx, ConsentRequest{
+	reply, err := a.consent(ctx, ConsentRequest{
 		Kind:     req.Kind.String(),
 		Tool:     req.Action.Tool,
 		Detail:   req.Detail,
@@ -106,19 +126,19 @@ func (a asker) Ask(ctx context.Context, req permission.Request) (permission.Verd
 		Argv:     slices.Clone(req.Action.Command),
 	})
 	if err != nil {
-		return permission.VerdictDeny, err
+		return deny, err
 	}
 
-	switch answer {
+	switch reply.Answer {
 	case ConsentAllow:
-		return permission.VerdictAllow, nil
+		return permission.Reply{Verdict: permission.VerdictAllow}, nil
 	case ConsentAllowSession:
-		return permission.VerdictAllowSession, nil
+		return permission.Reply{Verdict: permission.VerdictAllowSession}, nil
 	case ConsentDeny:
-		return permission.VerdictDeny, nil
+		return permission.Reply{Verdict: permission.VerdictDeny, Note: reply.Note}, nil
 	default:
 		// An answer nobody declared is not an approval.
-		return permission.VerdictDeny, fmt.Errorf(
-			"engine: surface returned %s, which is not an answer", answer)
+		return deny, fmt.Errorf(
+			"engine: surface returned %s, which is not an answer", reply.Answer)
 	}
 }

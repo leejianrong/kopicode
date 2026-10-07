@@ -183,7 +183,7 @@ prints:
 `version` is a git describe for humans and must not be parsed; `tree_state` is the machine-readable
 dirty bit. `protocol` moves only for a change that breaks an existing client. `features` is a sorted
 list of stable lower-case dotted names, added in the change that ships a capability, never renamed,
-and removed only with a protocol bump. Current names: `allow_commands`, `ask.request`, `consent_mode.auto`,
+and removed only with a protocol bump. Current names: `allow_commands`, `ask.request`, `consent.note`, `consent_mode.auto`,
 `consent_mode.remote_interactive`, `consent_mode.unattended_policy`, `consent_request.command`,
 `consent_timeout.flag`, `consent_timeout.session`, `mcp`, `server.hello`, `session.close`,
 `session.read_only`.
@@ -242,6 +242,16 @@ the join says nothing about where the line's own spaces were. A client that matc
 should strip that exact prefix once and treat the rest as untrusted model output, and deny a
 `detail` that does not start with it. (Found by a live consent client whose policy matched
 the bare line and so denied every real command.)
+
+A reply may also carry `result.note` (feature `consent.note`): free text saying what to do
+instead, meaningful only with `"deny"`. The model reads it in the denial ("permission denied: …; the user
+suggests instead: use a venv and uv"), and the journal records it as `PermissionDecided.note`. It is
+ignored with `"allow"` and `"allow_session"`, and absent means a bare refusal. It is relayed text from
+whoever answers: treat it as untrusted wherever you display it, as `detail` is.
+
+```json
+<-- { "jsonrpc": "2.0", "id": "c-1", "result": { "answer": "deny", "note": "use uv and a venv" } }
+```
 
 `result.answer` is one of `"allow"`, `"allow_session"`, `"deny"` —
 `engine.ConsentAnswer`'s three values spelled out as text, the same way this protocol

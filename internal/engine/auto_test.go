@@ -35,8 +35,8 @@ func TestAutoConsentRefusesAnswerersThatWouldCompete(t *testing.T) {
 	}
 	for name, mutate := range map[string]func(*engine.Options){
 		"Consent": func(o *engine.Options) {
-			o.Consent = func(context.Context, engine.ConsentRequest) (engine.ConsentAnswer, error) {
-				return engine.ConsentAllow, nil
+			o.Consent = func(context.Context, engine.ConsentRequest) (engine.ConsentReply, error) {
+				return engine.Reply(engine.ConsentAllow), nil
 			}
 		},
 		"Policy": func(o *engine.Options) {

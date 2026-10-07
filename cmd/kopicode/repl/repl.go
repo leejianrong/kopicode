@@ -103,7 +103,7 @@ type Surface interface {
 	// Ask puts a consent request to the user and returns the answer. It
 	// denies on anything that is not an affirmative, including a closed
 	// input and a cancelled turn.
-	Ask(ctx context.Context, req engine.ConsentRequest) (engine.ConsentAnswer, error)
+	Ask(ctx context.Context, req engine.ConsentRequest) (engine.ConsentReply, error)
 }
 
 // TurnFunc runs one exchange: the user's prompt in, an [engine.Result] out.

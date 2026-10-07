@@ -153,6 +153,7 @@ func fixtures() map[journal.Type]journal.Payload {
 			Decision:  "allow_session",
 			Source:    "user",
 			Reason:    "approved at the prompt",
+			Note:      "use uv and a venv",
 		},
 		journal.TypeTurnSnapshot: journal.TurnSnapshot{
 			Ref:    "refs/kopicode/01JQ0/3",

@@ -82,6 +82,10 @@ type consentResult struct {
 	// malformed one) is told apart from an empty answer, which is a person who
 	// read the question and had nothing to add (ADR-0009).
 	Text *string `json:"text"`
+	// Note is what to do instead, on a refusal: "use uv and a venv". It is
+	// shown to the model in the denial it reads and journaled on the decision.
+	// Ignored with any approval. Optional; absent is a bare refusal.
+	Note string `json:"note,omitempty"`
 }
 
 // consentReply is what handleLine hands a waiting remoteConsenter once a
@@ -153,9 +157,9 @@ func newRemoteConsenter(srv *server, session string, timeout time.Duration) *rem
 // own context ending — mirroring cmd/kopicode/repl/consent.go's loop.Ask,
 // which returns a clean ConsentDeny for an unrecognised human answer and an
 // error only for cancellation or a broken input stream.
-func (r *remoteConsenter) Ask(ctx context.Context, req engine.ConsentRequest) (engine.ConsentAnswer, error) {
+func (r *remoteConsenter) Ask(ctx context.Context, req engine.ConsentRequest) (engine.ConsentReply, error) {
 	if err := ctx.Err(); err != nil {
-		return engine.ConsentDeny, err
+		return engine.Deny(""), err
 	}
 
 	id, waiter := r.srv.registerConsentWaiter()
@@ -186,9 +190,9 @@ func (r *remoteConsenter) Ask(ctx context.Context, req engine.ConsentRequest) (e
 	case <-timer:
 		slog.WarnContext(ctx, "remote consent timed out", "session", r.session, "kind", req.Kind,
 			"tool", req.Tool, "timeout", r.timeout)
-		return engine.ConsentDeny, nil
+		return engine.Deny(""), nil
 	case <-ctx.Done():
-		return engine.ConsentDeny, ctx.Err()
+		return engine.Deny(""), ctx.Err()
 	}
 }
 
@@ -197,17 +201,19 @@ func (r *remoteConsenter) Ask(ctx context.Context, req engine.ConsentRequest) (e
 // same "anything not affirmative is a refusal" rule
 // cmd/kopicode/repl/consent.go's interpret holds human input to, applied here
 // to a remote peer's reply instead of a typed line.
-func decodeConsentReply(reply consentReply) engine.ConsentAnswer {
+func decodeConsentReply(reply consentReply) engine.ConsentReply {
 	if reply.Result == nil {
-		return engine.ConsentDeny
+		return engine.Deny("")
 	}
 	switch reply.Result.Answer {
 	case "allow":
-		return engine.ConsentAllow
+		return engine.Reply(engine.ConsentAllow)
 	case "allow_session":
-		return engine.ConsentAllowSession
+		return engine.Reply(engine.ConsentAllowSession)
 	default:
-		return engine.ConsentDeny
+		// The note rides a refusal only, and any answer this binary does not
+		// recognise is one. A note beside an approval is ignored.
+		return engine.Deny(reply.Result.Note)
 	}
 }
 
