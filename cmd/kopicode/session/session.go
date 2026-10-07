@@ -79,6 +79,11 @@ type StartParams struct {
 	Harness       string
 	HarnessConfig string
 
+	// MaxTurns and TokenBudget override the harness limits for this session
+	// (ADR-0022). Zero MaxTurns / nil TokenBudget mean not given.
+	MaxTurns    int
+	TokenBudget *int
+
 	// ConsentMode is required — one of the Consent* constants.
 	ConsentMode string
 
@@ -217,6 +222,8 @@ func (m *Manager) Start(p StartParams, events engine.Observer, turn Turn) *Error
 		Model:         p.Model,
 		Harness:       p.Harness,
 		HarnessConfig: p.HarnessConfig,
+		MaxTurns:      p.MaxTurns,
+		TokenBudget:   p.TokenBudget,
 	})
 	if err != nil {
 		kind := KindOpenFailed

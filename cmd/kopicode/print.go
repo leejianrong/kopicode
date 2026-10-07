@@ -127,6 +127,7 @@ func runPrint(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("kopicode run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	overrides := engine.BindSelectionFlags(fs)
+	engine.BindLimitFlags(fs, overrides)
 	asJSON := fs.Bool("print", false, "emit the session record as JSON on stdout")
 	debug := fs.Bool("debug", false, "engine diagnostics on stderr")
 	// --resume makes sense here for the reason it does on the REPL: a script

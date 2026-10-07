@@ -88,8 +88,8 @@ source of truth if the two ever disagree):
 | `completed` | 0 | the model replied in prose, asking for no tool |
 | `cancelled` | 1 | the run's context was cancelled (Ctrl-C, a caller's timeout) |
 | `verification_failed` | 1 | the model declared the task done over a tree the project's own verification command rejects |
-| `budget_exhausted` | 1 | the token budget ran out |
-| `max_turns` | 4 | the turn cap was reached |
+| `budget_exhausted` | 1 | the session's token budget ran out (`--token-budget`; 0 is unbounded) |
+| `max_turns` | 4 | the turn cap was reached (`--max-turns`; default 20 here, 100 in the REPL) |
 | `error` | 3 | a provider call that produced no usable reply, after the client's own retries |
 | `error` | 4 | kopicode itself broke: a journal write refused, a dispatcher/catalogue mismatch, a tool result that could not be placed in the conversation |
 

@@ -144,6 +144,8 @@ its first turn.
 | `containment_provided` | boolean | iff `consent_mode` is `"unattended_policy"` | the caller's explicit acknowledgment that it supplies real process/container containment for this session (ADR-0011 decision 4). Required and must be `true` for that mode; ignored for the other two |
 | `consent_timeout` | string | no | how long this session's `consent.request` waits for an answer before it is denied, as a Go duration (`"5m"`), within `1s` to `24h`; overrides `--consent-timeout` for this session only. Only meaningful under `"remote_interactive"` — sending it under any other mode is a usage error |
 | `ask_mode` | string | no | `"remote"` (ADR-0020) puts the model's `ask` tool to the client live as an [`ask.request`](#askrequest-server--client-adr-0020) instead of the process `--ask-policy-file` or the fixed "no human is present" refusal. Needs `consent_mode: "remote_interactive"`; any other mode, or any other value, is a usage error. Omit it for today's behaviour |
+| `max_turns` | integer | no | turns one prompt may take before the session stops with `max_turns` (ADR-0022). Positive; omit for the harness default of 20. The count restarts at every prompt (`session.submit`). Moves the session's `harness_config_hash` |
+| `token_budget` | integer | no | tokens (prompt + completion) the **whole session** may spend before it stops with `budget_exhausted`; `0` is unbounded, omit for the default of 2,000,000. Never resets, so a long-lived session must raise it or restart. Moves the hash |
 | `read_only` | boolean | no | refuse every file write for this session (ADR-0019): `write_file` and `edit_file` are denied by the gate itself, inside the root or outside it, in every mode, and the client is never asked. Shell is **not** made read-only — it stays governed by `consent_mode` — so this is not a sandbox. A usage error under `"auto"`, which runs shell unasked |
 | `never_allow` | array of strings | no | extra never-allow entries for `consent_mode: "auto"` (ADR-0017), each `"command [token ...]"`; see [`"auto"`](#auto-adr-0017). Adds to the built-in list, never removes from it. Sending it under any other mode is a usage error |
 
@@ -224,7 +226,7 @@ list of stable lower-case dotted names, added in the change that ships a capabil
 and removed only with a protocol bump. Current names: `allow_commands`, `ask.request`, `consent.note`, `consent_mode.auto`,
 `consent_mode.remote_interactive`, `consent_mode.unattended_policy`, `consent_request.command`,
 `consent_timeout.flag`, `consent_timeout.session`, `mcp`, `server.hello`, `session.close`,
-`session.read_only`, `session.usage`, `usage.context`, `usage.context_window`, `usage.cost`,
+`session.limits`, `session.read_only`, `session.usage`, `usage.context`, `usage.context_window`, `usage.cost`,
 `usage.tokens_split`.
 `cmd/kopicode/capabilities_test.go` ties the list to the consent modes and methods in the code.
 
@@ -340,8 +342,8 @@ here is derived from journal events the engine already appended.
 | `completed` | 0 | the model replied in prose, asking for no tool |
 | `cancelled` | 1 | the turn's context was cancelled (`session.cancel`, shutdown) |
 | `verification_failed` | 1 | the model stopped over a tree its verification command rejects |
-| `budget_exhausted` | 1 | the token budget ran out |
-| `max_turns` | 4 | the turn cap was hit |
+| `budget_exhausted` | 1 | the session's cumulative token budget ran out; every later prompt stops the same way, so start a new session (resume it, or pass a larger `token_budget`) |
+| `max_turns` | 4 | the turn cap was hit; the session is intact, so send another prompt to continue (the count restarts) |
 | `error` | 3 | a provider error that survived the client's retries |
 | `error` | 4 | a harness error |
 

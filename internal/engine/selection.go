@@ -53,6 +53,10 @@ type SelectionOverrides = harness.Overrides
 // other binary.
 func BindSelectionFlags(fs *flag.FlagSet) *SelectionOverrides { return harness.Bind(fs) }
 
+// BindLimitFlags registers --max-turns and --token-budget on fs, filling o
+// (ADR-0022). kopibench does not call it: its arms are fixed.
+func BindLimitFlags(fs *flag.FlagSet, o *SelectionOverrides) { harness.BindLimits(fs, o) }
+
 // ResolveSelection resolves the arm for a session started in dir.
 //
 // Precedence is the flag, then `model = "..."` in dir's `.kopicode/config.toml`

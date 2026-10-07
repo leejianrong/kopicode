@@ -45,7 +45,7 @@ event. Diagnostics go to stderr only. Protocol revisions `2025-06-18`, `2025-03-
 
 `kopicode_start` arguments: `dir` and `prompt` and **`consent_mode`** (all required);
 `containment_provided` (required, and true, for `unattended_policy`); `never_allow` (`auto`
-only); `session` (generated as `mcp-<hex>` if omitted); `model`, `harness`, `harness_config`.
+only); `session` (generated as `mcp-<hex>` if omitted); `model`, `harness`, `harness_config`, `max_turns`, `token_budget` (ADR-0022).
 `consent_mode` is never defaulted — see [Consent](#consent). A misspelt argument is refused, not
 ignored.
 
