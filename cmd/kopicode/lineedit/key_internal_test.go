@@ -87,6 +87,7 @@ var keySamples = map[key]string{
 	keyEnd:           "\x05",
 	keyKillToEnd:     "\x0b",
 	keyKillToStart:   "\x15",
+	keyTab:           "\t",
 	keyIgnored:       "\x1b[15~", // F5: recognised, consumed whole, dropped
 }
 

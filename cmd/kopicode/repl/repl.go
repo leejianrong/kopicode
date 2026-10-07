@@ -159,6 +159,10 @@ type Config struct {
 	// there is nothing to switch.
 	Mode ModeControl
 
+	// Skills finds the session's skills for /skills, /<skill> and Tab (ADR-0025).
+	// Optional; nil leaves all three out.
+	Skills SkillsFunc
+
 	// Usage reports the session's usage for /context. Optional; nil makes
 	// /context say there is nothing to report.
 	Usage UsageFunc
@@ -190,6 +194,7 @@ type Loop struct {
 	maxTurns int
 	usage    UsageFunc
 	mode     ModeControl
+	skills   SkillsFunc
 
 	// promptEndsLine records whether the line editor finishes the line
 	// itself. Its raw-mode path always does and its plain path never does;
@@ -229,14 +234,8 @@ func New(cfg Config) (*Loop, error) {
 		prompt = defaultPrompt
 	}
 
-	return &Loop{
-		out: newOut(w, cfg.Interactive),
-		ed: lineedit.New(lineedit.Config{
-			In:       in,
-			Out:      w,
-			Terminal: term,
-			Prompt:   prompt,
-		}),
+	l := &Loop{
+		out:            newOut(w, cfg.Interactive),
 		prompt:         prompt,
 		turn:           cfg.Turn,
 		closeFn:        cfg.Close,
@@ -244,8 +243,17 @@ func New(cfg Config) (*Loop, error) {
 		maxTurns:       cfg.MaxTurns,
 		usage:          cfg.Usage,
 		mode:           cfg.Mode,
+		skills:         cfg.Skills,
 		promptEndsLine: term.IsInteractive(),
-	}, nil
+	}
+	l.ed = lineedit.New(lineedit.Config{
+		In:       in,
+		Out:      w,
+		Terminal: term,
+		Prompt:   prompt,
+		Complete: l.complete,
+	})
+	return l, nil
 }
 
 // defaultPrompt is deliberately plain. lineedit measures the prompt in runes
@@ -325,9 +333,20 @@ func (l *Loop) loop(ctx context.Context) (engine.Stop, error) {
 		case commandMode:
 			l.switchMode(arg)
 			continue
+		case commandSkills:
+			l.showSkills()
+			continue
 		}
 
-		res, err := l.runTurn(ctx, line)
+		prompt, _, serr := l.expandSkill(line)
+		if serr != nil {
+			l.Fail(serr.Error())
+			continue
+		}
+		if prompt == "" {
+			prompt = line
+		}
+		res, err := l.runTurn(ctx, prompt)
 		if err != nil && res.Stop == engine.StopHarnessError {
 			l.Fail(err.Error())
 			return engine.StopHarnessError, err
@@ -449,6 +468,7 @@ const (
 	commandExit
 	commandContext
 	commandMode
+	commandSkills
 )
 
 func command(line string) (lineCommand, string) {
@@ -464,6 +484,10 @@ func command(line string) (lineCommand, string) {
 	case "/context":
 		if len(fields) == 1 {
 			return commandContext, ""
+		}
+	case "/skills":
+		if len(fields) == 1 {
+			return commandSkills, ""
 		}
 	case "/mode":
 		return commandMode, strings.Join(fields[1:], " ")

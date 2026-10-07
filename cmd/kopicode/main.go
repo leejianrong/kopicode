@@ -450,6 +450,9 @@ func openAndDriveSession(std streams, opts engine.Options, open func(context.Con
 		},
 		Close: func(ctx context.Context) error { return sess.Close(ctx) },
 		Usage: func() engine.Usage { return sess.Usage() },
+		Skills: func() ([]engine.Skill, []string) {
+			return engine.DiscoverSkills(opts.Dir, opts.Selection.Settings.SkillsPaths)
+		},
 		Mode: repl.ModeControl{
 			Auto: func() bool { return sess.Auto() },
 			Set:  func(auto bool) bool { return sess.SetAuto(auto) },
@@ -467,6 +470,8 @@ func openAndDriveSession(std streams, opts engine.Options, open func(context.Con
 	// ConsentInteractive: a decision a person made is still stamped user, and
 	// one auto made is stamped auto.
 	opts.Switchable = true
+	// Told to a new session once, so it need not list_dir to find them (ADR-0025).
+	opts.Skills, _ = engine.DiscoverSkills(opts.Dir, opts.Selection.Settings.SkillsPaths)
 	// opts.ConsentMode is left at its zero value, engine.ConsentInteractive: a
 	// human is answering through loop.Ask, so every PermissionDecided this
 	// session journals is stamped permission.SourceUser (KAN-885).

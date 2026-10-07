@@ -677,6 +677,10 @@ func (SessionForked) Type() Type { return TypeSessionForked }
 // user-level AGENTS.md rather than the repository's.
 const InstructionsScopeUser = "user"
 
+// InstructionsScopeSkills marks one that is the catalogue of skills the model
+// can read (ADR-0025), already framed, with no file behind it.
+const InstructionsScopeSkills = "skills"
+
 // ProjectInstructionsLoaded records that a genuinely new session's bootstrap
 // found the repository's own AGENTS.md and fed it into the conversation
 // (KAN-1024, KAN-1025).
