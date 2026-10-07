@@ -216,6 +216,11 @@ type autoScan struct {
 
 	allow   []allowEntry
 	enforce bool
+
+	// venv is set once the line has sourced a virtualenv's activate script, so a
+	// later bare pip is installing into it (ADR-0023). Each run_shell is a fresh
+	// shell, so this cannot carry across requests.
+	venv bool
 }
 
 func (s *autoScan) tick() string {
@@ -389,6 +394,10 @@ func (s *autoScan) rules(words []shWord, depth int, viaWrapper bool) string {
 		}
 	}
 
+	if r := s.blunders(name, words[0], args); r != "" {
+		return r
+	}
+
 	switch name {
 	case "rm":
 		return s.rm(args)
@@ -409,6 +418,9 @@ func (s *autoScan) rules(words []shWord, depth int, viaWrapper bool) string {
 		}
 		return s.line(strings.Join(parts, " "), depth+1)
 	case "source", ".":
+		if len(args) > 0 && !args[0].dynamic && path.Base(args[0].text) == "activate" {
+			s.venv = true
+		}
 		return downloadInSubstitution(args)
 	}
 

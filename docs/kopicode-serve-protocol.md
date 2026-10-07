@@ -497,7 +497,15 @@ every command in it is checked, including inside `;`, `&&`, `||`, `|`, newlines,
 | `rm` | any target outside `dir` (after `cd`, `..`, symlinks and `~`); a recursive `rm` of `dir` itself; a recursive `rm` whose target is computed at run time; `--no-preserve-root` |
 | forced push | `git push` with `--force`, `-f` (also inside a flag cluster such as `-fu`), `--force-with-lease`, `--force-if-includes`, `--mirror`, a `+refspec`, or an argument computed at run time |
 | download into a shell | `curl`/`wget`/`fetch`/`aria2c` piped to `sh`, `bash`, `zsh`, `dash`, … ; `sh <(curl …)`; `bash -c "$(curl …)"`; `eval`/`source` of a download |
+| global or destructive installs and git (ADR-0023) | `pip`/`pip3`/`python -m pip install` outside a virtualenv (a `…/bin/pip` or `…/bin/python` path, or an `activate` sourced earlier in the same line, counts as inside one) and `pip install --user` anywhere; `npm`/`pnpm`/`yarn`/`bun` with `-g`/`--global`/`global`; `git reset --hard`; `git clean -f`; `git checkout .`, `git checkout -- .`, `git restore .`; `git commit --no-verify` (or `-n`) and `git push --no-verify` |
+| permissions | `chmod -R 777`/`a+rwx`; a recursive `chmod`, `chown` or `chgrp` whose target is outside `dir` or computed at run time |
 | redirection outside `dir` | `>`, `>>`, `&>`, `2>` and friends to a path outside `dir`, or computed at run time (`/dev/null`, `/dev/stdout`, `/dev/stderr` are allowed) |
+
+**Every refusal from ADR-0023 names what to do instead** (`uv add <pkg>`, a project venv, `git stash`,
+fix what the hook reports), because a model that is only told no tends to retry in a neighbouring
+spelling. **This list grew in v0.4: a cuttlefish session that relied on `consent_mode: "auto"` and, for
+example, ran a bare `pip install` or `git commit --no-verify` is now refused.** The refusal is
+the ordinary auto denial, so nothing on the wire changes.
 
 **It fails closed.** A command line the tokenizer cannot account for is denied, not
 guessed at: an unterminated quote or substitution, a heredoc or here-string, a command

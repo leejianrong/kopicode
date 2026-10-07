@@ -55,7 +55,7 @@ directory or a command prefix); Enter or `n` denies. Anything else you type also
 the text goes to the model as a suggestion: `use uv and a venv` (or `no, use uv`) refuses the call and
 tells the agent what you want instead. A sentence that starts with "yes" is still a suggestion, never a yes. `Ctrl-C` cancels the
 turn in flight without ending the session; `/context` shows how much of the model's window the session is using, what it has spent and the
-provider-reported cost; `/exit` (or `/quit`) ends it. Your first task is best a small, well-described
+provider-reported cost; `/mode auto` (or `kopicode --mode auto`) stops the prompts for shell inside the project, keeping a fixed never-allow list, and `/mode default` brings them back; `/exit` (or `/quit`) ends it. Your first task is best a small, well-described
 bug in a repo with tests: [`docs/trying-kopicode.md`](docs/trying-kopicode.md) walks through
 two real ones. A one-line fix cost about $0.04.
 
@@ -111,7 +111,7 @@ commands and writes outside the project:
 
 | `consent_mode` | Who answers | Use it for |
 | --- | --- | --- |
-| `auto` | the harness: shell inside the project runs; a fixed never-allow list (`sudo`, `rm` outside the project, forced `git push`, a download piped into a shell, writes outside) is refused | your own repo, on your own machine |
+| `auto` | the harness: shell inside the project runs; a fixed never-allow list (`sudo`, `rm` outside the project, forced `git push`, a download piped into a shell, writes outside, a global `pip`/`npm` install, `git reset --hard`, `--no-verify`) is refused | your own repo, on your own machine |
 | `remote_interactive` | the calling agent, per action, live | open-ended work with a supervisor |
 | `unattended_policy` | a declared allowlist (`--policy-file`) | a fixed, known set of commands |
 

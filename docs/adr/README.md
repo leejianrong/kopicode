@@ -1,7 +1,7 @@
 # Decisions of record
 
 Each ADR records a decision and why. If a document contradicts an ADR, the ADR wins.
-Twenty-two exist. Two reverse earlier plans that still appear in older project notes, and
+Twenty-three exist. Two reverse earlier plans that still appear in older project notes, and
 five are amendments layered on top of earlier ones (one of which amends two prior ADRs at
 once). Read the relevant one before proposing a change to what it settles.
 
@@ -29,6 +29,7 @@ once). Read the relevant one before proposing a change to what it settles.
 | [0020](0020-live-ask-over-serve.md) *(Accepted)* | **Live `ask` over serve.** An opt-in `ask.request` server-to-client request beside `consent.request`; expiry is "nobody could answer", not a denial; journalled as source `remote`. Answers #173. |
 | [0021](0021-usage-reporting.md) *(Accepted)* | **Usage reporting.** Context in use (the latest prompt) and tokens spent (the sum) are different numbers and both are reported; an unknown cost or window is absent, never estimated. `usage` on `provider_response`, on every turn result and in a new `session.usage`; `/context` in the REPL. Answers #189. |
 | [0022](0022-turn-and-budget-limits.md) *(Accepted)* | **Turn and budget limits.** The corpus keeps 20 turns; the REPL defaults to 100. `--max-turns`, `--token-budget` and `session.start` `max_turns`/`token_budget` override per session and move the hash. The token budget stays cumulative per session. |
+| [0023](0023-repl-auto-mode.md) *(Accepted)* | **Auto mode in the REPL.** Amends 0017: `--mode auto` and `/mode` switch a REPL session between asking and auto mid-session (`permission.Switch`); the never-allow list gains global installs, destructive git, `--no-verify` and recursive permission changes, each refusal saying what to do instead. Default and auto only. |
 
 Satay's natural consumer in this suite is **cuttlefish** (unattended, triggered,
 credential-holding, not started), not kopicode. Do not reintroduce it here.
