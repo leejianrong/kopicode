@@ -57,6 +57,10 @@ func BindSelectionFlags(fs *flag.FlagSet) *SelectionOverrides { return harness.B
 // (ADR-0022). kopibench does not call it: its arms are fixed.
 func BindLimitFlags(fs *flag.FlagSet, o *SelectionOverrides) { harness.BindLimits(fs, o) }
 
+// UserConfigDir is the directory of the user's own kopicode files (ADR-0024),
+// or "" when there is no home to look in.
+func UserConfigDir() string { return harness.UserConfigDir() }
+
 // UserAgentsPath is the user-level AGENTS.md (ADR-0024), or "" when there is
 // none. A front end passes it as Options.UserInstructions.
 func UserAgentsPath() string { return harness.UserAgentsPath() }

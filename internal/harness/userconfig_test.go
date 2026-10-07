@@ -159,3 +159,39 @@ func TestAnUnknownUserModelNamesTheUserFile(t *testing.T) {
 		t.Errorf("err = %v, want the user file named", err)
 	}
 }
+
+func TestATypoedKeyIsRefusedNotIgnored(t *testing.T) {
+	userHome(t, "defaul_mode = \"auto\"\n")
+	_, err := harness.Resolve(repoWith(t, ""), harness.Overrides{UserConfig: true})
+	if err == nil || !strings.Contains(err.Error(), `did you mean "default_mode"`) {
+		t.Errorf("err = %v, want a did-you-mean", err)
+	}
+	// A neighbour's key that is nothing like ours is still skipped.
+	userHome(t, "colour = \"red\"\neditor_theme = \"dark\"\n")
+	if _, err := harness.Resolve(repoWith(t, ""), harness.Overrides{UserConfig: true}); err != nil {
+		t.Errorf("an unrelated key must be ignored: %v", err)
+	}
+}
+
+func TestAnEmptyNeverAllowEntryNamesTheLine(t *testing.T) {
+	home := userHome(t, "model = \"qwen/qwen3-coder-next\"\nauto_never_allow = [\"\"]\n")
+	_, err := harness.Resolve(repoWith(t, ""), harness.Overrides{UserConfig: true})
+	if err == nil || !strings.Contains(err.Error(), filepath.Join(home, "config.toml")+":2") {
+		t.Errorf("err = %v, want file:2", err)
+	}
+}
+
+func TestAByteOrderMarkIsNotPartOfTheFirstKey(t *testing.T) {
+	userHome(t, "\xef\xbb\xbfmodel = \"minimax/minimax-m2\"\n")
+	sel, err := harness.Resolve(repoWith(t, ""), harness.Overrides{UserConfig: true})
+	if err != nil || sel.ModelID != "minimax/minimax-m2" {
+		t.Errorf("model = %q, err = %v", sel.ModelID, err)
+	}
+}
+
+func TestSkillsPathsRefusalGivesItsOwnReason(t *testing.T) {
+	_, err := harness.Resolve(repoWith(t, "skills_paths = [\"/x\"]\n"), harness.Overrides{})
+	if err == nil || strings.Contains(err.Error(), "visitors are asked") || !strings.Contains(err.Error(), "outside itself") {
+		t.Errorf("err = %v", err)
+	}
+}

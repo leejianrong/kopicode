@@ -22,6 +22,12 @@
 7. **Every one of these refusals names the alternative** (`uv add`, a project venv, `git stash`, "fix what the hook reports"). A bare refusal sends a model to the neighbouring spelling.
 8. **Callers can still add entries, never remove one.** ADR-0017 decision 5 stands. The REPL accepts additions through `Options.AutoNeverAllow`, which is now valid with `Switchable`; the config file for it comes in a later change.
 
+## Refinements after the v0.4.0 QA pass
+
+The first cut matched only the plain spellings, and a QA agent found the obvious neighbours. The rules now also see: a global flag before the subcommand (`npm -g install`, `-gD`, `--global=true`, `--location global`), only for a subcommand that installs, so `npm test -- -g x` is not refused; `npx` and `corepack` as wrappers; a pip path counts as a virtualenv only when relative or inside the session root (`/usr/bin/pip` is the system's); `python -Im pip`; git long options by any prefix of three characters (`--har`, `--no-verif`); `git checkout/restore ./`, `git checkout -f`, `git switch --discard-changes`; and `chmod -R` modes that grant write to everyone in any spelling (`666`, `1777`, `o+w`, `a=rwx`). A `-m` message value is no longer read as an option.
+
+Still outside the list, by design or by cost: `find -exec chmod`, `pipx`/`cargo`/`gem`/`go install`, `git stash drop`, and an `activate` that does not run (`false && . .venv/bin/activate; pip install`). The list is best-effort over a model's honest mistakes, not a defence against a model trying to get round it.
+
 ## Consequences
 
 - **A behaviour change for existing `auto` callers**, cuttlefish among them: a session that ran `pip install` bare, `git commit --no-verify` or `git reset --hard` is now refused. Nothing on the wire changes, and the refusal text says what to do. The release notes say so.

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -153,12 +154,14 @@ func TestServeSessionStartLimitsReachTheSession(t *testing.T) {
 		t.Errorf("token_budget = %v, want 0 (unbounded)", u["token_budget"])
 	}
 
-	bad := startPayload("s2", t.TempDir(), "first")
-	bad["max_turns"] = -1
-	h.send(map[string]any{"jsonrpc": "2.0", "id": 3, "method": methodSessionStart, "params": bad})
-	errObj, _ := h.awaitResponse(3)["error"].(map[string]any)
-	if errObj == nil || !numEq(errObj["code"], codeUsageError) {
-		t.Errorf("negative max_turns = %v, want code %d", errObj, codeUsageError)
+	for i, v := range []int{-1, 0} {
+		bad := startPayload("bad"+strconv.Itoa(i), t.TempDir(), "first")
+		bad["max_turns"] = v
+		h.send(map[string]any{"jsonrpc": "2.0", "id": 10 + i, "method": methodSessionStart, "params": bad})
+		errObj, _ := h.awaitResponse(10 + i)["error"].(map[string]any)
+		if errObj == nil || !numEq(errObj["code"], codeUsageError) {
+			t.Errorf("max_turns %d = %v, want code %d (zero is not \"unset\")", v, errObj, codeUsageError)
+		}
 	}
 	h.close()
 }

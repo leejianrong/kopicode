@@ -268,7 +268,7 @@ type startParams struct {
 	// MaxTurns caps the turns one prompt may take, and TokenBudget the tokens
 	// the whole session may spend (0 is unbounded); both override the harness
 	// default for this session and move its config hash (ADR-0022).
-	MaxTurns    int  `json:"max_turns"`
+	MaxTurns    *int `json:"max_turns"`
 	TokenBudget *int `json:"token_budget"`
 
 	// ConsentMode is ADR-0016 decision 3's required declaration:

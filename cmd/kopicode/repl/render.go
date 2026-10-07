@@ -137,7 +137,11 @@ func (l *Loop) Render(e engine.Event) {
 		// doc comment. Rendered once, the same register EventSessionStarted's
 		// own line uses, so a user watching the session sees what it was
 		// shown without having to open the record.
-		l.tag("instructions", fmt.Sprintf("%s (%s)", e.Path, humanBytes(e.Size)))
+		label := e.Path
+		if label == "" {
+			label = "skills catalogue" // the one instructions event with no file behind it
+		}
+		l.tag("instructions", fmt.Sprintf("%s (%s)", label, humanBytes(e.Size)))
 
 	case engine.EventAskAnswered:
 		if e.Reason == "refused" {

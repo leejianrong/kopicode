@@ -412,7 +412,7 @@ type startArgs struct {
 	Model               string   `json:"model"`
 	Harness             string   `json:"harness"`
 	HarnessConfig       string   `json:"harness_config"`
-	MaxTurns            int      `json:"max_turns"`
+	MaxTurns            *int     `json:"max_turns"`
 	TokenBudget         *int     `json:"token_budget"`
 	ConsentMode         string   `json:"consent_mode"`
 	ContainmentProvided bool     `json:"containment_provided"`

@@ -1,6 +1,7 @@
 package repl
 
 import (
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -16,6 +17,11 @@ type SkillsFunc func() ([]engine.Skill, []string)
 // one of these names is still listed, marked, and reached through the model's
 // own reading of it.
 var builtinCommands = []string{"/context", "/exit", "/mode", "/quit", "/skills"}
+
+// IsBuiltinCommand reports whether name (without the slash) is a built-in
+// command, so a front end can leave a skill with that name out of what it tells
+// the model: it can never be invoked.
+func IsBuiltinCommand(name string) bool { return isBuiltin(name) }
 
 func isBuiltin(name string) bool {
 	for _, b := range builtinCommands {
@@ -35,7 +41,7 @@ func (l *Loop) showSkills() {
 	all, warns := l.skills()
 	if len(all) == 0 {
 		l.Notice("no skills found. A skill is a directory with a SKILL.md, in .agents/skills or .kopicode/skills " +
-			"in the repository or in ~/.config/kopicode/skills")
+			"in the repository or in " + filepath.Join(engine.UserConfigDir(), "skills"))
 	}
 	for _, s := range all {
 		note := ""

@@ -183,6 +183,7 @@ var (
 		"ionice": true, "time": true, "timeout": true, "stdbuf": true, "xargs": true,
 		"setsid": true, "watch": true, "flock": true, "busybox": true, "find": true,
 		"parallel": true, "unbuffer": true, "chroot": true, "strace": true,
+		"npx": true, "corepack": true,
 	}
 
 	// shellKeywords may precede the real command in a list.

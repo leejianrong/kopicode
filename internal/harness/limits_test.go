@@ -35,7 +35,8 @@ func TestInteractiveRaisesTheCapAndMovesTheHash(t *testing.T) {
 }
 
 func TestAnExplicitCapBeatsTheInteractiveDefault(t *testing.T) {
-	sel := resolveLimits(t, harness.Overrides{Interactive: true, MaxTurns: 7})
+	seven := 7
+	sel := resolveLimits(t, harness.Overrides{Interactive: true, MaxTurns: &seven})
 	if sel.Config.MaxTurns != 7 {
 		t.Fatalf("cap = %d, want 7", sel.Config.MaxTurns)
 	}
@@ -52,9 +53,10 @@ func TestTokenBudgetOverride(t *testing.T) {
 }
 
 func TestBadLimitsAreUsageErrors(t *testing.T) {
-	neg := -1
+	neg, zero, minus3 := -1, 0, -3
 	for name, o := range map[string]harness.Overrides{
-		"negative turns":  {MaxTurns: -3},
+		"negative turns":  {MaxTurns: &minus3},
+		"zero turns":      {MaxTurns: &zero},
 		"negative budget": {TokenBudget: &neg},
 	} {
 		_, err := harness.Resolve(t.TempDir(), o)

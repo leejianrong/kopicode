@@ -184,6 +184,7 @@ func findUpward(dir, relPath string) (path string, content []byte, ok bool, err 
 func parseFileConfig(path, content string, user bool) (FileConfig, error) {
 	cfg := FileConfig{Path: path}
 	seen := map[string]bool{}
+	content = strings.TrimPrefix(content, "\xef\xbb\xbf") // an editor's byte-order mark is not a key
 
 	for i, raw := range strings.Split(content, "\n") {
 		lineNo := i + 1
@@ -214,6 +215,10 @@ func parseFileConfig(path, content string, user bool) (FileConfig, error) {
 		}
 		seen[key] = true
 
+		if near := nearestKey(key); near != "" {
+			return FileConfig{}, usagef("%s:%d: unknown key %q; did you mean %q? (kopicode reads %s, and ignores no key that looks like one of them)",
+				path, lineNo, key, near, strings.Join(knownKeys, ", "))
+		}
 		if err := checkScope(key, user); err != nil {
 			return FileConfig{}, usagef("%s:%d: %s", path, lineNo, err)
 		}
@@ -224,6 +229,11 @@ func parseFileConfig(path, content string, user bool) (FileConfig, error) {
 				return FileConfig{}, usagef("%s:%d: %s = %s", path, lineNo, key, err)
 			}
 			if key == "auto_never_allow" {
+				for _, e := range list {
+					if strings.TrimSpace(e) == "" {
+						return FileConfig{}, usagef("%s:%d: auto_never_allow holds an empty entry; an entry is a command name and optional tokens, such as \"terraform apply\"", path, lineNo)
+					}
+				}
 				cfg.AutoNeverAllow = list
 			} else {
 				cfg.SkillsPaths = list
@@ -434,10 +444,15 @@ func splitArrayElements(body string) []string {
 // that describe the repository live in the repository.
 func checkScope(key string, user bool) error {
 	switch key {
-	case "default_mode", "skills_paths":
+	case "default_mode":
 		if !user {
-			return fmt.Errorf("%s belongs in the user config, not the repository's: a repository must not "+
-				"choose how much its visitors are asked (ADR-0024)", key)
+			return fmt.Errorf("default_mode belongs in the user config, not the repository's: a repository must not " +
+				"choose how much its visitors are asked (ADR-0024)")
+		}
+	case "skills_paths":
+		if !user {
+			return fmt.Errorf("skills_paths belongs in the user config, not the repository's: a repository must not " +
+				"point a session at directories outside itself (ADR-0024)")
 		}
 	case "harness", "harness_config", "verify":
 		if user {
@@ -472,4 +487,27 @@ func parseStringList(v string) ([]string, error) {
 		out = append(out, el)
 	}
 	return out, nil
+}
+
+// knownKeys are the keys this reader owns.
+var knownKeys = []string{"model", "harness", "harness_config", "verify", "default_mode", "auto_never_allow", "skills_paths"}
+
+// nearestKey names the key a misspelling was probably meant to be, or "" when
+// key is one we own or is nothing like one. A config file is shared and other
+// tools' keys are skipped on purpose, but a key a letter or two from one of
+// ours is a typo, and silently ignoring `defaul_mode` costs a user the setting
+// they thought they had.
+func nearestKey(key string) string {
+	for _, k := range knownKeys {
+		if key == k {
+			return ""
+		}
+	}
+	best, bestD := "", 3
+	for _, k := range knownKeys {
+		if d := editDistance(key, k); d <= 2 && d < bestD {
+			best, bestD = k, d
+		}
+	}
+	return best
 }

@@ -65,6 +65,16 @@ func TestSlashSkillRunsATurnWithTheBodyAndTheTask(t *testing.T) {
 	}
 }
 
+func TestBuiltinsIgnoreExtraWordsAndASlashAloneListsThem(t *testing.T) {
+	out, prompts := runSkillLines(t, "/skills extra\n/\n/context please\n", skillFunc(t, "deploy"), false)
+	if len(prompts) != 0 {
+		t.Errorf("a built-in with extra words, or a bare slash, reached the model: %q", prompts)
+	}
+	if !strings.Contains(out, "/deploy  does deploy") || !strings.Contains(out, "commands: /context /exit /mode /quit /skills") {
+		t.Errorf("output:\n%s", out)
+	}
+}
+
 func TestABuiltinWinsOverASkillOfTheSameName(t *testing.T) {
 	_, prompts := runSkillLines(t, "/mode\n", skillFunc(t, "mode"), false)
 	if len(prompts) != 0 {
