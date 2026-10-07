@@ -433,6 +433,7 @@ func openAndDriveSession(std streams, opts engine.Options, open func(context.Con
 			return sess.Run(ctx, prompt)
 		},
 		Close: func(ctx context.Context) error { return sess.Close(ctx) },
+		Usage: func() engine.Usage { return sess.Usage() },
 	})
 	if err != nil {
 		say(stderr, "kopicode: %v\n", err)

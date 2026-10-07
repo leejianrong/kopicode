@@ -192,6 +192,8 @@ type mcpTurnOutcome struct {
 	Stop     string `json:"stop"`
 	ExitCode int    `json:"exit_code"`
 	Turns    int    `json:"turns"`
+	// Usage is the session's usage as the turn settled; see usageSummary.
+	Usage *usageSummary `json:"usage,omitempty"`
 }
 
 func textResult(text string, structured any, isError bool) toolResult {
@@ -547,6 +549,7 @@ func (s *mcpServer) await(ch <-chan sessioncore.TurnResult) toolResult {
 	case r := <-ch:
 		return structuredResult(mcpTurnOutcome{
 			Session: r.Session, Record: r.Record, Stop: r.Stop, ExitCode: r.ExitCode, Turns: r.Turns,
+			Usage: usageSummaryOf(r.Usage),
 		}, r.ExitCode != 0)
 	case <-s.stop:
 		return errorResult("the client disconnected")

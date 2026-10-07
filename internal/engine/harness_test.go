@@ -313,6 +313,15 @@ type wireUsage struct {
 	Prompt     int `json:"prompt_tokens"`
 	Completion int `json:"completion_tokens"`
 	Total      int `json:"total_tokens"`
+	// Cost and Details are what OpenRouter adds to a usage block; both absent
+	// is a route that reports neither.
+	Cost    *float64          `json:"cost,omitempty"`
+	Details *wireUsageDetails `json:"prompt_tokens_details,omitempty"`
+}
+
+type wireUsageDetails struct {
+	Cached     int `json:"cached_tokens"`
+	CacheWrite int `json:"cache_write_tokens"`
 }
 
 type wireFunction struct {

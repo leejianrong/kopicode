@@ -62,6 +62,11 @@ type TokenCounts struct {
 	Prompt     int `json:"prompt"`
 	Completion int `json:"completion"`
 	Total      int `json:"total"`
+	// CacheRead and CacheWrite are the prompt tokens the provider served from
+	// and wrote to its cache, when it said so. Subsets of Prompt; absent when
+	// the route does not report them.
+	CacheRead  int `json:"cache_read,omitempty"`
+	CacheWrite int `json:"cache_write,omitempty"`
 }
 
 // Sampling is the decoding configuration for one request. Recorded per request
@@ -244,6 +249,10 @@ type ProviderResponse struct {
 	Body Text `json:"body"`
 	// Tokens is the usage the provider reported.
 	Tokens TokenCounts `json:"tokens"`
+	// CostUSD is the price the provider reported for this request, absent when
+	// it reported none. Never computed from a price table: an unknown cost is
+	// left unknown.
+	CostUSD *float64 `json:"cost_usd,omitempty"`
 	// FinishReason is the provider's stop reason, verbatim.
 	FinishReason string `json:"finish_reason"`
 	// ServedBy is the provider slug that actually answered. A result whose

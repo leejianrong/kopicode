@@ -160,6 +160,7 @@ const (
 	methodSessionSubmit  = "session.submit"
 	methodSessionCancel  = "session.cancel"
 	methodSessionClose   = "session.close"
+	methodSessionUsage   = "session.usage"
 	methodServerHello    = "server.hello"    // capabilities, see capabilities.go
 	methodAskRequest     = "ask.request"     // server → client request (ADR-0020)
 	methodSessionEvent   = "session.event"   // server → client notification
@@ -320,6 +321,20 @@ type turnResult struct {
 	Stop     string `json:"stop"`
 	ExitCode int    `json:"exit_code"`
 	Turns    int    `json:"turns"`
+	// Usage is the session's usage as the turn settled (feature usage.context
+	// and its siblings); see usageSummary.
+	Usage *usageSummary `json:"usage,omitempty"`
+}
+
+// usageParams / usageResult are session.usage's shapes: a pull for a session's
+// usage now, answerable while a turn is running.
+type usageParams struct {
+	Session string `json:"session"`
+}
+
+type usageResult struct {
+	Session string        `json:"session"`
+	Usage   *usageSummary `json:"usage"`
 }
 
 // cancelResult acknowledges a cancel. The cancelled turn reports its own
@@ -538,11 +553,13 @@ func (s *server) handleLine(line string) {
 		s.handleCancel(req)
 	case methodSessionClose:
 		s.dispatchClose(req)
+	case methodSessionUsage:
+		s.handleUsage(req)
 	case methodServerHello:
 		s.writeResult(req.ID, currentCapabilities())
 	default:
 		s.writeError(req.ID, codeMethodNotFound, fmt.Sprintf("unknown method %q; this surface has "+
-			"session.start, session.submit, session.cancel, session.close and server.hello", req.Method))
+			"session.start, session.submit, session.cancel, session.close, session.usage and server.hello", req.Method))
 	}
 }
 
@@ -570,7 +587,8 @@ func (s *server) writeSessionError(id json.RawMessage, e *sessioncore.Error) {
 }
 
 func turnResultOf(r sessioncore.TurnResult) turnResult {
-	return turnResult{Session: r.Session, Record: r.Record, Stop: r.Stop, ExitCode: r.ExitCode, Turns: r.Turns}
+	return turnResult{Session: r.Session, Record: r.Record, Stop: r.Stop, ExitCode: r.ExitCode, Turns: r.Turns,
+		Usage: usageSummaryOf(r.Usage)}
 }
 
 // dispatchStart opens a session and queues its first turn, on the read-loop
@@ -667,6 +685,26 @@ func (s *server) dispatchClose(req rpcRequest) {
 	}); err != nil {
 		s.writeSessionError(req.ID, err)
 	}
+}
+
+// handleUsage answers session.usage inline on the read loop, like cancel: it
+// reads a snapshot and never queues behind the turn it is asking about.
+func (s *server) handleUsage(req rpcRequest) {
+	var p usageParams
+	if err := json.Unmarshal(req.Params, &p); err != nil {
+		s.writeError(req.ID, codeInvalidParams, fmt.Sprintf("session.usage params: %v", err))
+		return
+	}
+	if p.Session == "" {
+		s.writeError(req.ID, codeInvalidParams, "session.usage needs a session id")
+		return
+	}
+	u, err := s.mgr.Usage(p.Session)
+	if err != nil {
+		s.writeSessionError(req.ID, err)
+		return
+	}
+	s.writeResult(req.ID, usageResult{Session: p.Session, Usage: usageSummaryOf(u)})
 }
 
 // handleCancel cancels a session's in-flight turn. It runs inline on the read

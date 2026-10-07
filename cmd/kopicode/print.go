@@ -400,6 +400,8 @@ type record struct {
 	Ran      *bool    `json:"ran,omitempty"`
 	ExitCode *int     `json:"exit_code,omitempty"`
 	Size     int64    `json:"size,omitempty"`
+	// Usage is a provider_response's token split and cost; see recordUsage.
+	Usage *recordUsage `json:"usage,omitempty"`
 }
 
 // emitter writes the JSON stream.
@@ -499,6 +501,7 @@ func recordOf(ev engine.Event) record {
 		Source:   ev.Source,
 		Checker:  ev.Checker,
 		Size:     ev.Size,
+		Usage:    recordUsageOf(ev.Tokens),
 	}
 	if ev.HasExitCode {
 		code := ev.ExitCode

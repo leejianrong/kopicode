@@ -50,6 +50,9 @@ otherwise read as false:
   therefore-fine.
 - `ran` is present only on `syntax_gate`, where `false` is a real answer: a gate that
   did not run must not read as a pass.
+- A `provider_response` also carries `usage`: `prompt`, `completion`, `total`, and `cache_read`,
+  `cache_write` and `cost_usd` when the provider reported them (an absent `cost_usd` is unknown, never
+  zero). `size` on that event is still the total. See [serve's Usage section](kopicode-serve-protocol.md#usage-adr-0021).
 - `size` is the size the *record* holds, not the length of `text`. Content over the
   journal's spill threshold arrives with an empty `text` and a real `size`; nothing is
   truncated, because nothing over the threshold is carried inline in the first place.

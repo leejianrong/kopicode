@@ -84,6 +84,43 @@ method-less line carrying a `result` or an `error` is read as a reply and routed
 whatever is waiting on that id; one carrying neither is the ordinary "request has no
 method" refusal.
 
+## Usage (ADR-0021)
+
+How much a session has used, so a client can show spend, enforce a ceiling, or checkpoint a
+long-running session before the model's window fills. The same object appears three places:
+as `usage` on every turn result, as `session.usage`'s result, and (one response's worth,
+split) as `usage` on each `provider_response` event.
+
+```json
+<-- { "jsonrpc": "2.0", "id": 7, "result": { "session": "s1", "usage": {
+      "context_tokens": 31204, "context_window": 262144,
+      "prompt": 301200, "completion": 10800, "total": 312000, "cache_read": 120000,
+      "cost_usd": 0.0123, "requests": 12, "turns": 12, "max_turns": 20, "token_budget": 2000000 } } }
+```
+
+| field | meaning |
+|---|---|
+| `context_tokens` | the prompt tokens of the **latest** request: what the model is holding now, and so how near its window is. `0` until the first response (`requests` is `0`) |
+| `context_window` | the model's context size in tokens. **Absent** when this binary does not know it — never estimated. A client that wants a percentage computes it only when present |
+| `prompt`, `completion`, `total` | cumulative over every request this process made for the session. `total` is what the token budget counts and grows much faster than `context_tokens`, because each request resends the whole history. Do not read `total` as "how full is the context" |
+| `cache_read`, `cache_write` | subsets of `prompt` served from / written to the provider's cache. Absent when the route reports none |
+| `cost_usd` | the sum of costs the provider reported, **present only when every request reported one**. Never computed from a price table; one request with no reported cost makes the whole sum absent, not partial |
+| `requests` | provider responses that reported usage |
+| `turns` | the session-wide turn number of the latest response |
+| `max_turns` | the cap on one prompt's turns (it resets with each `session.submit`), from the harness configuration |
+| `token_budget` | the cap on the whole session's `total` |
+
+A `provider_response` event's `usage` is one response: `prompt`, `completion`, `total`, and
+`cache_read`, `cache_write` and `cost_usd` when reported. `size` on the same event stays the total.
+
+`session.usage` takes `{ "session": "s1" }` and answers immediately, **including while a turn is
+running** (it is read inline like `session.cancel`, and never queues behind the turn). An id with no
+open session is `-32000`, a missing one `-32602`. After a process restart a resumed session's numbers
+restart from the first new response: they count this process's requests.
+
+Features: `session.usage`, `usage.tokens_split`, `usage.context`, `usage.context_window`,
+`usage.cost`.
+
 ## The four methods
 
 ADR-0013 decision 3 fixed three; `session.close` (KAN-1795) is the fourth. There is
@@ -120,6 +157,7 @@ is.
 | `stop` | string | why the turn stopped (see [Stops](#stops)) |
 | `exit_code` | number | the process exit code that stop maps to |
 | `turns` | number | how many turns this exchange used |
+| `usage` | object | the session's usage as the turn settled — see [Usage](#usage-adr-0021) |
 
 ### `session.submit`
 
@@ -186,7 +224,8 @@ list of stable lower-case dotted names, added in the change that ships a capabil
 and removed only with a protocol bump. Current names: `allow_commands`, `ask.request`, `consent.note`, `consent_mode.auto`,
 `consent_mode.remote_interactive`, `consent_mode.unattended_policy`, `consent_request.command`,
 `consent_timeout.flag`, `consent_timeout.session`, `mcp`, `server.hello`, `session.close`,
-`session.read_only`.
+`session.read_only`, `session.usage`, `usage.context`, `usage.context_window`, `usage.cost`,
+`usage.tokens_split`.
 `cmd/kopicode/capabilities_test.go` ties the list to the consent modes and methods in the code.
 
 ## `ask.request` (server → client, ADR-0020)

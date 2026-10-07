@@ -202,6 +202,11 @@ type Usage struct {
 	Prompt     int `json:"prompt"`
 	Completion int `json:"completion"`
 	Total      int `json:"total"`
+	// CacheRead and CacheWrite are the prompt tokens served from, and written
+	// to, the provider's cache, when the route reports them. Zero means "not
+	// reported or none"; they are a subset of Prompt, not an addition to it.
+	CacheRead  int `json:"cache_read,omitempty"`
+	CacheWrite int `json:"cache_write,omitempty"`
 }
 
 // Reply is one assembled model reply.
@@ -232,6 +237,10 @@ type Reply struct {
 	ToolCalls []ToolCall
 	// Usage is the token accounting.
 	Usage Usage
+	// Cost is the provider-reported price of the request in USD, or nil when
+	// the usage block carried none. Unknown is not free, and it is never
+	// filled in from a price table.
+	Cost *float64
 	// Raw is the assembled response body, verbatim, for
 	// journal.ProviderResponse.Body. It is the bytes the provider sent and not
 	// a re-encoding of the fields above: re-marshalling would be deterministic

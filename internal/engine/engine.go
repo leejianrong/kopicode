@@ -241,6 +241,9 @@ type Engine struct {
 	// spent is the token usage the provider has reported so far, summed. It is
 	// the only token number the budget is allowed to be decided from.
 	spent journal.TokenCounts
+	// meter is what Usage reads beyond spent: the latest request's prompt size
+	// and the cost bookkeeping. See usage.go.
+	meter meter
 
 	// unverified is the last verification's rejection, still outstanding.
 	//
@@ -477,7 +480,11 @@ func (e *Engine) Turns() int { return e.turn }
 // Tokens reports the token usage the provider has reported so far, summed. It
 // is the figure the budget is decided from and the only one this package treats
 // as a measurement.
-func (e *Engine) Tokens() journal.TokenCounts { return e.spent }
+func (e *Engine) Tokens() journal.TokenCounts {
+	e.meter.mu.Lock()
+	defer e.meter.mu.Unlock()
+	return e.spent
+}
 
 // Start opens the session record.
 func (e *Engine) Start(ctx context.Context) error {

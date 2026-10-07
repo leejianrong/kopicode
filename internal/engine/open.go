@@ -456,6 +456,10 @@ func (s *Session) Turns() int { return s.engine.Turns() }
 // Tokens reports the provider-reported usage so far, summed.
 func (s *Session) Tokens() journal.TokenCounts { return s.engine.Tokens() }
 
+// Usage reports the session's usage so far: the context in use, the sum spent,
+// the provider-reported cost when every request had one, and the bounds.
+func (s *Session) Usage() Usage { return s.engine.Usage() }
+
 // Run is one bounded exchange. See [Engine.Run].
 func (s *Session) Run(ctx context.Context, prompt string) (Result, error) {
 	return s.engine.Run(ctx, prompt)

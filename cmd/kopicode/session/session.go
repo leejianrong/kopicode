@@ -124,6 +124,8 @@ type TurnResult struct {
 	Stop     string
 	ExitCode int
 	Turns    int
+	// Usage is the session's usage as the turn settled.
+	Usage engine.Usage
 }
 
 // AskModeRemote is the one non-default StartParams.AskMode.
@@ -293,6 +295,18 @@ func (m *Manager) Cancel(id string) *Error {
 	return nil
 }
 
+// Usage reports an open session's usage now, including while a turn is
+// running: the engine guards the numbers it reads for exactly this call.
+func (m *Manager) Usage(id string) (engine.Usage, *Error) {
+	m.mu.Lock()
+	ms := m.sessions[id]
+	m.mu.Unlock()
+	if ms == nil {
+		return engine.Usage{}, errf(KindUnknownSession, "no open session %q", id)
+	}
+	return ms.sess.Usage(), nil
+}
+
 // Close queues the end of a session behind the turns it has already accepted, so
 // they finish and answer first. It never waits: the worker does the closing, so
 // a slow turn ahead of it cannot stall the caller's read loop. done is called
@@ -371,6 +385,7 @@ func (m *Manager) worker(ms *managed) {
 			Stop:     res.Stop.String(),
 			ExitCode: res.Stop.ExitCode(),
 			Turns:    res.Turns,
+			Usage:    ms.sess.Usage(),
 		}
 		if j.isStart {
 			out.Record = ms.sess.Path()

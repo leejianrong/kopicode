@@ -34,6 +34,12 @@ type Entry struct {
 	// contradict.
 	Pin provider.Pin
 
+	// ContextWindow is the model's context size in tokens at the pinned
+	// endpoint, from docs/provider-pin.md, or 0 when that document does not
+	// record one. 0 means unknown and is reported as unknown; a surface never
+	// substitutes a guess. It is not in the harness hash.
+	ContextWindow int
+
 	// Validated is the date the mapping was last checked against reality, as
 	// ADR-0007 §Consequences asks: "a row that claims a harness configuration
 	// the model has not actually been run against is a claim the registry
@@ -92,7 +98,9 @@ var registry = []Entry{
 		// The pin was chosen and argued on this date. The harness mapping is
 		// trivial while there is one configuration; the date is honest about
 		// what was actually checked.
-		Validated: "2026-08-14",
+		// The pinned endpoint's context length, docs/provider-pin.md.
+		ContextWindow: 262_144,
+		Validated:     "2026-08-14",
 	},
 	{
 		// A/B candidate (README's Role column). No endpoint reports a
@@ -117,7 +125,8 @@ var registry = []Entry{
 			AllowFallbacks: false,
 			Quantizations:  []string{"fp8"},
 		},
-		Validated: "2026-08-18",
+		ContextWindow: 204_800, // minimax/fp8, docs/provider-pin.md
+		Validated:     "2026-08-18",
 	},
 	{
 		// A/B candidate, long-context (README's Role column). No

@@ -339,7 +339,10 @@ func (e *Engine) call(ctx context.Context, turn, attempt int) (provider.Reply, S
 			Prompt:     reply.Usage.Prompt,
 			Completion: reply.Usage.Completion,
 			Total:      reply.Usage.Total,
+			CacheRead:  reply.Usage.CacheRead,
+			CacheWrite: reply.Usage.CacheWrite,
 		},
+		CostUSD:      reply.Cost,
 		FinishReason: reply.FinishReason,
 		ServedBy:     reply.ServedBy,
 	}); err != nil {
@@ -347,9 +350,7 @@ func (e *Engine) call(ctx context.Context, turn, attempt int) (provider.Reply, S
 	}
 
 	// The budget's only input, added the moment the provider states it.
-	e.spent.Prompt += reply.Usage.Prompt
-	e.spent.Completion += reply.Usage.Completion
-	e.spent.Total += reply.Usage.Total
+	e.recordSpend(turn, reply)
 
 	// History before events, so a journal write that fails cannot leave the
 	// conversation holding a reply the record does not.
