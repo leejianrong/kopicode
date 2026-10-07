@@ -70,8 +70,24 @@ registered, and an unknown id is refused at startup with the list printed). Pin 
 model = "minimax/minimax-m2"
 ```
 
-Precedence is `--model` / `--harness`, then this file, then the built-in default. No
-environment variable is in that chain.
+Precedence is `--model` / `--harness`, then this file, then your user config (below), then the
+built-in default. No environment variable is in that chain.
+
+**Your own defaults** live in `~/.config/kopicode/config.toml` (`$XDG_CONFIG_HOME/kopicode` or
+`$KOPICODE_HOME` if set). Only the interactive `kopicode` reads it; `run --print`, `serve`, `mcp`
+and `kopibench` never do, so your preferences cannot change what a script or a benchmark runs.
+
+```toml
+model = "minimax/minimax-m2"
+default_mode = "auto"                      # start in auto mode (see /mode)
+auto_never_allow = ["terraform apply"]     # added to the built-in list, never replacing it
+skills_paths = ["~/work/shared-skills"]    # reserved for skills
+```
+
+`auto_never_allow` also works in a repository's file and the two lists add up. `default_mode` and
+`skills_paths` are refused there: a repository must not decide how much its visitors are asked.
+An `AGENTS.md` beside the user config is given to the model before the repository's own, and is
+recorded in the journal. [ADR-0024](docs/adr/0024-user-level-config.md).
 
 **As a one-shot**, with the record as newline-delimited JSON on stdout:
 
@@ -148,7 +164,8 @@ mock provider with `make bench-smoke`.
 | Setting | Where | Notes |
 | --- | --- | --- |
 | `OPENROUTER_API_KEY` | environment | required; never written to the journal or logs |
-| `model`, `harness`, `harness_config` | `.kopicode/config.toml` or flags | flags win |
+| `model`, `harness`, `harness_config` | `.kopicode/config.toml` or flags | flags win; `model` can also come from the user config |
+| `default_mode`, `auto_never_allow`, user `AGENTS.md` | `~/.config/kopicode/` | interactive `kopicode` only |
 | turn cap and other bounds | a declared harness config (`--harness-config`) | for example `max_turns = 40` when a session stops with `max_turns`; local-only, never anchors a published number. See [`docs/harness-tuning.md`](docs/harness-tuning.md) |
 | per-language examples | [`docs/examples/`](docs/examples/) | Go, JavaScript/TypeScript, Python, multi-language |
 | reusable task instructions | `.agents/skills/<name>/SKILL.md` | the same convention Claude Code, Codex and Cursor read. The model is told to look there and may read a skill on its own; there is no `/skill` command to invoke one ([ADR-0014](docs/adr/0014-skills-mechanism.md)) |

@@ -2,7 +2,9 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 
 	"github.com/leejianrong/kopicode/internal/harness"
 	"github.com/leejianrong/kopicode/internal/journal"
@@ -30,6 +32,16 @@ func wrapProjectInstructions(content string) string {
 	return "The repository's own AGENTS.md:\n\n" + content
 }
 
+// wrapInstructions frames content by the scope its event recorded: the user's
+// own file is told apart from the repository's, so the model can weigh a
+// repository rule against a personal preference.
+func wrapInstructions(scope, content string) string {
+	if scope == journal.InstructionsScopeUser {
+		return "The user's own AGENTS.md (their preferences across every project):\n\n" + content
+	}
+	return wrapProjectInstructions(content)
+}
+
 // loadProjectInstructions finds dir's own AGENTS.md and, if one exists,
 // journals it and feeds it into e's assembler.
 //
@@ -41,7 +53,26 @@ func wrapProjectInstructions(content string) string {
 // (see readForkSource's own comment on why Turn 0 is not excluded for this
 // one type). Calling this again on either path would journal — and feed to
 // the model — a second copy of content the session already carries.
-func (e *Engine) loadProjectInstructions(ctx context.Context, dir string) error {
+func (e *Engine) loadProjectInstructions(ctx context.Context, dir, userPath string) error {
+	// The user's own file goes first, so the repository's, which is more
+	// specific, is the later and so the more recent of the two.
+	if userPath != "" {
+		data, err := os.ReadFile(userPath)
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+		case err != nil:
+			return fmt.Errorf("engine: loading %s: %w", userPath, err)
+		default:
+			if _, err := e.append(ctx, 0, journal.ProjectInstructionsLoaded{
+				Path:    userPath,
+				Content: journal.InlineText(string(data)),
+				Scope:   journal.InstructionsScopeUser,
+			}); err != nil {
+				return fmt.Errorf("engine: recording %s: %w", userPath, err)
+			}
+			e.asm.AppendUser(wrapInstructions(journal.InstructionsScopeUser, string(data)))
+		}
+	}
 	af, ok, err := harness.LoadAgentsFile(dir)
 	if err != nil {
 		return fmt.Errorf("engine: loading %s: %w", harness.AgentsFileName, err)

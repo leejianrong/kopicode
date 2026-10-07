@@ -48,6 +48,12 @@ type Overrides struct {
 	// TokenBudget overrides the session's cumulative token allowance
 	// (ADR-0022). Nil means not given; a pointer to zero means unbounded.
 	TokenBudget *int
+	// UserConfig reads the user-level config.toml (ADR-0024) as the rung between
+	// the repository's file and the built-in default. Only the human-facing front
+	// ends set it: serve, mcp and kopibench resolve from flags, the repository
+	// and the defaults alone, so one person's file cannot change what an
+	// orchestrator or a benchmark run.
+	UserConfig bool
 	// Interactive says a person is at the keyboard (the REPL). Unless MaxTurns
 	// is given or the harness is a declared config that chose its own, the turn
 	// cap is then [InteractiveMaxTurns] rather than the corpus's 20.
@@ -101,6 +107,8 @@ const (
 	SourceFlag Source = "flag"
 	// SourceFile is a key in .kopicode/config.toml.
 	SourceFile Source = "config"
+	// SourceUser is a key in the user-level config.toml (ADR-0024).
+	SourceUser Source = "user_config"
 	// SourceDefault is the built-in default.
 	SourceDefault Source = "default"
 	// SourceRegistry is the harness configuration the model's registry row
@@ -149,10 +157,26 @@ type Selection struct {
 	// Diagnostics only; the resolved [Config] and its hash are what identify the
 	// arm, and [Config.Name] already carries the [DeclaredConfigNamePrefix].
 	HarnessConfigPath string
+	// Settings are the resolved values that are not part of the arm (ADR-0024).
+	Settings Settings
+
 	// ModelSource and HarnessSource say which rung of the precedence chain
 	// supplied each value. Diagnostics only — see [Source].
 	ModelSource   Source
 	HarnessSource Source
+}
+
+// Settings are what the config files say about how a session behaves for a
+// person, as opposed to which arm it is. None of it is in the hash.
+type Settings struct {
+	// DefaultMode is "default", "auto", or "" when no file chose one.
+	DefaultMode string
+	// AutoNeverAllow is the user file's entries followed by the repository's.
+	AutoNeverAllow []string
+	// SkillsPaths are the user file's extra skill directories.
+	SkillsPaths []string
+	// UserConfigPath is the user file that was read, or "". Diagnostics only.
+	UserConfigPath string
 }
 
 // LogValue renders a selection for slog.
@@ -225,11 +249,25 @@ func Resolve(dir string, o Overrides) (Selection, error) {
 		return Selection{}, err
 	}
 
+	var user FileConfig
+	if o.UserConfig {
+		if user, err = LoadUserConfig(); err != nil {
+			return Selection{}, err
+		}
+	}
+
 	modelID, modelSource := pick(o.Model, file.Model, DefaultModelID, SourceDefault)
+	if o.Model == "" && file.Model == "" && user.Model != "" {
+		modelID, modelSource = user.Model, SourceUser
+	}
 
 	entry, ok := Lookup(modelID)
 	if !ok {
-		return Selection{}, unknownModel(modelID, modelSource, file.Path)
+		configPath := file.Path
+		if modelSource == SourceUser {
+			configPath = user.Path
+		}
+		return Selection{}, unknownModel(modelID, modelSource, configPath)
 	}
 
 	cfg, harnessSource, declaredPath, err := resolveHarness(dir, o, file, entry)
@@ -275,8 +313,14 @@ func Resolve(dir string, o Overrides) (Selection, error) {
 		Verify:            file.Verify,
 		ConfigFilePath:    file.Path,
 		HarnessConfigPath: declaredPath,
-		ModelSource:       modelSource,
-		HarnessSource:     harnessSource,
+		Settings: Settings{
+			DefaultMode:    user.DefaultMode,
+			AutoNeverAllow: append(append([]string(nil), user.AutoNeverAllow...), file.AutoNeverAllow...),
+			SkillsPaths:    user.SkillsPaths,
+			UserConfigPath: user.Path,
+		},
+		ModelSource:   modelSource,
+		HarnessSource: harnessSource,
 	}, nil
 }
 
@@ -412,6 +456,11 @@ func sourceDescription(source Source, flagName, configPath string) string {
 			return configPath
 		}
 		return ConfigDirName + "/" + ConfigFileName
+	case SourceUser:
+		if configPath != "" {
+			return configPath
+		}
+		return "the user config"
 	case SourceDefault:
 		// Reachable only if the built-in default names a model this binary does
 		// not register, which is a bug in the binary and not in what the user

@@ -109,7 +109,7 @@ func replayHistory(asm *Assembler, events []journal.Event) error {
 			if err := flush(); err != nil {
 				return err
 			}
-			asm.AppendUser(wrapProjectInstructions(p.Content.Inline))
+			asm.AppendUser(wrapInstructions(p.Scope, p.Content.Inline))
 
 		case journal.UserMessage:
 			if err := flush(); err != nil {

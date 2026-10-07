@@ -282,6 +282,11 @@ type Options struct {
 	// StartAuto starts a [Options.Switchable] session in auto mode.
 	StartAuto bool
 
+	// UserInstructions is the path of the user-level AGENTS.md (ADR-0024), fed
+	// to a new session before the repository's own. Empty means none; a missing
+	// file is skipped. Only the REPL sets it.
+	UserInstructions string
+
 	// Provider overrides the model provider. Nil builds the live OpenRouter
 	// client from OPENROUTER_API_KEY.
 	//
@@ -921,7 +926,7 @@ func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session,
 		// again. After Start, deliberately, for the same reason recordFork
 		// runs after it below — this session's own SessionStarted (seq 1)
 		// must land before anything this bootstrap adds.
-		if err := eng.loadProjectInstructions(ctx, abs); err != nil {
+		if err := eng.loadProjectInstructions(ctx, abs, opts.UserInstructions); err != nil {
 			return fail(err)
 		}
 	}

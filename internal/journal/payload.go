@@ -673,6 +673,10 @@ type SessionForked struct {
 
 func (SessionForked) Type() Type { return TypeSessionForked }
 
+// InstructionsScopeUser marks a [ProjectInstructionsLoaded] that came from the
+// user-level AGENTS.md rather than the repository's.
+const InstructionsScopeUser = "user"
+
 // ProjectInstructionsLoaded records that a genuinely new session's bootstrap
 // found the repository's own AGENTS.md and fed it into the conversation
 // (KAN-1024, KAN-1025).
@@ -703,6 +707,10 @@ type ProjectInstructionsLoaded struct {
 	Path string `json:"path"`
 	// Content is the file's content, verbatim.
 	Content Text `json:"content"`
+	// Scope is "user" for the user-level AGENTS.md (ADR-0024) and empty for the
+	// repository's own, so every journal written before this field existed
+	// still means what it said.
+	Scope string `json:"scope,omitempty"`
 }
 
 func (ProjectInstructionsLoaded) Type() Type { return TypeProjectInstructionsLoaded }
