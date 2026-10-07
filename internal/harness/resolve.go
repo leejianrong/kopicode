@@ -41,10 +41,10 @@ type Overrides struct {
 	// (see [Resolve]).
 	HarnessConfig string
 
-	// MaxTurns overrides the harness's per-prompt turn cap (ADR-0022). Zero
-	// means not given. It changes the configuration and so the hash: a longer
+	// MaxTurns overrides the harness's per-prompt turn cap (ADR-0022). Nil
+	// means not given; zero or less is a usage error. It changes the configuration and so the hash: a longer
 	// leash is a different arm.
-	MaxTurns int
+	MaxTurns *int
 	// TokenBudget overrides the session's cumulative token allowance
 	// (ADR-0022). Nil means not given; a pointer to zero means unbounded.
 	TokenBudget *int
@@ -68,8 +68,14 @@ const InteractiveMaxTurns = 100
 // BindLimits registers --max-turns and --token-budget on fs, filling o.
 // Only the human-facing front ends call it; kopibench's arms are fixed.
 func BindLimits(fs *flag.FlagSet, o *Overrides) {
-	fs.IntVar(&o.MaxTurns, "max-turns", 0,
-		"turns the agent may take per prompt (default 100 in the REPL, 20 in run --print)")
+	fs.Func("max-turns", "turns the agent may take per prompt (default 100 in the REPL, 20 in run --print)", func(v string) error {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			return fmt.Errorf("want a number of turns, 1 or more")
+		}
+		o.MaxTurns = &n
+		return nil
+	})
 	fs.Func("token-budget", "tokens (prompt+completion) a session may spend; 0 is unbounded", func(v string) error {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 0 {
@@ -288,12 +294,12 @@ func Resolve(dir string, o Overrides) (Selection, error) {
 		cfg.Verification.Source = VerificationConfigured
 	}
 
-	if o.MaxTurns < 0 {
-		return Selection{}, usagef("max turns is %d; want 1 or more (an unbounded loop is the failure the cap exists to prevent)", o.MaxTurns)
+	if o.MaxTurns != nil && *o.MaxTurns < 1 {
+		return Selection{}, usagef("max turns is %d; want 1 or more (an unbounded loop is the failure the cap exists to prevent)", *o.MaxTurns)
 	}
 	switch {
-	case o.MaxTurns > 0:
-		cfg.MaxTurns = o.MaxTurns
+	case o.MaxTurns != nil:
+		cfg.MaxTurns = *o.MaxTurns
 	case o.Interactive && declaredPath == "":
 		cfg.MaxTurns = InteractiveMaxTurns
 	}

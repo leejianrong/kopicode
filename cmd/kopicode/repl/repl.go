@@ -336,6 +336,9 @@ func (l *Loop) loop(ctx context.Context) (engine.Stop, error) {
 		case commandSkills:
 			l.showSkills()
 			continue
+		case commandSlash:
+			l.Notice("commands: " + strings.Join(builtinCommands, " ") + "; /skills lists skills you can run as /<name>")
+			continue
 		}
 
 		prompt, _, serr := l.expandSkill(line)
@@ -457,6 +460,9 @@ func (l *Loop) renderOutcome(res engine.Result, err error) {
 	if res.Stop == engine.StopMaxTurns {
 		l.Notice(TurnCapHint(l.maxTurns))
 	}
+	if res.Stop == engine.StopBudgetExhausted {
+		l.Notice(BudgetHint())
+	}
 }
 
 // command classifies a line the user typed.
@@ -469,6 +475,7 @@ const (
 	commandContext
 	commandMode
 	commandSkills
+	commandSlash
 )
 
 func command(line string) (lineCommand, string) {
@@ -478,17 +485,13 @@ func command(line string) (lineCommand, string) {
 	}
 	switch fields[0] {
 	case "/exit", "/quit":
-		if len(fields) == 1 {
-			return commandExit, ""
-		}
+		return commandExit, ""
 	case "/context":
-		if len(fields) == 1 {
-			return commandContext, ""
-		}
+		return commandContext, ""
 	case "/skills":
-		if len(fields) == 1 {
-			return commandSkills, ""
-		}
+		return commandSkills, ""
+	case "/":
+		return commandSlash, ""
 	case "/mode":
 		return commandMode, strings.Join(fields[1:], " ")
 	}

@@ -104,6 +104,12 @@ func (l *Loop) Render(e engine.Event) {
 		l.tag("snap", e.Ref)
 
 	case engine.EventVerification:
+		if len(e.Command) == 0 {
+			// Nothing ran: the project names no check and none could be found.
+			// An exit code here would read as a failure.
+			l.tag("verify", "skipped: no verification command found for this project")
+			break
+		}
 		l.tag("verify", fmt.Sprintf("%s exit %d", strings.Join(e.Command, " "), e.ExitCode))
 
 	case engine.EventTurnCancelled:
@@ -137,7 +143,11 @@ func (l *Loop) Render(e engine.Event) {
 		// doc comment. Rendered once, the same register EventSessionStarted's
 		// own line uses, so a user watching the session sees what it was
 		// shown without having to open the record.
-		l.tag("instructions", fmt.Sprintf("%s (%s)", e.Path, humanBytes(e.Size)))
+		label := e.Path
+		if label == "" {
+			label = "skills catalogue" // the one instructions event with no file behind it
+		}
+		l.tag("instructions", fmt.Sprintf("%s (%s)", label, humanBytes(e.Size)))
 
 	case engine.EventAskAnswered:
 		if e.Reason == "refused" {
@@ -264,6 +274,15 @@ func TurnCapHint(maxTurns int) string {
 		"then pass --harness-config <file> (or set harness_config = \"<file>\" in "+
 		".kopicode/config.toml). It is local-only and never anchors a published number.",
 		capClause, suggested, suggested)
+}
+
+// BudgetHint is the guidance shown when a session's token budget runs out. The
+// budget is cumulative and the check runs after a response, so the last one can
+// overshoot it, and nothing resets it: the session is finished (ADR-0022).
+func BudgetHint() string {
+	return "the session's token budget is spent (it is checked after each response, so the last one can " +
+		"overshoot it). This session cannot continue: start a new one, or start with --token-budget <tokens> " +
+		"(0 is unbounded). /context shows what was spent."
 }
 
 // Fail prints a failure of the surface, or one the session could not record.

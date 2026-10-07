@@ -160,7 +160,7 @@ func (g *Gate) Check(ctx context.Context, a Action) (Outcome, error) {
 func refusal(dec Decision) string {
 	msg := dec.Reason
 	if msg == "" {
-		msg = "refused"
+		msg = "the user declined this; if it is unclear what they want instead, ask them"
 	}
 	if dec.Note != "" {
 		msg += "; the user suggests instead: " + dec.Note

@@ -80,8 +80,8 @@ type StartParams struct {
 	HarnessConfig string
 
 	// MaxTurns and TokenBudget override the harness limits for this session
-	// (ADR-0022). Zero MaxTurns / nil TokenBudget mean not given.
-	MaxTurns    int
+	// (ADR-0022). Nil MaxTurns / TokenBudget mean not given.
+	MaxTurns    *int
 	TokenBudget *int
 
 	// ConsentMode is required — one of the Consent* constants.

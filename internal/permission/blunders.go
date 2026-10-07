@@ -18,11 +18,14 @@ import (
 func (s *autoScan) blunders(name string, cmd shWord, args []shWord) string {
 	switch {
 	case name == "pip" || name == "pip3" || strings.HasPrefix(name, "pip3."):
-		return s.pipInstall(name, viaVenv(cmd), args)
+		return s.pipInstall(name, s.viaVenv(cmd), args)
 	case isPython(name):
 		for i, a := range args {
-			if !a.dynamic && a.text == "-m" && i+1 < len(args) && !args[i+1].dynamic && args[i+1].text == "pip" {
-				return s.pipInstall(name, viaVenv(cmd), args[i+2:])
+			if a.dynamic || !isMFlag(a.text) || i+1 >= len(args) {
+				continue
+			}
+			if m := args[i+1]; !m.dynamic && m.text == "pip" {
+				return s.pipInstall(name, s.viaVenv(cmd), args[i+2:])
 			}
 		}
 	case name == "npm" || name == "pnpm" || name == "yarn" || name == "bun":
@@ -68,25 +71,50 @@ func (s *autoScan) pipInstall(name string, venvCmd bool, args []shWord) string {
 	return fmt.Sprintf("%s install outside a virtualenv installs into the global Python; use `uv add <pkg>` (with a pyproject.toml), or a project venv: `python -m venv .venv` then `.venv/bin/pip install <pkg>`", name)
 }
 
-// globalInstall refuses a global package install by npm, pnpm, yarn or bun.
+// globalInstall refuses a global package install by npm, pnpm, yarn or bun. The
+// flag may come before or after the subcommand (`npm -g install x`), and only
+// a subcommand that installs counts, so `npm test -- -g pattern` is not one.
 func globalInstall(name string, args []shWord) string {
-	sub := ""
+	installing := map[string]bool{
+		"install": true, "i": true, "add": true, "update": true, "upgrade": true, "up": true,
+		"uninstall": true, "remove": true, "rm": true, "link": true, "ln": true, "global": true,
+	}
+	global, sub := false, ""
+	skipNext := false
 	for _, a := range args {
 		if a.dynamic {
 			continue
 		}
 		t := a.text
+		if skipNext {
+			skipNext = false
+			if t == "global" {
+				global = true
+			}
+			continue
+		}
 		switch {
-		case t == "-g", t == "--global", t == "--location=global":
-			if sub != "" {
-				return globalMsg(name)
+		case t == "--":
+			// What follows belongs to the script being run, not to the package manager.
+			return decideGlobal(name, global, sub, installing)
+		case t == "--location":
+			skipNext = true
+		case t == "--global" || strings.HasPrefix(t, "--global=") || t == "--location=global":
+			global = true
+		case strings.HasPrefix(t, "-") && !strings.HasPrefix(t, "--"):
+			if strings.ContainsRune(t, 'g') {
+				global = true
 			}
 		case !strings.HasPrefix(t, "-") && sub == "":
 			sub = t
-			if name == "yarn" && t == "global" {
-				return globalMsg(name)
-			}
 		}
+	}
+	return decideGlobal(name, global, sub, installing)
+}
+
+func decideGlobal(name string, global bool, sub string, installing map[string]bool) string {
+	if (global && installing[sub]) || (name == "yarn" && sub == "global") {
+		return globalMsg(name)
 	}
 	return ""
 }
@@ -96,7 +124,8 @@ func globalMsg(name string) string {
 }
 
 // gitBlunder refuses the git commands that discard uncommitted work, and
-// --no-verify on commit and push.
+// --no-verify on commit and push. Long options are matched as git matches them,
+// by any prefix of three characters or more.
 func gitBlunder(args []shWord) string {
 	sub, rest := "", []shWord(nil)
 	for i, a := range args {
@@ -111,52 +140,79 @@ func gitBlunder(args []shWord) string {
 			break
 		}
 	}
+	// Words that are another option's value, not an option or a path.
+	var words []shWord
+	for i := 0; i < len(rest); i++ {
+		t := rest[i].text
+		if !rest[i].dynamic && sub == "commit" && (t == "-m" || t == "-F" || t == "-C" || t == "-c" || t == "--message" || t == "--file") {
+			i++
+			continue
+		}
+		words = append(words, rest[i])
+	}
 	has := func(match func(string) bool) bool {
-		for _, a := range rest {
+		for _, a := range words {
 			if !a.dynamic && match(a.text) {
 				return true
 			}
 		}
 		return false
 	}
+	long := func(full string) bool { return has(func(t string) bool { return isLongOpt(t, full) }) }
 	anyDynamic := func() bool {
-		for _, a := range rest {
+		for _, a := range words {
 			if a.dynamic {
 				return true
 			}
 		}
 		return false
 	}
+	shortCluster := func(set string, must rune) func(string) bool {
+		return func(t string) bool {
+			if len(t) < 2 || t[0] != '-' || t[1] == '-' || !strings.ContainsRune(t, must) {
+				return false
+			}
+			for _, r := range t[1:] {
+				if !strings.ContainsRune(set, r) {
+					return false
+				}
+			}
+			return true
+		}
+	}
 	switch sub {
 	case "reset":
-		if has(func(t string) bool { return t == "--hard" }) || anyDynamic() {
+		if long("--hard") || anyDynamic() {
 			return "git reset --hard discards uncommitted work; use `git stash` to set it aside, or `git reset --soft` / `git restore --staged <file>` to keep it"
 		}
 	case "clean":
-		for _, a := range rest {
-			t := a.text
-			if a.dynamic || t == "--force" || (strings.HasPrefix(t, "-") && !strings.HasPrefix(t, "--") && strings.ContainsRune(t, 'f')) {
-				return "git clean -f deletes untracked files for good; run `git clean -n` to list them and remove the ones you mean with rm"
+		if long("--force") || has(shortCluster("fdxXinqe", 'f')) || anyDynamic() {
+			return "git clean -f deletes untracked files for good; run `git clean -n` to list them and remove the ones you mean with rm"
+		}
+	case "checkout", "restore", "switch":
+		wholeTree := has(func(t string) bool { return t == "." || t == "./" || t == ":/" || t == "*" })
+		forced := (sub == "checkout" && (has(shortCluster("fqb", 'f')) || long("--force"))) ||
+			(sub == "switch" && (long("--discard-changes") || has(shortCluster("fqc", 'f')) || long("--force")))
+		dashed := false
+		for _, a := range words {
+			if !a.dynamic && a.text == "--" {
+				dashed = true
+			} else if dashed && a.dynamic {
+				wholeTree = true
 			}
 		}
-	case "checkout", "restore":
-		for _, a := range rest {
-			t := a.text
-			if a.dynamic {
-				continue
-			}
-			if t == "." || t == ":/" || t == "*" {
-				return "git " + sub + " . throws away every uncommitted change in the tree; name the one file you mean, or `git stash` first"
-			}
+		if wholeTree && sub != "switch" {
+			return "git " + sub + " . throws away every uncommitted change in the tree; name the one file you mean, or `git stash` first"
+		}
+		if forced {
+			return "git " + sub + " with --force/--discard-changes throws away uncommitted changes; commit or `git stash` them first"
 		}
 	case "commit":
-		if has(func(t string) bool {
-			return t == "--no-verify" || (strings.HasPrefix(t, "-") && !strings.HasPrefix(t, "--") && strings.ContainsRune(t, 'n'))
-		}) {
+		if long("--no-verify") || has(shortCluster("aivqsenp", 'n')) {
 			return "git commit --no-verify skips the repository's hooks; fix what the hook reports and commit again"
 		}
 	case "push":
-		if has(func(t string) bool { return t == "--no-verify" }) {
+		if long("--no-verify") {
 			return "git push --no-verify skips the repository's hooks; fix what the hook reports and push again"
 		}
 	}
@@ -190,8 +246,7 @@ func (s *autoScan) recursivePerms(name string, args []shWord) string {
 		return ""
 	}
 	if name == "chmod" && len(operands) > 0 {
-		mode := operands[0].text
-		if mode == "777" || mode == "0777" || mode == "a+rwx" || mode == "ugo+rwx" {
+		if mode := operands[0].text; worldWritable(mode) {
 			return "chmod -R " + mode + " makes a whole tree world-writable; grant the specific bit to the specific file (chmod +x script.sh)"
 		}
 	}
@@ -216,8 +271,68 @@ func (s *autoScan) recursivePerms(name string, args []shWord) string {
 }
 
 // viaVenv reports whether a command was invoked by a path through a bin
-// directory, the shape of a virtualenv's own pip or python.
-func viaVenv(w shWord) bool {
+// directory that is the session's own: a relative path (.venv/bin/pip) or an
+// absolute one inside the root. /usr/bin/pip is the system's, and a computed
+// path ($VIRTUAL_ENV/bin/pip) cannot be shown to be anything.
+func (s *autoScan) viaVenv(w shWord) bool {
 	t := w.text
-	return !w.dynamic && strings.Contains(t, "/") && path.Base(path.Dir(t)) == "bin"
+	if w.dynamic || !strings.Contains(t, "/") || path.Base(path.Dir(t)) != "bin" {
+		return false
+	}
+	if strings.HasPrefix(t, "/") {
+		return contains(s.p.root, path.Clean(t))
+	}
+	return !strings.HasPrefix(t, "..")
+}
+
+// isMFlag reports whether a python option word ends in -m, alone or in a
+// cluster such as -Im, so `python -Im pip install` is seen.
+func isMFlag(t string) bool {
+	return len(t) >= 2 && t[0] == '-' && t[1] != '-' && strings.HasSuffix(t, "m")
+}
+
+// isLongOpt reports whether t is full or an abbreviation of the long option
+// (git accepts any unambiguous prefix, so `--har` is `--hard`). Three
+// characters is the shortest that is taken, so `--h` still refuses: the answer
+// to ambiguity here is no.
+func isLongOpt(t, full string) bool {
+	return strings.HasPrefix(t, "--") && len(t) >= 3 && strings.HasPrefix(full, t)
+}
+
+// worldWritable reports whether a chmod mode grants write to everyone.
+func worldWritable(mode string) bool {
+	if mode == "" {
+		return false
+	}
+	allDigits := true
+	for _, r := range mode {
+		if r < '0' || r > '7' {
+			allDigits = false
+		}
+	}
+	if allDigits {
+		if len(mode) < 3 || len(mode) > 4 {
+			return false
+		}
+		switch mode[len(mode)-1] {
+		case '2', '3', '6', '7':
+			return true
+		}
+		return false
+	}
+	for _, clause := range strings.Split(mode, ",") {
+		who, perms, op := clause, "", byte(0)
+		if i := strings.IndexAny(clause, "+-="); i >= 0 {
+			who, op, perms = clause[:i], clause[i], clause[i+1:]
+		}
+		if op == '-' || !strings.Contains(perms, "w") && !strings.Contains(perms, "a") {
+			continue
+		}
+		if who == "" || strings.ContainsAny(who, "oa") || who == "ugo" {
+			if strings.Contains(perms, "w") {
+				return true
+			}
+		}
+	}
+	return false
 }

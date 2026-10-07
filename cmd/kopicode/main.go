@@ -471,7 +471,12 @@ func openAndDriveSession(std streams, opts engine.Options, open func(context.Con
 	// one auto made is stamped auto.
 	opts.Switchable = true
 	// Told to a new session once, so it need not list_dir to find them (ADR-0025).
-	opts.Skills, _ = engine.DiscoverSkills(opts.Dir, opts.Selection.Settings.SkillsPaths)
+	found, _ := engine.DiscoverSkills(opts.Dir, opts.Selection.Settings.SkillsPaths)
+	for _, sk := range found {
+		if !repl.IsBuiltinCommand(sk.Name) { // one that can never be invoked is not worth the model's attention
+			opts.Skills = append(opts.Skills, sk)
+		}
+	}
 	// opts.ConsentMode is left at its zero value, engine.ConsentInteractive: a
 	// human is answering through loop.Ask, so every PermissionDecided this
 	// session journals is stamped permission.SourceUser (KAN-885).
