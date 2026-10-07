@@ -13,7 +13,10 @@ overrides the few fields you name.
 ## The turn cap, the common case
 
 If a session stops with `max_turns` (exit code 4), it ran out of turns before it
-finished. Both surfaces now tell you how to raise it, but here it is in full.
+finished. The REPL and `run --print` also accept `--max-turns N` and `--token-budget N`
+(0 is unbounded), which override the configuration for one invocation and move its
+hash. The REPL defaults to 100 turns per prompt; `run --print` keeps 20. The
+longer form, as a declared config:
 
 Write a file — call it `harness.toml`:
 

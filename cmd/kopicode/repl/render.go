@@ -257,13 +257,13 @@ func TurnCapHint(maxTurns int) string {
 	if maxTurns > 0 {
 		capClause = fmt.Sprintf(" (max_turns = %d)", maxTurns)
 	}
-	return fmt.Sprintf("reached the turn cap%s. To raise it, write a declared harness config "+
-		"to a file:\n"+
+	return fmt.Sprintf("reached the turn cap%s. Send another prompt to carry on (the count restarts), "+
+		"or start with --max-turns %d. A declared harness config also sets it; write one to a file:\n"+
 		"    base = \"default\"\n"+
 		"    max_turns = %d\n"+
 		"then pass --harness-config <file> (or set harness_config = \"<file>\" in "+
 		".kopicode/config.toml). It is local-only and never anchors a published number.",
-		capClause, suggested)
+		capClause, suggested, suggested)
 }
 
 // Fail prints a failure of the surface, or one the session could not record.

@@ -412,6 +412,8 @@ type startArgs struct {
 	Model               string   `json:"model"`
 	Harness             string   `json:"harness"`
 	HarnessConfig       string   `json:"harness_config"`
+	MaxTurns            int      `json:"max_turns"`
+	TokenBudget         *int     `json:"token_budget"`
 	ConsentMode         string   `json:"consent_mode"`
 	ContainmentProvided bool     `json:"containment_provided"`
 	NeverAllow          []string `json:"never_allow"`
@@ -445,6 +447,7 @@ func (s *mcpServer) toolStart(call *mcpCall, raw json.RawMessage) toolResult {
 	if err := s.mgr.Start(sessioncore.StartParams{
 		ID: a.Session, Dir: a.Dir, Prompt: a.Prompt,
 		Model: a.Model, Harness: a.Harness, HarnessConfig: a.HarnessConfig,
+		MaxTurns: a.MaxTurns, TokenBudget: a.TokenBudget,
 		ConsentMode: a.ConsentMode, ContainmentProvided: a.ContainmentProvided, NeverAllow: a.NeverAllow,
 	}, s.observer(a.Session), s.turn(a.Session, call, ch)); err != nil {
 		return errorResult("%s", err.Message)

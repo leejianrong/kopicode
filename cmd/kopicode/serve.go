@@ -265,6 +265,12 @@ type startParams struct {
 	// both is a usage error, decided in engine.ResolveSelection.
 	HarnessConfig string `json:"harness_config"`
 
+	// MaxTurns caps the turns one prompt may take, and TokenBudget the tokens
+	// the whole session may spend (0 is unbounded); both override the harness
+	// default for this session and move its config hash (ADR-0022).
+	MaxTurns    int  `json:"max_turns"`
+	TokenBudget *int `json:"token_budget"`
+
 	// ConsentMode is ADR-0016 decision 3's required declaration:
 	// consentModeRemoteInteractive, consentModeUnattendedPolicy or
 	// consentModeAuto (ADR-0017). There is no
@@ -629,6 +635,7 @@ func (s *server) dispatchStart(req rpcRequest) {
 	if err := s.mgr.Start(sessioncore.StartParams{
 		ID: p.Session, Dir: p.Dir, Prompt: p.Prompt,
 		Model: p.Model, Harness: p.Harness, HarnessConfig: p.HarnessConfig,
+		MaxTurns: p.MaxTurns, TokenBudget: p.TokenBudget,
 		ConsentMode: p.ConsentMode, ContainmentProvided: p.ContainmentProvided, NeverAllow: p.NeverAllow,
 		ConsentTimeout: timeout, ReadOnly: p.ReadOnly, AskMode: p.AskMode,
 	}, s.notifier(p.Session), sessioncore.Turn{Done: func(r sessioncore.TurnResult) {

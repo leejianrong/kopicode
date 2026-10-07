@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/leejianrong/kopicode/internal/provider"
@@ -39,6 +40,38 @@ type Overrides struct {
 	// on one invocation is a usage error rather than a silent precedence
 	// (see [Resolve]).
 	HarnessConfig string
+
+	// MaxTurns overrides the harness's per-prompt turn cap (ADR-0022). Zero
+	// means not given. It changes the configuration and so the hash: a longer
+	// leash is a different arm.
+	MaxTurns int
+	// TokenBudget overrides the session's cumulative token allowance
+	// (ADR-0022). Nil means not given; a pointer to zero means unbounded.
+	TokenBudget *int
+	// Interactive says a person is at the keyboard (the REPL). Unless MaxTurns
+	// is given or the harness is a declared config that chose its own, the turn
+	// cap is then [InteractiveMaxTurns] rather than the corpus's 20.
+	Interactive bool
+}
+
+// InteractiveMaxTurns is the per-prompt turn cap for a REPL session (ADR-0022).
+// The built-in 20 is the benchmark corpus's cap (ADR-0005 §6) and stays the
+// default everywhere a number is compared.
+const InteractiveMaxTurns = 100
+
+// BindLimits registers --max-turns and --token-budget on fs, filling o.
+// Only the human-facing front ends call it; kopibench's arms are fixed.
+func BindLimits(fs *flag.FlagSet, o *Overrides) {
+	fs.IntVar(&o.MaxTurns, "max-turns", 0,
+		"turns the agent may take per prompt (default 100 in the REPL, 20 in run --print)")
+	fs.Func("token-budget", "tokens (prompt+completion) a session may spend; 0 is unbounded", func(v string) error {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return fmt.Errorf("want a count of tokens, 0 or more")
+		}
+		o.TokenBudget = &n
+		return nil
+	})
 }
 
 // Bind registers --model, --harness and --harness-config on fs and returns
@@ -215,6 +248,22 @@ func Resolve(dir string, o Overrides) (Selection, error) {
 	// an arm identified by a value it is not.
 	if len(file.Verify) > 0 {
 		cfg.Verification.Source = VerificationConfigured
+	}
+
+	if o.MaxTurns < 0 {
+		return Selection{}, usagef("max turns is %d; want 1 or more (an unbounded loop is the failure the cap exists to prevent)", o.MaxTurns)
+	}
+	switch {
+	case o.MaxTurns > 0:
+		cfg.MaxTurns = o.MaxTurns
+	case o.Interactive && declaredPath == "":
+		cfg.MaxTurns = InteractiveMaxTurns
+	}
+	if o.TokenBudget != nil {
+		if *o.TokenBudget < 0 {
+			return Selection{}, usagef("token budget is %d; want 0 (unbounded) or more", *o.TokenBudget)
+		}
+		cfg.TokenBudget = *o.TokenBudget
 	}
 
 	return Selection{

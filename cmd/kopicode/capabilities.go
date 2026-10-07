@@ -31,6 +31,7 @@ var features = []string{
 	"mcp",
 	"server.hello",
 	"session.close",
+	"session.limits",
 	"session.read_only",
 	"session.usage",
 	"usage.context",

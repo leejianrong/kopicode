@@ -128,3 +128,37 @@ func TestARouteThatReportsNoCostLeavesItOut(t *testing.T) {
 	}
 	h.close()
 }
+
+// TestServeSessionStartLimitsReachTheSession. max_turns and token_budget on
+// session.start are the limits the session reports back (ADR-0022), and a bad
+// value is refused before a session exists.
+func TestServeSessionStartLimitsReachTheSession(t *testing.T) {
+	t.Setenv(engine.APIKeyEnv, "kopicode-test-credential")
+	srv := scriptedProvider(t, sseBodyWithUsage("one", 400, 10, 0, 0.0001))
+	h := startServe(t, engine.Options{ProviderBaseURL: srv.URL})
+
+	p := startPayload("s1", t.TempDir(), "first")
+	p["max_turns"] = 7
+	p["token_budget"] = 0
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart, "params": p})
+	h.awaitResponse(1)
+
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": methodSessionUsage,
+		"params": map[string]any{"session": "s1"}})
+	u := h.awaitResponse(2)["result"].(map[string]any)["usage"].(map[string]any)
+	if !numEq(u["max_turns"], 7) {
+		t.Errorf("max_turns = %v, want the 7 session.start asked for", u["max_turns"])
+	}
+	if !numEq(u["token_budget"], 0) {
+		t.Errorf("token_budget = %v, want 0 (unbounded)", u["token_budget"])
+	}
+
+	bad := startPayload("s2", t.TempDir(), "first")
+	bad["max_turns"] = -1
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 3, "method": methodSessionStart, "params": bad})
+	errObj, _ := h.awaitResponse(3)["error"].(map[string]any)
+	if errObj == nil || !numEq(errObj["code"], codeUsageError) {
+		t.Errorf("negative max_turns = %v, want code %d", errObj, codeUsageError)
+	}
+	h.close()
+}

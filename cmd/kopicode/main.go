@@ -190,6 +190,8 @@ func interactive(args []string, _, stderr io.Writer) int {
 	fs := flag.NewFlagSet("kopicode", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	overrides := engine.BindSelectionFlags(fs)
+	engine.BindLimitFlags(fs, overrides)
+	overrides.Interactive = true
 	debug := fs.Bool("debug", false, "engine diagnostics on stderr")
 	// --resume is deliberately minimal: the id of an existing session, and
 	// nothing to help find one. `kopicode sessions` (KAN-941) is what finds
