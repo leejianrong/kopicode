@@ -90,6 +90,10 @@ type Selection struct {
 	Pin provider.Pin
 	// Config is the resolved harness configuration.
 	Config Config
+	// ContextWindow is the model's context size in tokens, or 0 when the
+	// registry does not know it. It is metadata about the model and is not in
+	// the hash: it changes nothing the harness does.
+	ContextWindow int
 	// HarnessConfigHash is Config.Hash, carried so the engine does not have to
 	// recompute it per event and so two events in one session cannot disagree.
 	HarnessConfigHash string
@@ -216,6 +220,7 @@ func Resolve(dir string, o Overrides) (Selection, error) {
 	return Selection{
 		ModelID:           entry.ModelID,
 		Pin:               entry.Pin,
+		ContextWindow:     entry.ContextWindow,
 		Config:            cfg,
 		HarnessConfigHash: cfg.Hash(),
 		Verify:            file.Verify,

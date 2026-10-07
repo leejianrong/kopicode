@@ -60,6 +60,9 @@ outcome `run --print`'s last line gives, as `structuredContent` and again as JSO
 {"session":"mcp-3f9a1c2b7d10","record":"/repo/.kopicode/sessions/…","stop":"completed","exit_code":0,"turns":3}
 ```
 
+Each outcome also carries `usage` (context in use, tokens spent, provider-reported cost when every
+request reported one; fields as in [serve's Usage section](kopicode-serve-protocol.md#usage-adr-0021)).
+
 `record` is present only on the opening turn. A task that did not complete (`exit_code != 0`,
 for example `stop: "cancelled"`) is an `isError` result: the call worked and the agent is told
 how it ended. A caller's mistake (a missing `consent_mode`, an unknown session, a refused

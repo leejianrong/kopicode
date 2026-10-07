@@ -145,6 +145,15 @@ type usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+	// Cost is the provider-reported price of the request in USD. A pointer so
+	// "the provider said nothing" is told apart from "the provider said zero":
+	// the first is unknown and is never filled in with a guess.
+	Cost *float64 `json:"cost"`
+	// PromptTokensDetails carries the cache split, when the route reports one.
+	PromptTokensDetails *struct {
+		CachedTokens     int `json:"cached_tokens"`
+		CacheWriteTokens int `json:"cache_write_tokens"`
+	} `json:"prompt_tokens_details"`
 }
 
 // text returns a message's content with null and "" treated alike.
@@ -361,6 +370,14 @@ func (a *accumulator) reply(raw json.RawMessage) Reply {
 			Prompt:     a.usage.PromptTokens,
 			Completion: a.usage.CompletionTokens,
 			Total:      a.usage.TotalTokens,
+		}
+		if d := a.usage.PromptTokensDetails; d != nil {
+			r.Usage.CacheRead = d.CachedTokens
+			r.Usage.CacheWrite = d.CacheWriteTokens
+		}
+		if a.usage.Cost != nil {
+			c := *a.usage.Cost
+			r.Cost = &c
 		}
 	}
 	for _, idx := range a.order {

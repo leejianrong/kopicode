@@ -1,7 +1,7 @@
 # Decisions of record
 
 Each ADR records a decision and why. If a document contradicts an ADR, the ADR wins.
-Twenty exist. Two reverse earlier plans that still appear in older project notes, and
+Twenty-one exist. Two reverse earlier plans that still appear in older project notes, and
 five are amendments layered on top of earlier ones (one of which amends two prior ADRs at
 once). Read the relevant one before proposing a change to what it settles.
 
@@ -27,6 +27,7 @@ once). Read the relevant one before proposing a change to what it settles.
 | [0018](0018-tokenized-allowlist.md) *(Accepted)* | **A tokenized allowlist.** Amends 0011: `allow_commands` in the policy file — command prefixes matched on whole tokens, a line permitted only if *every* command in it matches, ADR-0017's never-allow rules still on top. Answers #157 without the character-prefix matching 0008/0011/0016 rejected. |
 | [0019](0019-read-only-sessions.md) *(Accepted)* | **Read-only sessions.** `read_only: true` on `session.start` denies in-root file edits in the gate, in every mode that accepts it; refused under `auto`. Shell is not made read-only and the docs say so. Answers #176. |
 | [0020](0020-live-ask-over-serve.md) *(Accepted)* | **Live `ask` over serve.** An opt-in `ask.request` server-to-client request beside `consent.request`; expiry is "nobody could answer", not a denial; journalled as source `remote`. Answers #173. |
+| [0021](0021-usage-reporting.md) *(Accepted)* | **Usage reporting.** Context in use (the latest prompt) and tokens spent (the sum) are different numbers and both are reported; an unknown cost or window is absent, never estimated. `usage` on `provider_response`, on every turn result and in a new `session.usage`; `/context` in the REPL. Answers #189. |
 
 Satay's natural consumer in this suite is **cuttlefish** (unattended, triggered,
 credential-holding, not started), not kopicode. Do not reintroduce it here.

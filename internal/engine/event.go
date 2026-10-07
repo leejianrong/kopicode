@@ -191,6 +191,10 @@ type Event struct {
 	// spill threshold lives in a blob, and a surface summarising by size is
 	// pointing at the record rather than reprinting it.
 	Size int64
+	// Tokens is a provider response's usage, split. It is set only on
+	// [EventProviderResponse]; Size carries the same response's total for
+	// surfaces that predate it.
+	Tokens *TokenUsage
 }
 
 // Observer receives events as they are recorded. It is called synchronously on
@@ -286,6 +290,7 @@ func eventOf(ev journal.Event) Event {
 		base.Reason = p.FinishReason
 		base.Source = p.ServedBy
 		base.Size = int64(p.Tokens.Total)
+		base.Tokens = usageOf(p)
 
 	case journal.ToolCallRequested:
 		base.Kind = EventToolCallRequested

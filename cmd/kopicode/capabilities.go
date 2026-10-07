@@ -32,6 +32,11 @@ var features = []string{
 	"server.hello",
 	"session.close",
 	"session.read_only",
+	"session.usage",
+	"usage.context",
+	"usage.context_window",
+	"usage.cost",
+	"usage.tokens_split",
 }
 
 // capabilities is what `kopicode version --json` prints and what serve answers

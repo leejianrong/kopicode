@@ -47,6 +47,20 @@ func fieldShapes(t *testing.T, v any) map[string]string {
 	return out
 }
 
+// TestFixtureUsageIsTheBaseTokenCounts. fixture.Usage is the recorded
+// expectation validated against a body, and it deliberately stops at the three
+// counts every recording has always carried: the cache split is read from the
+// body, and widening the expectation would fail every fixture recorded before
+// the split was decoded for a number the body already states.
+func TestFixtureUsageIsTheBaseTokenCounts(t *testing.T) {
+	want := fieldShapes(t, provider.Usage{})
+	delete(want, "CacheRead")
+	delete(want, "CacheWrite")
+	if got := fieldShapes(t, fixture.Usage{}); !reflect.DeepEqual(want, got) {
+		t.Errorf("fixture.Usage is %v, want provider.Usage less the cache split: %v", got, want)
+	}
+}
+
 func TestPinShapesAgreeAcrossThePackagesThatCannotImportEachOther(t *testing.T) {
 	cases := []struct {
 		name string
@@ -58,7 +72,7 @@ func TestPinShapesAgreeAcrossThePackagesThatCannotImportEachOther(t *testing.T) 
 		},
 		{
 			name: "the token counts",
-			of:   []any{provider.Usage{}, journal.TokenCounts{}, fixture.Usage{}},
+			of:   []any{provider.Usage{}, journal.TokenCounts{}},
 		},
 		{
 			// fixture has no sampling shape: a recording carries the reply, and

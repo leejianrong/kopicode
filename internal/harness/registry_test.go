@@ -357,3 +357,21 @@ func TestNearMatchSuggestionsStayHonest(t *testing.T) {
 		})
 	}
 }
+
+// TestContextWindowIsMetadataNotBehaviour. The window reaches the Selection a
+// surface reads, and it is outside the hash: it changes nothing the harness
+// does, so a registry row learning its window must not move an arm.
+func TestContextWindowIsMetadataNotBehaviour(t *testing.T) {
+	sel, err := harness.Resolve(t.TempDir(), harness.Overrides{})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if sel.ContextWindow != 262_144 {
+		t.Errorf("default selection ContextWindow = %d, want the pinned endpoint's 262144", sel.ContextWindow)
+	}
+	before := sel.Config.Hash()
+	sel.ContextWindow = 1
+	if sel.Config.Hash() != before {
+		t.Error("the context window is in the harness hash; it is model metadata and must not be")
+	}
+}

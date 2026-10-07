@@ -153,6 +153,10 @@ type Config struct {
 	// yields a usable hint.
 	MaxTurns int
 
+	// Usage reports the session's usage for /context. Optional; nil makes
+	// /context say there is nothing to report.
+	Usage UsageFunc
+
 	// Turn runs one exchange. Required.
 	Turn TurnFunc
 
@@ -178,6 +182,7 @@ type Loop struct {
 	closeFn  CloseFunc
 	sig      <-chan os.Signal
 	maxTurns int
+	usage    UsageFunc
 
 	// promptEndsLine records whether the line editor finishes the line
 	// itself. Its raw-mode path always does and its plain path never does;
@@ -230,6 +235,7 @@ func New(cfg Config) (*Loop, error) {
 		closeFn:        cfg.Close,
 		sig:            cfg.Interrupts,
 		maxTurns:       cfg.MaxTurns,
+		usage:          cfg.Usage,
 		promptEndsLine: term.IsInteractive(),
 	}, nil
 }
@@ -304,6 +310,9 @@ func (l *Loop) loop(ctx context.Context) (engine.Stop, error) {
 			continue
 		case commandExit:
 			return engine.StopCompleted, nil
+		case commandContext:
+			l.showContext()
+			continue
 		}
 
 		res, err := l.runTurn(ctx, line)
@@ -426,6 +435,7 @@ const (
 	commandNone lineCommand = iota
 	commandBlank
 	commandExit
+	commandContext
 )
 
 func command(line string) lineCommand {
@@ -434,6 +444,8 @@ func command(line string) lineCommand {
 		return commandBlank
 	case "/exit", "/quit":
 		return commandExit
+	case "/context":
+		return commandContext
 	default:
 		return commandNone
 	}

@@ -43,7 +43,8 @@ func fixtures() map[journal.Type]journal.Payload {
 		AllowFallbacks: false,
 		Quantizations:  []string{"fp8"},
 	}
-	tokens := journal.TokenCounts{Prompt: 1200, Completion: 340, Total: 1540}
+	tokens := journal.TokenCounts{Prompt: 1200, Completion: 340, Total: 1540, CacheRead: 1024, CacheWrite: 64}
+	cost := 0.00054914
 
 	return map[journal.Type]journal.Payload{
 		journal.TypeSessionStarted: journal.SessionStarted{
@@ -79,6 +80,7 @@ func fixtures() map[journal.Type]journal.Payload {
 		journal.TypeProviderResponse: journal.ProviderResponse{
 			Body:         journal.BlobText("e3b0c44298fc1c149afbf4c8996fb924", 91234),
 			Tokens:       tokens,
+			CostUSD:      &cost,
 			FinishReason: "tool_calls",
 			ServedBy:     "deepinfra/fp8",
 		},

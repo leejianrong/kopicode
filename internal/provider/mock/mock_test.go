@@ -129,13 +129,16 @@ func TestEveryFixtureReplaysEndToEnd(t *testing.T) {
 					t.Errorf("exchange %d: served by %q, fixture expects %q",
 						i, reply.ServedBy, ex.Expect.ServedBy)
 				}
+				// The expectation stops at the three base counts; the cache split is
+				// read from the body and is not part of what a fixture promises.
+				got := provider.Usage{Prompt: reply.Usage.Prompt, Completion: reply.Usage.Completion, Total: reply.Usage.Total}
 				want := provider.Usage{
 					Prompt:     ex.Expect.Usage.Prompt,
 					Completion: ex.Expect.Usage.Completion,
 					Total:      ex.Expect.Usage.Total,
 				}
-				if reply.Usage != want {
-					t.Errorf("exchange %d: usage %+v, fixture expects %+v", i, reply.Usage, want)
+				if got != want {
+					t.Errorf("exchange %d: usage %+v, fixture expects %+v", i, got, want)
 				}
 				if string(reply.Raw) != string(ex.Response.Body) {
 					t.Errorf("exchange %d: Raw is not the recorded body verbatim, so the journal would "+
@@ -338,6 +341,7 @@ func journalFragment(t *testing.T, p *mock.Provider, f fixture.Fixture) string {
 		emit(ex.Turn, journal.ProviderResponse{
 			Body:         journal.InlineText(string(reply.Raw)),
 			Tokens:       journal.TokenCounts(reply.Usage),
+			CostUSD:      reply.Cost,
 			FinishReason: reply.FinishReason,
 			ServedBy:     reply.ServedBy,
 		})
