@@ -70,7 +70,7 @@ func ContextReport(u engine.Usage) []string {
 
 	turns := fmt.Sprintf("turns    %d so far", u.Turns)
 	if u.MaxTurns > 0 {
-		turns += fmt.Sprintf("; the cap is %d per prompt", u.MaxTurns)
+		turns += fmt.Sprintf(" in the session; the cap is %d per prompt", u.MaxTurns)
 	}
 	return append(lines, turns)
 }

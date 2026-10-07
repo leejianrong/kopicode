@@ -29,7 +29,7 @@ func TestContextReport(t *testing.T) {
 				"309,000 tokens this session (prompt 300,000, completion 9,000), budget 2,000,000",
 				"120,000 prompt tokens read from the provider's cache",
 				"$0.0123, as reported by the provider",
-				"12 so far; the cap is 20 per prompt",
+				"12 so far in the session; the cap is 20 per prompt",
 			},
 		},
 		{

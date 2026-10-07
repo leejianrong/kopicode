@@ -460,6 +460,9 @@ func (l *Loop) renderOutcome(res engine.Result, err error) {
 	if res.Stop == engine.StopMaxTurns {
 		l.Notice(TurnCapHint(l.maxTurns))
 	}
+	if res.Stop == engine.StopBudgetExhausted {
+		l.Notice(BudgetHint())
+	}
 }
 
 // command classifies a line the user typed.

@@ -64,3 +64,44 @@ func TestSlashModeWithoutASessionToSwitchSaysSo(t *testing.T) {
 		t.Errorf("a refused switch must say so: %q", out)
 	}
 }
+
+func TestBudgetExhaustedExplainsItself(t *testing.T) {
+	var out strings.Builder
+	loop, err := repl.New(repl.Config{
+		In: strings.NewReader("go on\n"), Out: &out,
+		Turn: func(context.Context, string, repl.Surface) (engine.Result, error) {
+			return engine.Result{Stop: engine.StopBudgetExhausted}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loop.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"[stopped] budget_exhausted", "cannot continue", "--token-budget"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output lacks %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestAVerificationThatNeverRanIsNotShownAsAFailure(t *testing.T) {
+	var out strings.Builder
+	loop, err := repl.New(repl.Config{
+		In: strings.NewReader("hi\n"), Out: &out,
+		Turn: func(_ context.Context, _ string, s repl.Surface) (engine.Result, error) {
+			s.Render(engine.Event{Kind: engine.EventVerification, ExitCode: -1})
+			return engine.Result{Stop: engine.StopCompleted}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loop.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "exit -1") || !strings.Contains(out.String(), "skipped: no verification command") {
+		t.Errorf("output:\n%s", out.String())
+	}
+}
