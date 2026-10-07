@@ -46,6 +46,18 @@ type FileConfig struct {
 	// would have to be re-split on replay by a splitter that is not the shell
 	// that ran it, and the two disagree the first time a path holds a space.
 	Verify []string
+
+	// AutoNeverAllow is the `auto_never_allow` key: extra never-allow entries for
+	// auto mode, each "command [token ...]" (ADR-0017). Honoured in both the
+	// project and the user file, and additive: a file can only lengthen the list.
+	AutoNeverAllow []string
+	// DefaultMode is the `default_mode` key, "default" or "auto". User file only
+	// (ADR-0024): a repository must not be able to turn off the prompts for
+	// everyone who clones it.
+	DefaultMode string
+	// SkillsPaths is the `skills_paths` key: extra directories to read skills
+	// from. User file only, for the same reason.
+	SkillsPaths []string
 }
 
 // LoadFileConfig finds and reads the repository's config file, starting at dir
@@ -67,7 +79,7 @@ func LoadFileConfig(dir string) (FileConfig, error) {
 	if !ok {
 		return FileConfig{}, nil
 	}
-	return parseFileConfig(path, string(data))
+	return parseFileConfig(path, string(data), false)
 }
 
 // AgentsFileName is the repository's own project-instructions file
@@ -169,7 +181,7 @@ func findUpward(dir, relPath string) (path string, content []byte, ok bool, err 
 // never a silent skip. That direction is deliberate: this file decides which
 // model runs, and a misread key means a session attributed to the wrong arm.
 // Refusing to start says so; guessing does not.
-func parseFileConfig(path, content string) (FileConfig, error) {
+func parseFileConfig(path, content string, user bool) (FileConfig, error) {
 	cfg := FileConfig{Path: path}
 	seen := map[string]bool{}
 
@@ -202,6 +214,23 @@ func parseFileConfig(path, content string) (FileConfig, error) {
 		}
 		seen[key] = true
 
+		if err := checkScope(key, user); err != nil {
+			return FileConfig{}, usagef("%s:%d: %s", path, lineNo, err)
+		}
+
+		if key == "auto_never_allow" || key == "skills_paths" {
+			list, err := parseStringList(strings.TrimSpace(rest))
+			if err != nil {
+				return FileConfig{}, usagef("%s:%d: %s = %s", path, lineNo, key, err)
+			}
+			if key == "auto_never_allow" {
+				cfg.AutoNeverAllow = list
+			} else {
+				cfg.SkillsPaths = list
+			}
+			continue
+		}
+
 		if key == "verify" {
 			argv, err := parseStringArray(strings.TrimSpace(rest))
 			if err != nil {
@@ -215,6 +244,7 @@ func parseFileConfig(path, content string) (FileConfig, error) {
 			"model":          &cfg.Model,
 			"harness":        &cfg.Harness,
 			"harness_config": &cfg.HarnessConfig,
+			"default_mode":   &cfg.DefaultMode,
 		}[key]
 		if target == nil {
 			// A key belonging to somebody else. Its value is not this reader's
@@ -225,6 +255,9 @@ func parseFileConfig(path, content string) (FileConfig, error) {
 		value, err := parseString(strings.TrimSpace(rest))
 		if err != nil {
 			return FileConfig{}, usagef("%s:%d: %s = %s", path, lineNo, key, err)
+		}
+		if key == "default_mode" && value != "default" && value != "auto" {
+			return FileConfig{}, usagef("%s:%d: default_mode = %q; the modes are \"default\" and \"auto\"", path, lineNo, value)
 		}
 		*target = value
 	}
@@ -394,4 +427,49 @@ func splitArrayElements(body string) []string {
 		out = out[:n-1]
 	}
 	return out
+}
+
+// checkScope refuses a key in the file that may not hold it (ADR-0024). Keys
+// that choose how the session behaves for a person live in the user file; keys
+// that describe the repository live in the repository.
+func checkScope(key string, user bool) error {
+	switch key {
+	case "default_mode", "skills_paths":
+		if !user {
+			return fmt.Errorf("%s belongs in the user config, not the repository's: a repository must not "+
+				"choose how much its visitors are asked (ADR-0024)", key)
+		}
+	case "harness", "harness_config", "verify":
+		if user {
+			return fmt.Errorf("%s is a per-repository key and is not read from the user config (ADR-0024)", key)
+		}
+	}
+	return nil
+}
+
+// parseStringList reads a single-line array of strings. Unlike
+// [parseStringArray] an empty list is fine: it is "add nothing".
+func parseStringList(v string) ([]string, error) {
+	if v == "" {
+		return nil, fmt.Errorf("has no value")
+	}
+	if v[0] != '[' {
+		return nil, fmt.Errorf("%s is not an array; write it as [\"a\", \"b\"]", v)
+	}
+	end := closingBracket(v)
+	if end < 0 {
+		return nil, fmt.Errorf("%s does not close on this line; the reader is line-oriented", v)
+	}
+	if trailer := strings.TrimSpace(v[end+1:]); trailer != "" && !strings.HasPrefix(trailer, "#") {
+		return nil, fmt.Errorf("%s has trailing text after the closing bracket: %q", v, trailer)
+	}
+	var out []string
+	for _, field := range splitArrayElements(v[1:end]) {
+		el, err := parseString(field)
+		if err != nil {
+			return nil, fmt.Errorf("element %d %w", len(out)+1, err)
+		}
+		out = append(out, el)
+	}
+	return out, nil
 }

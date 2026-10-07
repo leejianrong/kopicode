@@ -188,3 +188,64 @@ func TestResumeReplaysTheOriginalProjectInstructions(t *testing.T) {
 		t.Errorf("journaled %d ProjectInstructionsLoaded events across the original run and its resume, want exactly 1", len(got))
 	}
 }
+
+// TestUserInstructionsComeFirstAreScopedAndSurviveResume is ADR-0024's
+// user-level AGENTS.md: journalled with scope "user" ahead of the repository's,
+// shown to the model under its own framing, and replayed from the journal on
+// resume rather than re-read.
+func TestUserInstructionsComeFirstAreScopedAndSurviveResume(t *testing.T) {
+	userFile := filepath.Join(t.TempDir(), "AGENTS.md")
+	if err := os.WriteFile(userFile, []byte("Prefer uv.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dir := writeAgentsFile(t, t.TempDir(), "Run make test.\n")
+	sel := resumeSelection(t)
+	ctx := context.Background()
+
+	prov := &fakeReplyProvider{bodies: [][]byte{proseBody(t, "ok"), proseBody(t, "again")}}
+	open := func(resume bool) *engine.Session {
+		s, err := engine.Open(ctx, engine.Options{
+			Dir: dir, Selection: sel, SessionID: "user-agents", Provider: prov, Now: fixedClock(),
+			UserInstructions: userFile, Resume: resume,
+		})
+		if err != nil {
+			t.Fatalf("Open(resume=%v): %v", resume, err)
+		}
+		return s
+	}
+	s := open(false)
+	if _, err := s.Run(ctx, "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded := payloadsOf[journal.ProjectInstructionsLoaded](t, readJournal(t, s.Path()))
+	if len(loaded) != 2 || loaded[0].Scope != journal.InstructionsScopeUser || loaded[1].Scope != "" {
+		t.Fatalf("loaded = %+v, want the user file (scope user) then the repository's", loaded)
+	}
+
+	// Edit the file on disk: a resume must replay what the model was shown.
+	if err := os.WriteFile(userFile, []byte("CHANGED\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s = open(true)
+	if _, err := s.Run(ctx, "more"); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close(ctx)
+
+	sent := prov.requests[len(prov.requests)-1].Messages
+	userIdx := indexOfContent(sent, "Prefer uv.")
+	repoIdx := indexOfContent(sent, "Run make test.")
+	if userIdx < 0 || repoIdx < 0 || userIdx > repoIdx {
+		t.Fatalf("resumed request lost or reordered the instructions (user at %d, repo at %d)", userIdx, repoIdx)
+	}
+	if !strings.Contains(sent[userIdx].Content, "The user's own AGENTS.md") {
+		t.Errorf("user instructions lost their framing: %q", sent[userIdx].Content)
+	}
+	if indexOfContent(sent, "CHANGED") >= 0 {
+		t.Error("a resume re-read the user file instead of replaying the journal")
+	}
+}

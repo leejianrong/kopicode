@@ -192,7 +192,8 @@ func interactive(args []string, _, stderr io.Writer) int {
 	overrides := engine.BindSelectionFlags(fs)
 	engine.BindLimitFlags(fs, overrides)
 	overrides.Interactive = true
-	mode := fs.String("mode", repl.ModeDefault, "consent mode to start in: default (ask before shell and outside writes) or auto (see /mode)")
+	overrides.UserConfig = true
+	mode := fs.String("mode", "", "consent mode to start in: default (ask before shell and outside writes) or auto (see /mode); default_mode in the user config sets it when this is not given")
 	debug := fs.Bool("debug", false, "engine diagnostics on stderr")
 	// --resume is deliberately minimal: the id of an existing session, and
 	// nothing to help find one. `kopicode sessions` (KAN-941) is what finds
@@ -267,11 +268,19 @@ func interactive(args []string, _, stderr io.Writer) int {
 	// the journal).
 	slog.Debug("arm resolved", "selection", selection)
 
-	if *mode != repl.ModeDefault && *mode != repl.ModeAuto {
-		say(stderr, "kopicode: --mode %q: the modes are default and auto\n", *mode)
+	startMode := *mode
+	if startMode == "" {
+		startMode = selection.Settings.DefaultMode
+	}
+	if startMode != "" && startMode != repl.ModeDefault && startMode != repl.ModeAuto {
+		say(stderr, "kopicode: --mode %q: the modes are default and auto\n", startMode)
 		return exitUsage
 	}
-	opts := engine.Options{Dir: dir, Selection: selection, StartAuto: *mode == repl.ModeAuto}
+	opts := engine.Options{
+		Dir: dir, Selection: selection, StartAuto: startMode == repl.ModeAuto,
+		AutoNeverAllow:   selection.Settings.AutoNeverAllow,
+		UserInstructions: engine.UserAgentsPath(),
+	}
 	std := stdio(stderr)
 	switch {
 	case forkSrc != nil:
