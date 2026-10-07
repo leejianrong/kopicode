@@ -1,0 +1,6 @@
+[
+ {"text":"A failing test suite","start":0.8,"end":3.2},
+ {"text":"Repairs malformed tool calls","start":12.0,"end":15.5},
+ {"text":"Anchored edit, syntax gate","start":21.4,"end":24.0},
+ {"text":"Tests must pass to finish","start":24.2,"end":27.4}
+]
