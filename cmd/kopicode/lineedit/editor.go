@@ -90,6 +90,8 @@ type Config struct {
 	Prompt string
 	// History seeds the recall list, oldest first.
 	History []string
+	// Complete answers Tab. Nil leaves Tab unbound.
+	Complete Completer
 }
 
 // Editor reads one line at a time.
@@ -108,7 +110,8 @@ type Editor struct {
 	width    int
 	lastRows int
 
-	history []string
+	history  []string
+	complete Completer
 
 	// mu guards restore only. It exists because Restore is documented as
 	// callable from a signal handler, which means from another goroutine,
@@ -137,6 +140,7 @@ func New(cfg Config) *Editor {
 		out:      out,
 		terminal: terminal,
 		history:  append([]string(nil), cfg.History...),
+		complete: cfg.Complete,
 	}
 	e.SetPrompt(cfg.Prompt)
 	return e
@@ -251,6 +255,7 @@ func (e *Editor) readPlain() (string, error) {
 func (e *Editor) readInteractive() (string, error) {
 	keys := &keyReader{r: e.in}
 	s := newSession(e.history)
+	s.complete = e.complete
 
 	// Queried once per ReadLine, not per keystroke: a resize mid-line is out
 	// of scope, the same way MakeRaw is called once per ReadLine rather than
@@ -295,6 +300,13 @@ func (e *Editor) readInteractive() (string, error) {
 				return "", err
 			}
 			return "", io.EOF
+
+		case outcomeCandidates:
+			// Below the line, as a shell does, then the prompt again.
+			if err := e.writeString("\r\n" + strings.Join(s.candidates, "  ") + "\r\n"); err != nil {
+				return "", err
+			}
+			e.lastRows = 1
 
 		case outcomeContinue, outcomeUnhandled:
 			// outcomeUnhandled is unreachable — key_internal_test.go fails

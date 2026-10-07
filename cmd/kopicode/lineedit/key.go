@@ -35,6 +35,8 @@ const (
 	keyEnd
 	keyKillToEnd
 	keyKillToStart
+	// keyTab completes the word being typed, when the editor has a completer.
+	keyTab
 	// keyIgnored is a sequence that was recognised, consumed in full, and
 	// deliberately dropped: an unbound control byte, or an escape sequence
 	// this editor has no use for. It is a distinct value rather than an
@@ -61,6 +63,7 @@ var keyNames = map[key]string{
 	keyEnd:           "keyEnd",
 	keyKillToEnd:     "keyKillToEnd",
 	keyKillToStart:   "keyKillToStart",
+	keyTab:           "keyTab",
 	keyIgnored:       "keyIgnored",
 }
 
@@ -79,6 +82,7 @@ const (
 	ctrlC   = 0x03 // interrupt
 	ctrlD   = 0x04 // end of input on an empty line, delete-forward otherwise
 	ctrlE   = 0x05 // end of line
+	ctrlI   = 0x09 // tab
 	ctrlH   = 0x08 // backspace, on terminals that send BS rather than DEL
 	ctrlJ   = 0x0a // line feed
 	ctrlK   = 0x0b // kill to end of line
@@ -131,6 +135,8 @@ func (kr *keyReader) next() (key, rune, error) {
 		return keyEnd, 0, nil
 	case ctrlH, del:
 		return keyBackspace, 0, nil
+	case ctrlI:
+		return keyTab, 0, nil
 	case ctrlJ, ctrlM:
 		return keyEnter, 0, nil
 	case ctrlK:

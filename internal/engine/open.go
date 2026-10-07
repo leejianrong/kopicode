@@ -282,6 +282,11 @@ type Options struct {
 	// StartAuto starts a [Options.Switchable] session in auto mode.
 	StartAuto bool
 
+	// Skills are the discovered skills (see [DiscoverSkills]). A new session is
+	// told, once, about those inside its root (ADR-0025). Nil tells it nothing:
+	// serve and mcp leave it unset, so their sessions are as they were.
+	Skills []Skill
+
 	// UserInstructions is the path of the user-level AGENTS.md (ADR-0024), fed
 	// to a new session before the repository's own. Empty means none; a missing
 	// file is skipped. Only the REPL sets it.
@@ -927,6 +932,9 @@ func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session,
 		// runs after it below — this session's own SessionStarted (seq 1)
 		// must land before anything this bootstrap adds.
 		if err := eng.loadProjectInstructions(ctx, abs, opts.UserInstructions); err != nil {
+			return fail(err)
+		}
+		if err := eng.loadSkillCatalogue(ctx, abs, opts.Skills); err != nil {
 			return fail(err)
 		}
 	}

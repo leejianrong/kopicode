@@ -81,7 +81,7 @@ and `kopibench` never do, so your preferences cannot change what a script or a b
 model = "minimax/minimax-m2"
 default_mode = "auto"                      # start in auto mode (see /mode)
 auto_never_allow = ["terraform apply"]     # added to the built-in list, never replacing it
-skills_paths = ["~/work/shared-skills"]    # reserved for skills
+skills_paths = ["~/work/shared-skills"]    # more places to look for skills
 ```
 
 `auto_never_allow` also works in a repository's file and the two lists add up. `default_mode` and
@@ -168,7 +168,7 @@ mock provider with `make bench-smoke`.
 | `default_mode`, `auto_never_allow`, user `AGENTS.md` | `~/.config/kopicode/` | interactive `kopicode` only |
 | turn cap and other bounds | a declared harness config (`--harness-config`) | for example `max_turns = 40` when a session stops with `max_turns`; local-only, never anchors a published number. See [`docs/harness-tuning.md`](docs/harness-tuning.md) |
 | per-language examples | [`docs/examples/`](docs/examples/) | Go, JavaScript/TypeScript, Python, multi-language |
-| reusable task instructions | `.agents/skills/<name>/SKILL.md` | the same convention Claude Code, Codex and Cursor read. The model is told to look there and may read a skill on its own; there is no `/skill` command to invoke one ([ADR-0014](docs/adr/0014-skills-mechanism.md)) |
+| skills: reusable task instructions | `<name>/SKILL.md` under `.agents/skills`, `.kopicode/skills`, `~/.config/kopicode/skills`, or `skills_paths` in the user config; `~/.claude/skills` and `~/.agents/skills` are read as fallbacks | the convention Claude Code, Codex and Cursor read. `/skills` lists them, `/<name> [task]` runs one, Tab completes the name. A repository's skill beats a personal one of the same name. The model is also shown the ones inside the project once per session. Interactive `kopicode` only ([ADR-0014](docs/adr/0014-skills-mechanism.md), [ADR-0025](docs/adr/0025-skills-discovery-and-commands.md)) |
 
 `kopicode sessions` lists past sessions; `--resume <id>` and `--fork <id>:<turn>` continue or
 branch one. Every session is a journal under `.kopicode/sessions/`; everything printed is

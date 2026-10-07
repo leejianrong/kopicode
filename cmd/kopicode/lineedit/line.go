@@ -1,5 +1,7 @@
 package lineedit
 
+import "strings"
+
 // line is the text being edited and where the cursor sits in it.
 //
 // **Runes, not bytes.** The cursor is an index into a []rune, so every motion
@@ -103,7 +105,18 @@ type history struct {
 type session struct {
 	line line
 	hist history
+
+	// complete, when set, answers Tab; candidates are what it last offered
+	// that the line could not be extended to.
+	complete   Completer
+	candidates []string
 }
+
+// Completer offers completions for a line being typed. Each candidate is a
+// whole replacement line; the editor extends the line to what they share, and
+// lists them when there is nothing more to add. It is called only when the
+// cursor is at the end of the line.
+type Completer func(line string) []string
 
 func newSession(entries []string) *session {
 	return &session{hist: history{entries: entries, pos: len(entries)}}
@@ -147,6 +160,9 @@ const (
 	outcomeInterrupt
 	// outcomeEOF: Ctrl-D on an empty line.
 	outcomeEOF
+	// outcomeCandidates: Tab found several completions and could not narrow
+	// them; the editor prints s.candidates.
+	outcomeCandidates
 	// outcomeUnhandled: no binding for this key. It is unreachable in
 	// product code, and key_internal_test.go is what makes that true — a key
 	// constant added without a case below returns this and fails the suite,
@@ -194,6 +210,8 @@ func (s *session) handle(k key, r rune) outcome {
 		s.line.killToEnd()
 	case keyKillToStart:
 		s.line.killToStart()
+	case keyTab:
+		return s.tab()
 	case keyIgnored:
 		// Recognised, consumed in full, and dropped on purpose. This case
 		// exists so "ignored" is a decision with a line of code behind it
@@ -202,4 +220,31 @@ func (s *session) handle(k key, r rune) outcome {
 		return outcomeUnhandled
 	}
 	return outcomeContinue
+}
+
+// tab completes the line from s.complete.
+func (s *session) tab() outcome {
+	if s.complete == nil || s.line.pos != len(s.line.runes) {
+		return outcomeContinue
+	}
+	cur := s.line.String()
+	cands := s.complete(cur)
+	if len(cands) == 0 {
+		return outcomeContinue
+	}
+	prefix := cands[0]
+	for _, c := range cands[1:] {
+		for !strings.HasPrefix(c, prefix) {
+			prefix = prefix[:len(prefix)-1]
+		}
+	}
+	if len(prefix) > len(cur) {
+		s.line.set(prefix)
+		return outcomeContinue
+	}
+	if len(cands) == 1 {
+		return outcomeContinue
+	}
+	s.candidates = cands
+	return outcomeCandidates
 }

@@ -36,6 +36,9 @@ func wrapProjectInstructions(content string) string {
 // own file is told apart from the repository's, so the model can weigh a
 // repository rule against a personal preference.
 func wrapInstructions(scope, content string) string {
+	if scope == journal.InstructionsScopeSkills {
+		return content
+	}
 	if scope == journal.InstructionsScopeUser {
 		return "The user's own AGENTS.md (their preferences across every project):\n\n" + content
 	}

@@ -1,6 +1,6 @@
 # ADR-0014: A skills mechanism — a documented directory, no new tool
 
-- **Status:** Proposed
+- **Status:** Accepted in part: shape (a) stands as built; [ADR-0025](0025-skills-discovery-and-commands.md) adds discovery roots and commands
 - **Date:** 2026-08-29
 - **Deciders:** Jian (leejianrong2@gmail.com)
 
