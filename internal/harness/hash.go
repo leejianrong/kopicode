@@ -92,6 +92,11 @@ func (c Config) hashWith(anchorVersion string) string {
 	p.num("repair_budget", c.RepairBudget)
 	p.num("max_turns", c.MaxTurns)
 	p.num("token_budget", c.TokenBudget)
+	// Written only when set, so an arm that does not use the stall detector
+	// (every registered one) keeps the hash it had before KAN-1971.
+	if c.StallThreshold != 0 {
+		p.num("stall_threshold", c.StallThreshold)
+	}
 
 	p.bool("verification_forced", c.Verification.Forced)
 	p.str("verification_source", string(c.Verification.Source))
