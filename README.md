@@ -93,6 +93,20 @@ skills_paths = ["~/work/shared-skills"]    # more places to look for skills
 An `AGENTS.md` beside the user config is given to the model before the repository's own, and is
 recorded in the journal. [ADR-0024](docs/adr/0024-user-level-config.md).
 
+**Against a local model or a proxy** (ADR-0027): `--provider-url` (or `provider_url` in the user config,
+never a repository's) sends requests to any OpenAI-compatible endpoint instead of OpenRouter, which is
+the cheap way to try the harness or test an integration.
+
+```bash
+kopicode --provider-url http://localhost:11434/v1 --model qwen2.5-coder:7b     # Ollama, no key needed
+KOPICODE_PROVIDER_API_KEY=... kopicode --provider-url https://llm.example.com/v1 --model my-model
+```
+
+Your OpenRouter key is never sent to that host. The key for it is `KOPICODE_PROVIDER_API_KEY`, optional
+for a loopback address and required otherwise. `http` is accepted for loopback only. These runs are
+unpinned, are named `custom:` in the harness hash and so never pool with a measured arm, report no context
+window, and cannot anchor a benchmark number. `serve` and `mcp` take the same flag.
+
 **As a one-shot**, with the record as newline-delimited JSON on stdout:
 
 ```bash
@@ -168,6 +182,7 @@ mock provider with `make bench-smoke`.
 | Setting | Where | Notes |
 | --- | --- | --- |
 | `OPENROUTER_API_KEY` | environment | required; never written to the journal or logs |
+| `KOPICODE_PROVIDER_API_KEY`, `provider_url` | environment, and the user config or `--provider-url` | only with a custom endpoint (ADR-0027); the first is never sent to OpenRouter and the second never read from a repository |
 | `model`, `harness`, `harness_config` | `.kopicode/config.toml` or flags | flags win; `model` can also come from the user config |
 | `default_mode`, `auto_never_allow`, user `AGENTS.md` | `~/.config/kopicode/` | interactive `kopicode` only |
 | turn cap and other bounds | a declared harness config (`--harness-config`) | for example `max_turns = 40` when a session stops with `max_turns`; local-only, never anchors a published number. See [`docs/harness-tuning.md`](docs/harness-tuning.md) |

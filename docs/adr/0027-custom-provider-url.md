@@ -1,6 +1,6 @@
 # ADR-0027: A custom provider URL, for local models and proxies
 
-*Proposed.* Amends [ADR-0007](0007-model-selection-and-harness-config-shape.md) decisions 1 to 4 and [ADR-0024](0024-user-level-config.md). It does not touch [ADR-0005](0005-benchmark-and-ab-methodology.md): a custom endpoint can never anchor a benchmark number.
+*Accepted.* Amends [ADR-0007](0007-model-selection-and-harness-config-shape.md) decisions 1 to 4 and [ADR-0024](0024-user-level-config.md). It does not touch [ADR-0005](0005-benchmark-and-ab-methodology.md): a custom endpoint can never anchor a benchmark number.
 
 ## Context
 

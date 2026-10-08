@@ -168,7 +168,11 @@ type Client struct {
 	referer  string
 	title    string
 	unpinned bool
-	onRetry  RetryObserver
+	// noRouting omits the OpenRouter `provider` object from the body, and noAuth
+	// the Authorization header (ADR-0027). Both are for a custom URL.
+	noRouting bool
+	noAuth    bool
+	onRetry   RetryObserver
 
 	mu   sync.Mutex
 	rand Rand
@@ -204,6 +208,22 @@ func WithBaseURL(u string) ClientOption {
 			c.baseURL = strings.TrimSuffix(u, "/")
 		}
 	}
+}
+
+// WithoutRouting sends no `provider` routing object and accepts a request with
+// no pin (ADR-0027). It is for a custom endpoint, which has nothing to route:
+// OpenRouter's pin fields mean nothing to a local server and a strict one may
+// refuse them. A run made this way is unpinned, and ADR-0005 §2 says what that
+// is worth.
+func WithoutRouting() ClientOption {
+	return func(c *Client) { c.noRouting, c.unpinned = true, true }
+}
+
+// WithoutAuth sends no Authorization header, and lets [NewClient] accept an
+// empty key (ADR-0027). The caller decides when that is safe; the engine allows
+// it for a loopback host only.
+func WithoutAuth() ClientOption {
+	return func(c *Client) { c.noAuth = true }
 }
 
 // WithHTTPClient replaces the http.Client. Nil is ignored.
@@ -287,9 +307,6 @@ func WithoutPin() ClientOption {
 // outage and is a configuration error — the same misreporting ADR-0007 decision
 // 4 refuses for an unknown model id.
 func NewClient(key APIKey, opts ...ClientOption) (*Client, error) {
-	if key.IsZero() {
-		return nil, ErrNoAPIKey
-	}
 	c := &Client{
 		key:     key,
 		baseURL: DefaultBaseURL,
@@ -301,6 +318,11 @@ func NewClient(key APIKey, opts ...ClientOption) (*Client, error) {
 	}
 	for _, opt := range opts {
 		opt(c)
+	}
+	// Checked after the options, because WithoutAuth is what makes an empty key
+	// legitimate. Without it the refusal is the same as ever.
+	if key.IsZero() && !c.noAuth {
+		return nil, ErrNoAPIKey
 	}
 	return c, nil
 }
@@ -440,7 +462,9 @@ func (c *Client) newHTTPRequest(ctx context.Context, body []byte) (*http.Request
 	if err != nil {
 		return nil, fmt.Errorf("provider: building request for %s: %w", url, err)
 	}
-	req.Header.Set("Authorization", "Bearer "+c.key.reveal())
+	if !c.noAuth {
+		req.Header.Set("Authorization", "Bearer "+c.key.reveal())
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 	if c.referer != "" {
@@ -558,7 +582,7 @@ type wireRequest struct {
 	Model    string           `json:"model"`
 	Messages []wireMessage    `json:"messages"`
 	Stream   bool             `json:"stream"`
-	Provider Pin              `json:"provider"`
+	Provider *Pin             `json:"provider,omitempty"`
 	Tools    []ToolDefinition `json:"tools,omitempty"`
 
 	// Temperature is always sent: 0 is a meaningful value (greedy decoding) and
@@ -597,21 +621,25 @@ func (c *Client) encode(req Request) ([]byte, error) {
 			ErrUnpinned, req.Pin)
 	}
 
+	pin := req.Pin
+	if pin.Order == nil {
+		pin.Order = []string{}
+	}
+	if pin.Quantizations == nil {
+		pin.Quantizations = []string{}
+	}
 	w := wireRequest{
 		Model:       req.ModelID,
 		Stream:      true,
-		Provider:    req.Pin,
+		Provider:    &pin,
 		Tools:       RenderTools(req.Tools),
 		Temperature: req.Sampling.Temperature,
 		TopP:        req.Sampling.TopP,
 		MaxTokens:   req.Sampling.MaxTokens,
 		Seed:        req.Sampling.Seed,
 	}
-	if w.Provider.Order == nil {
-		w.Provider.Order = []string{}
-	}
-	if w.Provider.Quantizations == nil {
-		w.Provider.Quantizations = []string{}
+	if c.noRouting {
+		w.Provider = nil
 	}
 	for _, m := range req.Messages {
 		wm := wireMessage{Role: string(m.Role), Content: m.Content, ToolCallID: m.ToolCallID}

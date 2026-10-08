@@ -119,8 +119,12 @@ type ShellResult struct {
 	Output string
 }
 
-// apiKeyEnv is the one variable a shell command never inherits.
-const apiKeyEnv = "OPENROUTER_API_KEY"
+// apiKeyEnv and customKeyEnv are the variables a shell command never inherits:
+// the OpenRouter credential and the one for a custom provider URL (ADR-0027).
+const (
+	apiKeyEnv    = "OPENROUTER_API_KEY"
+	customKeyEnv = "KOPICODE_PROVIDER_API_KEY"
+)
 
 // RunShell runs one command line in its own process group and returns what it
 // produced.
@@ -312,7 +316,7 @@ func childEnv(home string) []string {
 	env := os.Environ()
 	out := make([]string, 0, len(env)+2)
 	for _, kv := range env {
-		if strings.HasPrefix(kv, apiKeyEnv+"=") {
+		if strings.HasPrefix(kv, apiKeyEnv+"=") || strings.HasPrefix(kv, customKeyEnv+"=") {
 			continue
 		}
 		if home != "" && (strings.HasPrefix(kv, "HOME=") || strings.HasPrefix(kv, "USERPROFILE=")) {

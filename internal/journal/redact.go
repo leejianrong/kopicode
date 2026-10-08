@@ -13,7 +13,7 @@ import (
 // format, and kopicode already knows the actual secret because it read it from
 // the environment to make the request.
 func DefaultSecretEnv() []string {
-	return []string{"OPENROUTER_API_KEY"}
+	return []string{"OPENROUTER_API_KEY", "KOPICODE_PROVIDER_API_KEY"}
 }
 
 // minSecretLen is the shortest value worth redacting.

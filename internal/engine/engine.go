@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/leejianrong/kopicode/internal/harness"
 	"github.com/leejianrong/kopicode/internal/journal"
 	"github.com/leejianrong/kopicode/internal/parse"
 	"github.com/leejianrong/kopicode/internal/permission"
@@ -496,6 +497,9 @@ func (e *Engine) Start(ctx context.Context) error {
 		RepoHead: e.cfg.RepoHead,
 		ModelID:  e.cfg.Selection.ModelID,
 		Provider: journalPin(e.cfg.Selection.Pin),
+		// The host only, and only for a custom endpoint (ADR-0027): the run is
+		// unpinned, and the record says where it went.
+		ProviderHost: harness.ProviderHost(e.cfg.Selection.ProviderURL),
 		// Copied, never recomputed: one session has one arm, and two events
 		// disagreeing about which would be worse than either.
 		HarnessConfigHash: e.cfg.Selection.HarnessConfigHash,

@@ -16,6 +16,13 @@ import (
 // is deliberate and points the other way.
 const KeyEnv = "OPENROUTER_API_KEY"
 
+// CustomKeyEnv is the credential for a custom provider URL (ADR-0027).
+//
+// It exists so that [KeyEnv] is never sent anywhere but OpenRouter: a person who
+// points kopicode at another host has not agreed to give that host their
+// OpenRouter key, and a variable shared by both would do it without asking.
+const CustomKeyEnv = "KOPICODE_PROVIDER_API_KEY"
+
 // ErrNoAPIKey reports that [KeyEnv] was unset or empty.
 //
 // It is a startup failure rather than a request failure: a client built without

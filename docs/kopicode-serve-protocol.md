@@ -225,10 +225,17 @@ dirty bit. `protocol` moves only for a change that breaks an existing client. `f
 list of stable lower-case dotted names, added in the change that ships a capability, never renamed,
 and removed only with a protocol bump. Current names: `allow_commands`, `ask.request`, `consent.note`, `consent_mode.auto`,
 `consent_mode.remote_interactive`, `consent_mode.unattended_policy`, `consent_request.command`,
-`consent_timeout.flag`, `consent_timeout.session`, `mcp`, `server.hello`, `session.close`,
+`consent_timeout.flag`, `consent_timeout.session`, `mcp`, `provider_url.flag`, `server.hello`, `session.close`,
 `session.limits`, `session.read_only`, `session.usage`, `usage.context`, `usage.context_window`, `usage.cost`,
 `usage.tokens_split`.
 `cmd/kopicode/capabilities_test.go` ties the list to the consent modes and methods in the code.
+
+`provider_url.flag` (ADR-0027) means `kopicode serve --provider-url URL` and `kopicode mcp --provider-url URL`
+are accepted. Every session the process opens then sends its requests to that OpenAI-compatible endpoint
+instead of OpenRouter, and each `session.start` must name a `model` the endpoint serves. The credential is
+`KOPICODE_PROVIDER_API_KEY` (optional for a loopback host); `OPENROUTER_API_KEY` is never sent to it. Such
+sessions are unpinned, their `session_started` event carries `provider_host`, and they report no context
+window, so `usage.context_window` is absent for them.
 
 ## `ask.request` (server → client, ADR-0020)
 

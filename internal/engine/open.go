@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/leejianrong/kopicode/internal/build"
+	"github.com/leejianrong/kopicode/internal/harness"
 	"github.com/leejianrong/kopicode/internal/journal"
 	"github.com/leejianrong/kopicode/internal/lock"
 	"github.com/leejianrong/kopicode/internal/permission"
@@ -307,6 +308,12 @@ type Options struct {
 	// Ignored when Provider is set.
 	ProviderBaseURL string
 
+	// ProviderURL is the --provider-url the process was started with (ADR-0027).
+	// serve and mcp set it once and the session manager passes it to every
+	// session's selection; [Open] itself reads Selection.ProviderURL and ignores
+	// this field.
+	ProviderURL string
+
 	// Snapshots decides whether turn snapshots are written. The zero value
 	// writes them in a repository and not outside one, which is what an
 	// interactive session wants.
@@ -425,6 +432,14 @@ var ErrNoAPIKey = errors.New("engine: OPENROUTER_API_KEY is not set")
 // from. It is named here so a surface can say so in an error message without
 // importing internal/provider.
 const APIKeyEnv = "OPENROUTER_API_KEY"
+
+// CustomAPIKeyEnv is the credential for a custom provider URL (ADR-0027). The
+// OpenRouter key is never sent to any other host.
+const CustomAPIKeyEnv = provider.CustomKeyEnv
+
+// ErrNoCustomAPIKey is returned when a custom provider URL names a host that is
+// not loopback and KOPICODE_PROVIDER_API_KEY is not set.
+var ErrNoCustomAPIKey = errors.New("engine: KOPICODE_PROVIDER_API_KEY is not set")
 
 // ErrSessionLocked reports that another live session already holds the working
 // tree (docs/SLICE-1.md §8). The error returned by [Open] wraps it and its
@@ -1068,6 +1083,12 @@ func requireProviderCredential(opts Options) error {
 	if opts.Provider != nil {
 		return nil
 	}
+	if u := opts.Selection.ProviderURL; u != "" {
+		if os.Getenv(CustomAPIKeyEnv) == "" && !harness.ProviderURLIsLoopback(u) {
+			return ErrNoCustomAPIKey
+		}
+		return nil
+	}
 	if os.Getenv(APIKeyEnv) == "" {
 		return ErrNoAPIKey
 	}
@@ -1088,6 +1109,10 @@ func openProvider(opts Options, jrn journal.Journal) (Provider, error) {
 		// so the model id is the only fact worth echoing.
 		slog.Debug("provider supplied by caller", "model", opts.Selection.ModelID)
 		return opts.Provider, nil
+	}
+
+	if u := opts.Selection.ProviderURL; u != "" {
+		return openCustomProvider(opts, u, jrn)
 	}
 
 	key := os.Getenv(APIKeyEnv)
@@ -1116,6 +1141,33 @@ func openProvider(opts Options, jrn journal.Journal) (Provider, error) {
 	// nothing to gain from trying.
 	slog.Debug("connecting to provider",
 		"base_url", baseURL, "model", opts.Selection.ModelID, "pin", opts.Selection.Pin.String())
+	c, err := provider.NewClient(provider.NewAPIKey(key), clientOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("engine: building the provider client: %w", err)
+	}
+	return c, nil
+}
+
+// openCustomProvider builds the client for a custom provider URL (ADR-0027).
+//
+// The credential is KOPICODE_PROVIDER_API_KEY and never OPENROUTER_API_KEY, which
+// belongs to OpenRouter alone. A loopback host with no key gets no Authorization
+// header at all. No routing object is sent: the run is unpinned.
+func openCustomProvider(opts Options, baseURL string, jrn journal.Journal) (Provider, error) {
+	clientOpts := []provider.ClientOption{
+		provider.WithBaseURL(baseURL),
+		provider.WithoutRouting(),
+		provider.WithRetryObserver(journalRetryObserver(jrn)),
+		provider.WithLogger(slog.Default()),
+	}
+	key := os.Getenv(CustomAPIKeyEnv)
+	if key == "" {
+		if !harness.ProviderURLIsLoopback(baseURL) {
+			return nil, ErrNoCustomAPIKey
+		}
+		clientOpts = append(clientOpts, provider.WithoutAuth())
+	}
+	slog.Debug("connecting to a custom provider", "host", harness.ProviderHost(baseURL), "model", opts.Selection.ModelID)
 	c, err := provider.NewClient(provider.NewAPIKey(key), clientOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("engine: building the provider client: %w", err)

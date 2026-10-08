@@ -52,6 +52,7 @@ func fixtures() map[journal.Type]journal.Payload {
 			RepoHead:          "6c9eab8f0e2b1c",
 			ModelID:           "qwen/qwen3-coder-next",
 			Provider:          pin,
+			ProviderHost:      "localhost:11434",
 			HarnessConfigHash: "sha256:abc123",
 			Build: journal.BuildInfo{
 				Version:   "v0.1.0-3-g6c9eab8",

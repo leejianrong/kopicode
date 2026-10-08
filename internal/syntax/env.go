@@ -30,6 +30,7 @@ var stripped = []struct {
 	why  string
 }{
 	{APIKeyEnv, "the provider credential belongs in no subprocess"},
+	{"KOPICODE_PROVIDER_API_KEY", "the custom provider credential belongs in no subprocess (ADR-0027)"},
 
 	// The Go toolchain. GOFLAGS can inject build tags or -mod=vendor and
 	// silently change which files are even compiled; GOOS and GOARCH make the

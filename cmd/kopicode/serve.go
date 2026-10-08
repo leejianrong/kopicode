@@ -401,6 +401,10 @@ func residentOptions(name, noArgsHint string, args []string, stderr io.Writer) (
 	// ask call nobody can answer, or the fixed headless refusal when unset.
 	askPolicyFile := fs.String("ask-policy-file", "", "load an ask-policy file (ADR-0013) whose note answers "+
 		"the model's ask calls for every session; unset means the fixed 'no human is present' refusal")
+	// ADR-0027: every session this process opens talks to this endpoint instead
+	// of OpenRouter. Each session.start must then name a model the endpoint serves.
+	providerURL := fs.String("provider-url", "", "send every session's requests to this OpenAI-compatible endpoint "+
+		"instead of OpenRouter (unpinned, never a benchmark arm; the key is KOPICODE_PROVIDER_API_KEY, optional on loopback)")
 	timeoutFlag := fs.Duration("consent-timeout", remoteConsentTimeout, "how long a live consent request "+
 		"(consent_mode remote_interactive) waits for the client's answer before it is denied, for example 5m; "+
 		"between 1s and 24h")
@@ -422,6 +426,15 @@ func residentOptions(name, noArgsHint string, args []string, stderr io.Writer) (
 	if err != nil {
 		say(stderr, "kopicode: %v\n", err)
 		return base, 0, exitUsage, false
+	}
+
+	if *providerURL != "" {
+		u, err := engine.ValidateProviderURL(*providerURL)
+		if err != nil {
+			say(stderr, "kopicode: %v\n", err)
+			return base, 0, exitUsage, false
+		}
+		base.ProviderURL = u
 	}
 
 	// Loaded up front, the same ordering ADR-0007 decision 4 holds every other

@@ -124,6 +124,10 @@ type SessionStarted struct {
 	ModelID string `json:"model_id"`
 	// Provider is the pin every request in this session carries.
 	Provider ProviderPin `json:"provider"`
+	// ProviderHost is the host of a custom provider URL (ADR-0027), or absent
+	// for OpenRouter. Never a path, query or credential. A session with one is
+	// unpinned, and nothing may treat it as a benchmark arm.
+	ProviderHost string `json:"provider_host,omitempty"`
 	// HarnessConfigHash identifies the harness configuration, so two runs can
 	// be compared only when they were run the same way.
 	HarnessConfigHash string `json:"harness_config_hash"`
