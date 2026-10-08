@@ -192,7 +192,7 @@ wasn't reached, because the thing being staged was never approved.
   different shape of solution this ADR did not evaluate. KAN-991 scopes it. Recorded here
   rather than silently added as a sixth rejected-and-replaced alternative, because it is
   not this ADR's decision to make — it belongs to whatever ADR eventually comes out of
-  KAN-991's scoping.
+  KAN-991's scoping. That ADR is now [ADR-0026](0026-handoff.md) (proposed).
 
 ## Consequences
 

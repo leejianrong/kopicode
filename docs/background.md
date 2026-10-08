@@ -27,7 +27,7 @@ feature and not a wedge. ADR-0002 had already stopped leaning on it.
 
 **Competing on tool surface is unwinnable and off-thesis.** Explicit non-goals, not
 "later": LSP integration, DAP debugging, browser or desktop control, voice and TTS,
-image generation, a memory system, in-process coreutils, dozens of providers, and
+image generation, self-editing or auto-written memory, in-process coreutils, dozens of providers, and
 IDE integration. Every one is orthogonal to whether a cheap open model can be made to
 code reliably — which is the only question this project is trying to answer.
 

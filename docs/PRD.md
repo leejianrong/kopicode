@@ -142,7 +142,7 @@ JSON-RPC surface, container isolation for the bench runner, and context compacti
 from real session data rather than guessed.
 
 **Not planned, and this list is as load-bearing as the one above.** LSP integration, DAP
-debugging, browser or desktop control, voice, image tools, a memory system, in-process
+debugging, browser or desktop control, voice, image tools, self-editing or auto-written memory, in-process
 coreutils, dozens of providers, IDE integration, AST-structural editing, and any hosted or
 shared journal.
 
