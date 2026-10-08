@@ -58,6 +58,13 @@ not this list:
   `unattributed` in the bench classifier. `run_shell` is the one tool with no
   containment claim — its working directory is resolved like any other path, but a
   shell goes where it likes, which is why the permission gate exists.
+- **`internal/handoff`** (ADR-0026, proposed) — the document a session leaves for its successor. A
+  leaf over `internal/journal` that calls no model and touches no disk. The model writes the
+  narrative sections; the facts (files written and deleted, last verification, refused calls, usage)
+  are derived from journal events, so a model that forgets a file does not lose it. The prompt, the
+  parser and the renderer all walk one section list so they cannot drift. A passing verification is
+  always rendered as dated, with an instruction to run it again. Step 1 of 3: the engine call, the
+  REPL command and the wire method are not built yet.
 - **`internal/syntax`** — the post-edit gate: a language-native check (`gofmt -e`,
   `node --check`, `py_compile`, …) run immediately after an edit. `NotRun` is the zero
   value of `Outcome` — a gate that didn't run must never read as one that passed — and
@@ -219,6 +226,7 @@ internal/
   syntax/            the post-edit language gate
   verify/            forced verification: discovery and the run
   procgroup/         start a subprocess in its own group, end the whole group
+  handoff/           the handoff document: narrative sections plus journal-derived facts
   journal/           Journal interface, FileJournal, blob spill, redaction, event types
   repo/              git shadow refs — write, restore, resume and fork
   lock/              the advisory lock at .kopicode/lock — one session per working tree

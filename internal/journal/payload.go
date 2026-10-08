@@ -723,6 +723,31 @@ type ProjectInstructionsLoaded struct {
 
 func (ProjectInstructionsLoaded) Type() Type { return TypeProjectInstructionsLoaded }
 
+// HandoffWritten records a session's handoff document (ADR-0026): what a fresh
+// session needs in order to carry on, written when a person or a caller asked
+// for one.
+//
+// The journal is the record and the file named by Path is a projection of it,
+// the same arrangement as everything else a surface prints: if the two ever
+// disagree, this event is right. Document is the whole text, the model's
+// sections and the facts block kopicode appended from the journal, so a reader
+// of the record sees exactly what the next session was given.
+//
+// It does not end the session. Whether to keep working in it, and whether to
+// start another from the document, is the caller's decision, and the new
+// session's own journal says which handoff it began from.
+type HandoffWritten struct {
+	// Goal is what the person asked the next session to do, when they said.
+	// Absent when the handoff was asked for without one.
+	Goal string `json:"goal,omitempty"`
+	// Document is the complete handoff text.
+	Document Text `json:"document"`
+	// Path is the projection file, absolute. Absent when none was written.
+	Path string `json:"path,omitempty"`
+}
+
+func (HandoffWritten) Type() Type { return TypeHandoffWritten }
+
 // AskRequested records that the model paused the turn to ask the human a
 // question (docs/adr/0009-ask-tool-contract.md decision 3).
 //

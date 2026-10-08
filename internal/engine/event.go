@@ -50,6 +50,7 @@ const (
 	EventAskRequested
 	EventAskAnswered
 	EventProjectInstructionsLoaded
+	EventHandoffWritten
 
 	// EventUnknown is an event this build has no typed payload for, preserved
 	// by the journal's compatibility promise and passed through here rather
@@ -97,6 +98,7 @@ var eventKindText = map[EventKind]string{
 	EventAskRequested:              "ask_requested",
 	EventAskAnswered:               "ask_answered",
 	EventProjectInstructionsLoaded: "project_instructions_loaded",
+	EventHandoffWritten:            "handoff_written",
 	EventUnknown:                   "unknown",
 	EventDelta:                     "delta",
 }
@@ -412,6 +414,12 @@ func eventOf(ev journal.Event) Event {
 		base.Kind = EventProjectInstructionsLoaded
 		base.Path = p.Path
 		base.Text, base.Size = text(p.Content)
+
+	case journal.HandoffWritten:
+		base.Kind = EventHandoffWritten
+		base.Path = p.Path
+		base.Reason = p.Goal
+		base.Text, base.Size = text(p.Document)
 
 	case journal.UnknownPayload:
 		// The journal's compatibility promise, carried one layer further out. A

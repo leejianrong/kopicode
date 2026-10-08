@@ -90,6 +90,7 @@ func everyKind() []engine.Event {
 		{Kind: engine.EventAskAnswered, Seq: 30, Detail: "kc-2", Text: "config/retry.toml", Source: "user"},
 		{Kind: engine.EventAskAnswered, Seq: 31, Detail: "kc-2", Text: "no human is present", Source: "policy", Reason: "refused"},
 		{Kind: engine.EventProjectInstructionsLoaded, Seq: 32, Path: "/repo/AGENTS.md", Size: 512},
+		{Kind: engine.EventHandoffWritten, Seq: 33, Path: "/repo/.kopicode/handoff/s.md", Size: 1024, Reason: "finish the backoff"},
 		// The zero value, which must be reported rather than dropped.
 		{},
 	}

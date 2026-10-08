@@ -149,6 +149,16 @@ func (l *Loop) Render(e engine.Event) {
 		}
 		l.tag("instructions", fmt.Sprintf("%s (%s)", label, humanBytes(e.Size)))
 
+	case engine.EventHandoffWritten:
+		// A handoff was written (ADR-0026). One line saying where it is; the
+		// document itself is shown by the command that asked for it, which is
+		// where a person reads and edits it.
+		label := e.Path
+		if label == "" {
+			label = "in the record"
+		}
+		l.tag("handoff", fmt.Sprintf("written, %s (%s)", label, humanBytes(e.Size)))
+
 	case engine.EventAskAnswered:
 		if e.Reason == "refused" {
 			l.tag("ask", fmt.Sprintf("unanswered (%s): %s", e.Source, e.Text))

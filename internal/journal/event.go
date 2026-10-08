@@ -80,6 +80,9 @@ const (
 	// TypeProjectInstructionsLoaded is KAN-1024/KAN-1025's addition, after the
 	// slice-1 set above.
 	TypeProjectInstructionsLoaded Type = "ProjectInstructionsLoaded"
+
+	// TypeHandoffWritten is ADR-0026's addition: a session's handoff document.
+	TypeHandoffWritten Type = "HandoffWritten"
 )
 
 // Payload is one event's typed body.
@@ -254,6 +257,8 @@ var registry = map[Type]func([]byte) (Payload, error){
 	TypeAskAnswered:         decodeInto[AskAnswered],
 
 	TypeProjectInstructionsLoaded: decodeInto[ProjectInstructionsLoaded],
+
+	TypeHandoffWritten: decodeInto[HandoffWritten],
 }
 
 // KnownTypes lists every discriminator this build can decode into a typed
