@@ -125,7 +125,8 @@ not this list:
   Every bound (turn cap, token budget, repair attempts) comes off the harness config,
   never a package constant, so two runs differing in a bound compare as different arms.
   Context assembly is naive full history, a decision made deliberately rather than a
-  gap — a compaction strategy chosen without session data would be a guess.
+  gap. In-place compaction was rejected (ADR-0012); the chosen direction is ending a
+  session and starting a fresh one from a handoff document (ADR-0026, proposed).
   `TurnCancelled` records what was *in flight* when a turn was cancelled
   (`provider_stream` / `tool_call` / `verification` / `between_steps`), so a cancelled
   session is distinguishable from a genuinely stuck one.

@@ -63,7 +63,7 @@ prefix-cache exploitation, the SWE-bench-Verified anchor run, `glob` as a distin
 tool (grep + `list_dir` cover it), and any hosted or shared journal.
 
 Explicit non-goals, per the README: LSP, DAP debugging, browser or desktop control,
-voice, image tools, a memory system, in-process coreutils, and AST-structural editing
+voice, image tools, self-editing or auto-written memory, in-process coreutils, and AST-structural editing
 (ADR-0006 §6).
 
 ---

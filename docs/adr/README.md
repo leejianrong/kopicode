@@ -1,7 +1,7 @@
 # Decisions of record
 
 Each ADR records a decision and why. If a document contradicts an ADR, the ADR wins.
-Twenty-five exist. Two reverse earlier plans that still appear in older project notes, and
+Twenty-six exist. Two reverse earlier plans that still appear in older project notes, and
 five are amendments layered on top of earlier ones (one of which amends two prior ADRs at
 once). Read the relevant one before proposing a change to what it settles.
 
@@ -18,7 +18,7 @@ once). Read the relevant one before proposing a change to what it settles.
 | [0009](0009-ask-tool-contract.md) *(Proposed)* | **The `ask` tool** is a sibling mechanism to consent, not an extension of `internal/permission` — free-text question/answer, never a `Verdict`. |
 | [0010](0010-declarative-harness-configs-and-self-tuning.md) | **Declarative harness configs + `kopitune`.** Amends 0007: a second, *declared* config class (TOML, base + overrides) alongside the built-in registry, for models with no hand-tuned entry. Local-only — never anchors a published benchmark number. |
 | [0011](0011-unattended-invocation-policy-gate.md) | **A policy gate for unattended invocation.** Amends 0008: a new opt-in `permission.Policy` (declared allowlist) for a caller like cuttlefish that spawns kopicode with no human present. Real containment is the caller's job, not kopicode's — kopicode gains no sandbox dependency from this. |
-| [0012](0012-context-compaction-strategy.md) | **Context compaction.** Decision 1 (a smaller verification-truthfulness fix) **Accepted**; decision 2 (a supersession-based compaction strategy) **Rejected** on review. |
+| [0012](0012-context-compaction-strategy.md) | **Context compaction.** Decision 1 (a smaller verification-truthfulness fix) **Accepted**; decision 2 (a supersession-based compaction strategy) **Rejected** on review. The chosen direction is not "no memory" but ending a long session and starting a fresh one from a handoff document: see 0026. |
 | [0013](0013-agent-controlled-resident-session-surface.md) | **`kopicode serve`, a resident session surface over stdio.** NDJSON JSON-RPC 2.0, N concurrent `engine.Open` sessions in one process, credentials via env only, reusing ADR-0011's policy flags and adding an opt-in `--ask-policy-file` (a sibling to consent, per ADR-0009). No engine-boundary change. EPIC-131. |
 | [0014](0014-skills-mechanism.md) *(Accepted in part; see 0025)* | **A skills mechanism — a documented directory, no new tool.** Reusable task instructions under `.agents/skills/<name>/SKILL.md` (a multi-vendor convention), discovered and read with the existing `read_file`/`list_dir`/`grep`; one system-prompt sentence points the model there. No engine loader, no dispatch or catalogue change. EPIC-132. |
 | [0015](0015-mcp-server-front-end.md) *(Accepted)* | **An MCP server front end.** A fourth `cmd/kopicode` subcommand (`mcp`), reusing `serve`'s session core over a new `cmd/kopicode/session` package, so any MCP-capable agent orchestrator can drive kopicode with zero bespoke client code. Additive — `serve`'s wire is unchanged. |
@@ -32,6 +32,7 @@ once). Read the relevant one before proposing a change to what it settles.
 | [0023](0023-repl-auto-mode.md) *(Accepted)* | **Auto mode in the REPL.** Amends 0017: `--mode auto` and `/mode` switch a REPL session between asking and auto mid-session (`permission.Switch`); the never-allow list gains global installs, destructive git, `--no-verify` and recursive permission changes, each refusal saying what to do instead. Default and auto only. |
 | [0024](0024-user-level-config.md) *(Accepted)* | **User-level config.** Amends 0007: `~/.config/kopicode/config.toml` (`KOPICODE_HOME`/`XDG_CONFIG_HOME` locate it) and an `AGENTS.md` beside it, read by the interactive REPL only. `model`, `default_mode`, `auto_never_allow`, `skills_paths`; `default_mode` and `skills_paths` are refused in a repository's file. |
 | [0025](0025-skills-discovery-and-commands.md) *(Accepted)* | **Skills: discovery and commands.** Amends 0014 (shape (a) stands, no new tool): several roots in a fixed order, `/skills`, `/<name> [task]` inlining the body, Tab completion, and a catalogue of the skills inside the project told to a new REPL session through the journal. No change to the system prompt or the hash. |
+| [0026](0026-handoff.md) *(Proposed)* | **Handoff.** Settles the direction ADR-0012 left open (KAN-991): a long session ends and a new one starts from a document, never an in-place rewrite. Fixed sections, model-written narrative plus a harness-written facts block from the journal, verification reset to `NotRun`, `/handoff` in the REPL and `session.handoff` on the wire. The journal stays the record; the file is a projection. |
 
 Satay's natural consumer in this suite is **cuttlefish** (unattended, triggered,
 credential-holding, not started), not kopicode. Do not reintroduce it here.
