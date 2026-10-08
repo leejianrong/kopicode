@@ -132,6 +132,10 @@ kopicode as a child; `kopicode version --json` lists the protocol version and th
 your binary supports, so a client can require one. See [`docs/kopicode-mcp.md`](docs/kopicode-mcp.md) and
 [`docs/kopicode-serve-protocol.md`](docs/kopicode-serve-protocol.md).
 
+If the model goes in circles (the same call with the same result three times, or three failed edits to one
+file, with nothing written in between) the REPL tells it so and what to try instead
+([ADR-0028](docs/adr/0028-stall-detector.md)). `--stall-threshold N` changes the count and `0` turns it off.
+
 A session is bounded: each prompt gets at most **20 model calls** (the turn cap) and the
 session at most 2M tokens. A task that needs more ends with `stop: max_turns` rather than
 running on; the work done so far stays in the tree, and replying continues it with a fresh

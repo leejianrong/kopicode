@@ -293,6 +293,11 @@ type Engine struct {
 	// denied. Any call that doesn't match resets it, so a repeat that
 	// succeeds, or a different call in between, never collapses.
 	lastDispatch dispatchOutcome
+
+	// stall is the stall detector's state (KAN-1971): transient, in memory, and
+	// reset by anything that changes the tree. Off when the harness config's
+	// StallThreshold is 0.
+	stall stallTracker
 }
 
 // dispatchOutcome is one dispatched call's identity, for the repeat-denial

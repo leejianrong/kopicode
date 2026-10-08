@@ -1,7 +1,7 @@
 # Decisions of record
 
 Each ADR records a decision and why. If a document contradicts an ADR, the ADR wins.
-Twenty-seven exist. Two reverse earlier plans that still appear in older project notes, and
+Twenty-eight exist. Two reverse earlier plans that still appear in older project notes, and
 five are amendments layered on top of earlier ones (one of which amends two prior ADRs at
 once). Read the relevant one before proposing a change to what it settles.
 
@@ -34,6 +34,7 @@ once). Read the relevant one before proposing a change to what it settles.
 | [0025](0025-skills-discovery-and-commands.md) *(Accepted)* | **Skills: discovery and commands.** Amends 0014 (shape (a) stands, no new tool): several roots in a fixed order, `/skills`, `/<name> [task]` inlining the body, Tab completion, and a catalogue of the skills inside the project told to a new REPL session through the journal. No change to the system prompt or the hash. |
 | [0026](0026-handoff.md) *(Proposed)* | **Handoff.** Settles the direction ADR-0012 left open (KAN-991): a long session ends and a new one starts from a document, never an in-place rewrite. Fixed sections, model-written narrative plus a harness-written facts block from the journal, verification reset to `NotRun`, `/handoff` in the REPL and `session.handoff` on the wire. The journal stays the record; the file is a projection. |
 | [0027](0027-custom-provider-url.md) *(Accepted)* | **A custom provider URL.** Amends 0007 and 0024. `--provider-url` / `provider_url` (flag or user file only, never a repository's) points kopicode at a local or proxy endpoint. The OpenRouter key is never sent to another host (`KOPICODE_PROVIDER_API_KEY`, optional on loopback), any model id is accepted, the run is unpinned and named `custom:` in the hash, and it can never anchor a benchmark number. |
+| [0028](0028-stall-detector.md) *(Accepted)* | **A stall detector.** The same call with the same result, or edits to one file that keep failing, N times in a row with no landed write between, gets a note after the result. Wire only, journal untouched. `StallThreshold` is in the hash only when set; the REPL defaults it to 3, every benchmark arm stays off. |
 
 Satay's natural consumer in this suite is **cuttlefish** (unattended, triggered,
 credential-holding, not started), not kopicode. Do not reintroduce it here.

@@ -235,6 +235,15 @@ type Config struct {
 	// second half of the bounded loop (docs/SLICE-1.md build step 9).
 	TokenBudget int
 
+	// StallThreshold is how many times in a row the same thing may happen before
+	// the loop tells the model it is stuck (KAN-1971): the same call with the
+	// same result and nothing changed in between, or edits to one file that keep
+	// failing. 0 turns the detector off, which is every registered arm and so
+	// every benchmark number; the REPL defaults it to [DefaultStallThreshold].
+	// It changes what the model is told, so it is in the hash, and only when it
+	// is set, so no existing arm's hash moves.
+	StallThreshold int
+
 	// Verification is the forced-verification policy.
 	Verification Verification
 

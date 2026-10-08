@@ -266,7 +266,7 @@ func (e *Engine) dispatch(ctx context.Context, turn int, ext parse.Extraction) (
 			return mutated, err
 		}
 
-		output, mut, denied, err := e.runTool(ctx, turn, id, call)
+		output, mut, denied, failed, err := e.runTool(ctx, turn, id, call)
 		if err != nil {
 			return mutated, err
 		}
@@ -288,6 +288,14 @@ func (e *Engine) dispatch(ctx context.Context, turn int, ext parse.Extraction) (
 			e.lastDispatch = dispatchOutcome{tool: call.Name, args: call.Arguments, denied: denied}
 		}
 
+		// KAN-1971: tell a model that is going round in circles so. After the
+		// collapse above, so a repeated denial is not also called a stall.
+		if !denied {
+			if note := e.stall.observe(e.cfg.Selection.Config.StallThreshold, call.Name, call.Arguments, output, failed, denied); note != "" {
+				wire += "\n\n" + note
+			}
+		}
+
 		if err := e.asm.AppendToolResult(call.ID, wire); err != nil {
 			return mutated, fmt.Errorf("engine: placing the result of %s (call %q): %w", call.Name, id, err)
 		}
@@ -305,13 +313,15 @@ func (e *Engine) dispatch(ctx context.Context, turn int, ext parse.Extraction) (
 // The string it returns is what the model sees next, and it is never empty and
 // never clipped — it is journal.ToolResult.Output verbatim; dispatch is the
 // only place that may shorten what reaches the model, and only for a detected
-// repeat denial. The first bool says the tree may have changed. The second
+// repeat denial. The first bool says the tree may have changed. The third says
+// the call failed (an unknown tool, undecodable arguments, a refusal, or the
+// tool's own error), which the stall detector counts. The second
 // says the permission gate itself ran and refused the call — the "denied" this
 // package's repeat-collapse cares about, as opposed to a tool failing for any
 // other reason (an unknown tool, arguments that didn't decode, the tool's own
 // error). The error is fatal and only ever the harness's own: a tool that
 // failed is an observation, not an exception.
-func (e *Engine) runTool(ctx context.Context, turn int, callID string, call parse.ToolCall) (string, bool, bool, error) {
+func (e *Engine) runTool(ctx context.Context, turn int, callID string, call parse.ToolCall) (string, bool, bool, bool, error) {
 	entry, ok := toolByName[call.Name]
 	if !ok || !e.offered[call.Name] {
 		// Two ways in, and both are refusals rather than surprises. The name
@@ -329,18 +339,18 @@ func (e *Engine) runTool(ctx context.Context, turn int, callID string, call pars
 			Reason: parse.KindUnknownTool.String(),
 			Detail: journal.InlineText(detail),
 		}); err != nil {
-			return "", false, false, err
+			return "", false, false, false, err
 		}
-		return detail, false, false, nil
+		return detail, false, false, true, nil
 	}
 
 	args := entry.newArgs()
 	if err := json.Unmarshal(call.Arguments, args); err != nil {
 		detail := fmt.Sprintf("the arguments for %s did not decode: %v", call.Name, err)
 		if jerr := e.journalToolResult(ctx, turn, callID, call.Name, detail, nil, tools.FaultTask); jerr != nil {
-			return "", false, false, jerr
+			return "", false, false, false, jerr
 		}
-		return detail, false, false, nil
+		return detail, false, false, true, nil
 	}
 
 	act := permission.Action{ID: callID, Tool: call.Name, Operation: entry.op}
@@ -352,25 +362,25 @@ func (e *Engine) runTool(ctx context.Context, turn int, callID string, call pars
 	outcome, perr := e.cfg.Permissions.Check(ctx, act)
 	if outcome.Required {
 		if err := e.journalPermission(ctx, turn, outcome); err != nil {
-			return "", false, false, err
+			return "", false, false, false, err
 		}
 	}
 	if perr != nil {
 		detail := perr.Error()
 		if jerr := e.journalToolResult(ctx, turn, callID, call.Name, detail, nil, faultOf(perr)); jerr != nil {
-			return "", false, false, jerr
+			return "", false, false, false, jerr
 		}
-		return detail, false, true, nil
+		return detail, false, true, true, nil
 	}
 
 	res, err := entry.run(ctx, e, turn, callID, args)
 	if err != nil {
-		return "", false, false, err
+		return "", false, false, false, err
 	}
 	if jerr := e.journalToolResult(ctx, turn, callID, call.Name, res.output, res.exitCode, faultOf(res.err)); jerr != nil {
-		return "", false, false, jerr
+		return "", false, false, false, jerr
 	}
-	return res.output, entry.mutates, false, nil
+	return res.output, entry.mutates, false, res.err != nil, nil
 }
 
 // journalToolResult writes the outcome of one call. Output goes in whole:

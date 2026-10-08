@@ -48,6 +48,10 @@ type Overrides struct {
 	// TokenBudget overrides the session's cumulative token allowance
 	// (ADR-0022). Nil means not given; a pointer to zero means unbounded.
 	TokenBudget *int
+	// StallThreshold overrides the stall detector's threshold (KAN-1971). Nil
+	// means not given; a pointer to zero turns it off. Like the limits it changes
+	// the configuration and so the hash.
+	StallThreshold *int
 	// UserConfig reads the user-level config.toml (ADR-0024) as the rung between
 	// the repository's file and the built-in default. Only the human-facing front
 	// ends set it: serve, mcp and kopibench resolve from flags, the repository
@@ -68,6 +72,11 @@ type Overrides struct {
 // default everywhere a number is compared.
 const InteractiveMaxTurns = 100
 
+// DefaultStallThreshold is the stall detector's setting in the REPL (KAN-1971).
+// Three is the smallest count that is not an honest retry: one repeat is a
+// model checking its work, two is a model being careful.
+const DefaultStallThreshold = 3
+
 // BindLimits registers --max-turns and --token-budget on fs, filling o.
 // Only the human-facing front ends call it; kopibench's arms are fixed.
 func BindLimits(fs *flag.FlagSet, o *Overrides) {
@@ -85,6 +94,14 @@ func BindLimits(fs *flag.FlagSet, o *Overrides) {
 			return fmt.Errorf("want a count of tokens, 0 or more")
 		}
 		o.TokenBudget = &n
+		return nil
+	})
+	fs.Func("stall-threshold", "tell the model it is stuck after this many identical calls with the same result, or failed edits to one file, in a row (default 3 in the REPL, 0 = off elsewhere)", func(v string) error {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return fmt.Errorf("want a count, 0 (off) or more")
+		}
+		o.StallThreshold = &n
 		return nil
 	})
 }
@@ -333,6 +350,12 @@ func Resolve(dir string, o Overrides) (Selection, error) {
 		}
 		cfg.TokenBudget = *o.TokenBudget
 	}
+	switch {
+	case o.StallThreshold != nil:
+		cfg.StallThreshold = *o.StallThreshold
+	case o.Interactive && declaredPath == "":
+		cfg.StallThreshold = DefaultStallThreshold
+	}
 
 	return Selection{
 		ModelID:           entry.ModelID,
@@ -394,6 +417,12 @@ func resolveCustom(dir string, o Overrides, file, user FileConfig, rawURL, model
 			return Selection{}, usagef("token budget is %d; want 0 (unbounded) or more", *o.TokenBudget)
 		}
 		cfg.TokenBudget = *o.TokenBudget
+	}
+	switch {
+	case o.StallThreshold != nil:
+		cfg.StallThreshold = *o.StallThreshold
+	case o.Interactive && declaredPath == "":
+		cfg.StallThreshold = DefaultStallThreshold
 	}
 	return Selection{
 		ModelID:           modelID,
