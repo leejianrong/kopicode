@@ -296,6 +296,9 @@ func (e *Engine) call(ctx context.Context, turn, attempt int) (provider.Reply, S
 		Tools:    e.wireTools(),
 		Turn:     turn,
 		Attempt:  attempt,
+		// One stable id for the whole session, so OpenRouter keeps routing to the
+		// provider that holds this session's prompt cache.
+		SessionID: e.cfg.SessionID,
 	}
 
 	if _, err := e.append(ctx, turn, journal.ProviderRequest{

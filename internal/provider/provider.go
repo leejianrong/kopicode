@@ -193,6 +193,13 @@ type Request struct {
 	// then falls back to strict recorded order.
 	Turn    int
 	Attempt int
+
+	// SessionID names the session this request belongs to. A live client sends
+	// it to OpenRouter as the x-session-id header, which pins follow-up requests
+	// to the provider that already holds the prompt cache (KAN-1969). It is a
+	// header and not a body field, so the bytes of the body, and the fixtures
+	// recorded from it, do not move. A replay ignores it.
+	SessionID string
 }
 
 // Usage is the token accounting the provider reported, in the journal's

@@ -149,6 +149,9 @@ type usage struct {
 	// "the provider said nothing" is told apart from "the provider said zero":
 	// the first is unknown and is never filled in with a guess.
 	Cost *float64 `json:"cost"`
+	// PromptCacheHitTokens is DeepSeek's own spelling of the cache hit count,
+	// used only when the route sends no prompt_tokens_details (KAN-1969).
+	PromptCacheHitTokens int `json:"prompt_cache_hit_tokens"`
 	// PromptTokensDetails carries the cache split, when the route reports one.
 	PromptTokensDetails *struct {
 		CachedTokens     int `json:"cached_tokens"`
@@ -374,6 +377,9 @@ func (a *accumulator) reply(raw json.RawMessage) Reply {
 		if d := a.usage.PromptTokensDetails; d != nil {
 			r.Usage.CacheRead = d.CachedTokens
 			r.Usage.CacheWrite = d.CacheWriteTokens
+		}
+		if r.Usage.CacheRead == 0 && a.usage.PromptCacheHitTokens > 0 {
+			r.Usage.CacheRead = a.usage.PromptCacheHitTokens
 		}
 		if a.usage.Cost != nil {
 			c := *a.usage.Cost

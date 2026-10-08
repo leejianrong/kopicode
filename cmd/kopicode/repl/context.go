@@ -55,9 +55,20 @@ func ContextReport(u engine.Usage) []string {
 	}
 	lines = append(lines, spent)
 
-	if u.CacheRead > 0 || u.CacheWrite > 0 {
-		lines = append(lines, fmt.Sprintf("cached   %s prompt tokens read from the provider's cache, %s written",
-			group(u.CacheRead), group(u.CacheWrite)))
+	switch {
+	case u.CacheRead > 0 || u.CacheWrite > 0:
+		line := fmt.Sprintf("cached   %s prompt tokens read from the provider's cache, %s written",
+			group(u.CacheRead), group(u.CacheWrite))
+		if u.Prompt > 0 {
+			line += fmt.Sprintf(" (%.0f%% of the prompt tokens were cache hits)", 100*float64(u.CacheRead)/float64(u.Prompt))
+		}
+		lines = append(lines, line)
+	case u.Requests > 1 && u.Prompt > 0:
+		// Said, not omitted: no hits across several requests is either a route
+		// that does not cache or a prefix that keeps changing, and a person
+		// paying for it should be able to tell it is happening.
+		lines = append(lines, "cached   none reported across "+group(u.Requests)+
+			" requests: this route may not cache, or the start of the prompt is changing")
 	}
 
 	switch {
