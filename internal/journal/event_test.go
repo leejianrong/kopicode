@@ -208,6 +208,11 @@ func fixtures() map[journal.Type]journal.Payload {
 			Source:  "policy",
 			Refused: true,
 		},
+		journal.TypeHandoffWritten: journal.HandoffWritten{
+			Goal:     "finish the retry backoff and make the suite pass",
+			Document: text("## Goal\nFinish the retry backoff."),
+			Path:     "/home/jian/projects/kopicode/.kopicode/handoff/s1.md",
+		},
 		journal.TypeProjectInstructionsLoaded: journal.ProjectInstructionsLoaded{
 			Path:    "/home/jian/projects/kopicode/AGENTS.md",
 			Content: text("Run `make test` before every commit."),

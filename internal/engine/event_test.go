@@ -86,6 +86,9 @@ func samplePayloads() []journal.Payload {
 		journal.ProjectInstructionsLoaded{
 			Path: "/repo/AGENTS.md", Content: journal.InlineText("run make test first"),
 		},
+		journal.HandoffWritten{
+			Goal: "finish the backoff", Document: journal.InlineText("## Goal\nx"), Path: "/repo/.kopicode/handoff/s.md",
+		},
 		journal.UnknownPayload{EventType: "SomethingNewer", Raw: json.RawMessage(`{"a":1}`)},
 	}
 }
