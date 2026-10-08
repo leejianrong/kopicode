@@ -54,6 +54,9 @@ type Overrides struct {
 	// and the defaults alone, so one person's file cannot change what an
 	// orchestrator or a benchmark run.
 	UserConfig bool
+	// ProviderURL is --provider-url (ADR-0027): a custom endpoint. The user
+	// file's `provider_url` is the next rung, read only when UserConfig is set.
+	ProviderURL string
 	// Interactive says a person is at the keyboard (the REPL). Unless MaxTurns
 	// is given or the harness is a declared config that chose its own, the turn
 	// cap is then [InteractiveMaxTurns] rather than the corpus's 20.
@@ -84,6 +87,15 @@ func BindLimits(fs *flag.FlagSet, o *Overrides) {
 		o.TokenBudget = &n
 		return nil
 	})
+}
+
+// BindProviderURL registers --provider-url on fs, filling o (ADR-0027). The
+// human-facing front ends and serve/mcp call it; kopibench does not, because a
+// benchmark arm is always pinned.
+func BindProviderURL(fs *flag.FlagSet, o *Overrides) {
+	fs.StringVar(&o.ProviderURL, FlagProviderURL, "",
+		"send requests to this OpenAI-compatible endpoint instead of OpenRouter, for a local model or a proxy "+
+			"(unpinned, never a benchmark arm; the key is KOPICODE_PROVIDER_API_KEY, optional on loopback; needs --model)")
 }
 
 // Bind registers --model, --harness and --harness-config on fs and returns
@@ -165,6 +177,10 @@ type Selection struct {
 	HarnessConfigPath string
 	// Settings are the resolved values that are not part of the arm (ADR-0024).
 	Settings Settings
+	// ProviderURL is the validated custom endpoint (ADR-0027), or "" for
+	// OpenRouter. When set the Pin is empty, the context window is unknown and
+	// the configuration name starts with [CustomConfigNamePrefix].
+	ProviderURL string
 
 	// ModelSource and HarnessSource say which rung of the precedence chain
 	// supplied each value. Diagnostics only — see [Source].
@@ -267,6 +283,14 @@ func Resolve(dir string, o Overrides) (Selection, error) {
 		modelID, modelSource = user.Model, SourceUser
 	}
 
+	providerURL := o.ProviderURL
+	if providerURL == "" {
+		providerURL = user.ProviderURL
+	}
+	if providerURL != "" {
+		return resolveCustom(dir, o, file, user, providerURL, modelID, modelSource)
+	}
+
 	entry, ok := Lookup(modelID)
 	if !ok {
 		configPath := file.Path
@@ -325,6 +349,66 @@ func Resolve(dir string, o Overrides) (Selection, error) {
 			SkillsPaths:    user.SkillsPaths,
 			UserConfigPath: user.Path,
 		},
+		ModelSource:   modelSource,
+		HarnessSource: harnessSource,
+	}, nil
+}
+
+// resolveCustom is [Resolve] for a custom provider URL (ADR-0027).
+//
+// The model id is whatever the endpoint calls it, so the registry is not
+// consulted, and the default id would mean nothing to a local server, so one has
+// to be named. The harness configuration is the one --harness picks, else the
+// default model's. It is renamed with [CustomConfigNamePrefix], which changes the
+// hash: this run is not an arm of anything registered. No pin is declared, and
+// the context window is unknown rather than guessed (ADR-0021).
+func resolveCustom(dir string, o Overrides, file, user FileConfig, rawURL, modelID string, modelSource Source) (Selection, error) {
+	if modelSource == SourceDefault {
+		return Selection{}, usagef("a custom provider url needs a model: the id %q is OpenRouter's, "+
+			"pass --model with the name your endpoint serves", DefaultModelID)
+	}
+	providerURL, err := ValidateProviderURL(rawURL)
+	if err != nil {
+		return Selection{}, err
+	}
+	base, _ := Lookup(DefaultModelID)
+	cfg, harnessSource, declaredPath, err := resolveHarness(dir, o, file, base)
+	if err != nil {
+		return Selection{}, err
+	}
+	cfg.Name = CustomConfigNamePrefix + cfg.Name
+	if len(file.Verify) > 0 {
+		cfg.Verification.Source = VerificationConfigured
+	}
+	if o.MaxTurns != nil && *o.MaxTurns < 1 {
+		return Selection{}, usagef("max turns is %d; want 1 or more", *o.MaxTurns)
+	}
+	switch {
+	case o.MaxTurns != nil:
+		cfg.MaxTurns = *o.MaxTurns
+	case o.Interactive && declaredPath == "":
+		cfg.MaxTurns = InteractiveMaxTurns
+	}
+	if o.TokenBudget != nil {
+		if *o.TokenBudget < 0 {
+			return Selection{}, usagef("token budget is %d; want 0 (unbounded) or more", *o.TokenBudget)
+		}
+		cfg.TokenBudget = *o.TokenBudget
+	}
+	return Selection{
+		ModelID:           modelID,
+		Config:            cfg,
+		HarnessConfigHash: cfg.Hash(),
+		Verify:            file.Verify,
+		ConfigFilePath:    file.Path,
+		HarnessConfigPath: declaredPath,
+		Settings: Settings{
+			DefaultMode:    user.DefaultMode,
+			AutoNeverAllow: append(append([]string(nil), user.AutoNeverAllow...), file.AutoNeverAllow...),
+			SkillsPaths:    user.SkillsPaths,
+			UserConfigPath: user.Path,
+		},
+		ProviderURL:   providerURL,
 		ModelSource:   modelSource,
 		HarnessSource: harnessSource,
 	}, nil

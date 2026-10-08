@@ -959,3 +959,47 @@ func TestConcurrentCompletesDoNotRaceOnTheJitterSource(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// ADR-0027: a custom endpoint gets no routing object and, when told so, no
+// Authorization header; an empty key is still refused without that.
+func TestWithoutRoutingAndAuthSendsNeitherAPinNorACredential(t *testing.T) {
+	f := loadFixture(t)
+
+	var (
+		gotAuth string
+		gotBody []byte
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		gotBody, _ = io.ReadAll(r.Body)
+		writeSSE(t, w, f.Exchanges[0].Response.Stream)
+	}))
+	defer srv.Close()
+
+	c, err := provider.NewClient(provider.NewAPIKey(""),
+		provider.WithBaseURL(srv.URL), provider.WithoutRouting(), provider.WithoutAuth())
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	req := request(f)
+	req.Pin = provider.Pin{}
+	stream, err := c.Complete(t.Context(), req)
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	drain(t, stream)
+	_ = stream.Close()
+
+	if gotAuth != "" {
+		t.Errorf("Authorization = %q, want none", gotAuth)
+	}
+	if strings.Contains(string(gotBody), `"provider"`) {
+		t.Errorf("body carries a provider object: %s", gotBody)
+	}
+}
+
+func TestAnEmptyKeyIsStillRefusedWithoutWithoutAuth(t *testing.T) {
+	if _, err := provider.NewClient(provider.NewAPIKey(""), provider.WithoutRouting()); !errors.Is(err, provider.ErrNoAPIKey) {
+		t.Fatalf("NewClient = %v, want ErrNoAPIKey", err)
+	}
+}

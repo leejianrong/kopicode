@@ -30,6 +30,7 @@ var stripped = []struct {
 	why  string
 }{
 	{APIKeyEnv, "the provider credential belongs in no subprocess"},
+	{"KOPICODE_PROVIDER_API_KEY", "the custom provider credential belongs in no subprocess (ADR-0027)"},
 
 	// Git. This is the class that has already corrupted this repository once:
 	// GIT_DIR beats a correctly-set working directory outright, so a test suite

@@ -222,6 +222,7 @@ func (m *Manager) Start(p StartParams, events engine.Observer, turn Turn) *Error
 		Model:         p.Model,
 		Harness:       p.Harness,
 		HarnessConfig: p.HarnessConfig,
+		ProviderURL:   m.base.ProviderURL,
 		MaxTurns:      p.MaxTurns,
 		TokenBudget:   p.TokenBudget,
 	})

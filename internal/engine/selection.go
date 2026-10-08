@@ -53,6 +53,15 @@ type SelectionOverrides = harness.Overrides
 // other binary.
 func BindSelectionFlags(fs *flag.FlagSet) *SelectionOverrides { return harness.Bind(fs) }
 
+// BindProviderURLFlag registers --provider-url on fs, filling o (ADR-0027).
+// kopibench does not call it: a benchmark arm is always pinned.
+func BindProviderURLFlag(fs *flag.FlagSet, o *SelectionOverrides) { harness.BindProviderURL(fs, o) }
+
+// ValidateProviderURL checks a custom provider URL (ADR-0027) and returns it
+// normalised, or a usage error. A resident front end calls it at startup so a
+// bad --provider-url is refused before any session is asked for.
+func ValidateProviderURL(raw string) (string, error) { return harness.ValidateProviderURL(raw) }
+
 // BindLimitFlags registers --max-turns and --token-budget on fs, filling o
 // (ADR-0022). kopibench does not call it: its arms are fixed.
 func BindLimitFlags(fs *flag.FlagSet, o *SelectionOverrides) { harness.BindLimits(fs, o) }

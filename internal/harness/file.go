@@ -58,6 +58,10 @@ type FileConfig struct {
 	// SkillsPaths is the `skills_paths` key: extra directories to read skills
 	// from. User file only, for the same reason.
 	SkillsPaths []string
+	// ProviderURL is the `provider_url` key: a custom provider endpoint
+	// (ADR-0027). User file only: a repository must not choose where its
+	// visitors' source code and prompts are sent.
+	ProviderURL string
 }
 
 // LoadFileConfig finds and reads the repository's config file, starting at dir
@@ -255,6 +259,7 @@ func parseFileConfig(path, content string, user bool) (FileConfig, error) {
 			"harness":        &cfg.Harness,
 			"harness_config": &cfg.HarnessConfig,
 			"default_mode":   &cfg.DefaultMode,
+			"provider_url":   &cfg.ProviderURL,
 		}[key]
 		if target == nil {
 			// A key belonging to somebody else. Its value is not this reader's
@@ -454,6 +459,11 @@ func checkScope(key string, user bool) error {
 			return fmt.Errorf("skills_paths belongs in the user config, not the repository's: a repository must not " +
 				"point a session at directories outside itself (ADR-0024)")
 		}
+	case "provider_url":
+		if !user {
+			return fmt.Errorf("provider_url belongs in the user config, not the repository's: a repository must not " +
+				"choose where its visitors' code and prompts are sent (ADR-0027)")
+		}
 	case "harness", "harness_config", "verify":
 		if user {
 			return fmt.Errorf("%s is a per-repository key and is not read from the user config (ADR-0024)", key)
@@ -490,7 +500,7 @@ func parseStringList(v string) ([]string, error) {
 }
 
 // knownKeys are the keys this reader owns.
-var knownKeys = []string{"model", "harness", "harness_config", "verify", "default_mode", "auto_never_allow", "skills_paths"}
+var knownKeys = []string{"model", "harness", "harness_config", "verify", "default_mode", "auto_never_allow", "skills_paths", "provider_url"}
 
 // nearestKey names the key a misspelling was probably meant to be, or "" when
 // key is one we own or is nothing like one. A config file is shared and other

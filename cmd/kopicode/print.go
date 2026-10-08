@@ -128,6 +128,7 @@ func runPrint(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	overrides := engine.BindSelectionFlags(fs)
 	engine.BindLimitFlags(fs, overrides)
+	engine.BindProviderURLFlag(fs, overrides)
 	asJSON := fs.Bool("print", false, "emit the session record as JSON on stdout")
 	debug := fs.Bool("debug", false, "engine diagnostics on stderr")
 	// --resume makes sense here for the reason it does on the REPL: a script
@@ -305,6 +306,11 @@ func headless(ctx context.Context, prompt string, stdout, stderr io.Writer, opts
 		out.orphaned()
 		if errors.Is(err, engine.ErrNoAPIKey) {
 			say(stderr, "kopicode: %s is not set, so there is no provider to talk to\n", engine.APIKeyEnv)
+			return exitHarness
+		}
+		if errors.Is(err, engine.ErrNoCustomAPIKey) {
+			say(stderr, "kopicode: %s is not set; a custom provider url that is not loopback needs it, "+
+				"and %s is never sent to another host\n", engine.CustomAPIKeyEnv, engine.APIKeyEnv)
 			return exitHarness
 		}
 		// A --resume naming a session this repository has no record of is a
