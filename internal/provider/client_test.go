@@ -1003,3 +1003,47 @@ func TestAnEmptyKeyIsStillRefusedWithoutWithoutAuth(t *testing.T) {
 		t.Fatalf("NewClient = %v, want ErrNoAPIKey", err)
 	}
 }
+
+// KAN-1969: a stable session id goes to OpenRouter as a header, so follow-up
+// requests are routed to the provider that holds this session's prompt cache.
+func TestSessionIDIsSentAsAHeaderToOpenRouterOnly(t *testing.T) {
+	f := loadFixture(t)
+	long := strings.Repeat("s", 257)
+
+	tests := []struct {
+		name string
+		opts []provider.ClientOption
+		id   string
+		want string
+	}{
+		{"openrouter gets it", nil, "sess-1", "sess-1"},
+		{"a custom endpoint does not", []provider.ClientOption{provider.WithoutRouting(), provider.WithoutAuth()}, "sess-1", ""},
+		{"an id over 256 characters is not sent", nil, long, ""},
+		{"no id, no header", nil, "", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var got string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				got = r.Header.Get("X-Session-Id")
+				writeSSE(t, w, f.Exchanges[0].Response.Stream)
+			}))
+			defer srv.Close()
+
+			req := request(f)
+			req.SessionID = tc.id
+			if len(tc.opts) > 0 {
+				req.Pin = provider.Pin{}
+			}
+			stream, err := newClient(t, srv, tc.opts...).Complete(t.Context(), req)
+			if err != nil {
+				t.Fatalf("Complete: %v", err)
+			}
+			drain(t, stream)
+			_ = stream.Close()
+			if got != tc.want {
+				t.Errorf("X-Session-Id = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

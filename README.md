@@ -153,6 +153,17 @@ Command lines are tokenized, every command in them is checked, and anything that
 analysed is refused. None of this is a sandbox; real containment is the caller's job
 ([ADR-0017](docs/adr/0017-auto-consent-mode.md), [ADR-0018](docs/adr/0018-tokenized-allowlist.md)).
 
+## Prompt caching
+
+Every request carries the whole history, so provider prompt caching is the largest saving there is:
+DeepSeek and Qwen read cached input at about a tenth of the price, GLM at about a fifth, Moonshot at a
+quarter. A cache hits only on an exact prefix, so kopicode keeps history strictly append-only (the system
+prompt and the tool list never change within a session, and a test fails if any request alters an earlier
+message), and sends one stable `x-session-id` per session so OpenRouter keeps routing follow-ups to the
+provider that holds the cache. `/context` shows how many prompt tokens were cache hits and says so when
+none were. Which routes cache is the provider's business: DeepSeek, GLM and Moonshot do it automatically;
+Qwen needs an explicit marker that kopicode does not send yet (KAN-1979).
+
 ## Why a harness, and what it has measured
 
 A model's harness (prompt structure, tool surface, parse-and-repair, verification loop) moves

@@ -197,6 +197,9 @@ func defaultTransport() http.RoundTripper {
 	return clone
 }
 
+// maxSessionIDLen is the longest x-session-id OpenRouter accepts.
+const maxSessionIDLen = 256
+
 // A ClientOption configures [NewClient].
 type ClientOption func(*Client)
 
@@ -368,7 +371,7 @@ func (c *Client) Complete(ctx context.Context, req Request) (*Stream, error) {
 	attempts := c.retry.maxAttempts()
 	var last error
 	for attempt := range attempts {
-		stream, err := c.send(ctx, body)
+		stream, err := c.send(ctx, body, req.SessionID)
 		if err == nil {
 			return stream, nil
 		}
@@ -418,8 +421,8 @@ func (c *Client) delay(attempt int) time.Duration {
 }
 
 // send makes one attempt, returning a stream or the reason there is none.
-func (c *Client) send(ctx context.Context, body []byte) (*Stream, error) {
-	httpReq, err := c.newHTTPRequest(ctx, body)
+func (c *Client) send(ctx context.Context, body []byte, sessionID string) (*Stream, error) {
+	httpReq, err := c.newHTTPRequest(ctx, body, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -456,7 +459,7 @@ func (c *Client) send(ctx context.Context, body []byte) (*Stream, error) {
 //
 // This is the only place the credential is read. Keep it that way: a second
 // caller of APIKey.reveal is a second place to audit.
-func (c *Client) newHTTPRequest(ctx context.Context, body []byte) (*http.Request, error) {
+func (c *Client) newHTTPRequest(ctx context.Context, body []byte, sessionID string) (*http.Request, error) {
 	url := c.baseURL + completionsPath
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -467,6 +470,13 @@ func (c *Client) newHTTPRequest(ctx context.Context, body []byte) (*http.Request
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
+	// OpenRouter's sticky routing: a stable session id sends follow-ups to the
+	// provider that holds this session's prompt cache, before any hit has been
+	// seen. Not sent to a custom endpoint, which is not OpenRouter, and not when
+	// longer than the 256 characters OpenRouter accepts.
+	if sessionID != "" && !c.noRouting && len(sessionID) <= maxSessionIDLen {
+		req.Header.Set("X-Session-Id", sessionID)
+	}
 	if c.referer != "" {
 		req.Header.Set("HTTP-Referer", c.referer)
 	}

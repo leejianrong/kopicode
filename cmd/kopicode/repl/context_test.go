@@ -33,6 +33,30 @@ func TestContextReport(t *testing.T) {
 			},
 		},
 		{
+			name: "the cache hit rate is said",
+			u: engine.Usage{
+				TokenUsage: engine.TokenUsage{Prompt: 1_000, Completion: 10, Total: 1_010, CacheRead: 750},
+				Requests:   3, Turns: 3,
+			},
+			want: []string{"750 prompt tokens read from the provider's cache", "75% of the prompt tokens were cache hits"},
+		},
+		{
+			name: "no cache hits over several requests is said, not hidden",
+			u: engine.Usage{
+				TokenUsage: engine.TokenUsage{Prompt: 1_000, Completion: 10, Total: 1_010},
+				Requests:   4, Turns: 4,
+			},
+			want: []string{"cached   none reported across 4 requests"},
+		},
+		{
+			name: "one request cannot have hit a cache",
+			u: engine.Usage{
+				TokenUsage: engine.TokenUsage{Prompt: 1_000, Completion: 10, Total: 1_010},
+				Requests:   1, Turns: 1,
+			},
+			not: []string{"cached"},
+		},
+		{
 			name: "unknown window is said to be unknown",
 			u:    engine.Usage{ContextTokens: 5_000, Requests: 1, TokenUsage: engine.TokenUsage{Total: 5_100}},
 			want: []string{"5,000 tokens in the latest request (this model's window is not known)"},

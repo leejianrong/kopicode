@@ -548,3 +548,38 @@ func TestStreamIsDeterministic(t *testing.T) {
 		t.Fatalf("the trace does not mention the tool calls; it would pass over anything:\n%s", first)
 	}
 }
+
+// KAN-1969: DeepSeek's own cache spelling counts when the route sends no
+// prompt_tokens_details, and OpenRouter's normalised one wins when both exist.
+func TestCacheHitsAreReadFromEitherSpelling(t *testing.T) {
+	frame := func(usage string) string {
+		return `data: {"id":"gen-1","object":"chat.completion.chunk","created":1767225600,` +
+			`"model":"m","provider":"P","choices":[],"usage":` + usage + `}`
+	}
+	tests := []struct {
+		name  string
+		usage string
+		want  int
+	}{
+		{"openrouter's normalised field", `{"prompt_tokens":100,"completion_tokens":1,"total_tokens":101,"prompt_tokens_details":{"cached_tokens":80}}`, 80},
+		{"deepseek's own field", `{"prompt_tokens":100,"completion_tokens":1,"total_tokens":101,"prompt_cache_hit_tokens":64,"prompt_cache_miss_tokens":36}`, 64},
+		{"both: the normalised one wins", `{"prompt_tokens":100,"completion_tokens":1,"total_tokens":101,"prompt_tokens_details":{"cached_tokens":80},"prompt_cache_hit_tokens":64}`, 80},
+		{"neither", `{"prompt_tokens":100,"completion_tokens":1,"total_tokens":101}`, 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := provider.NewSSEStream(t.Context(), frames(
+				chunk(`{"index":0,"delta":{"content":"x"},"finish_reason":"stop"}`), "",
+				frame(tc.usage), "", doneFrame,
+			), json.RawMessage(`{}`))
+			drain(t, s)
+			reply, err := s.Reply()
+			if err != nil {
+				t.Fatalf("Reply: %v", err)
+			}
+			if reply.Usage.CacheRead != tc.want {
+				t.Errorf("CacheRead = %d, want %d", reply.Usage.CacheRead, tc.want)
+			}
+		})
+	}
+}
