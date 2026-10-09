@@ -6,6 +6,8 @@ cites both rather than restating them, so there is one place to change each fact
 
 Written 2026-08-11, before any product code existed.
 
+> **Positioning and scope changed on 2026-10-09 ([ADR-0029](adr/0029-positioning-capable-harness.md)).** The thesis below (a harness tuned per model, proven by the benchmark) and the "Not planned" list under *Scope for v1* are superseded. The requirements about the record, consent and honest measurement still hold.
+
 ## The problem
 
 A coding agent's measured ability is not a property of the model alone. The harness
@@ -141,7 +143,7 @@ model measured and the plugin axes it earns, the `ask` tool, semantic model role
 JSON-RPC surface, container isolation for the bench runner, and context compaction chosen
 from real session data rather than guessed.
 
-**Not planned, and this list is as load-bearing as the one above.** LSP integration, DAP
+**Not planned at v1 (retired by ADR-0029: none of these is excluded now).** LSP integration, DAP
 debugging, browser or desktop control, voice, image tools, self-editing or auto-written memory, in-process
 coreutils, dozens of providers, IDE integration, AST-structural editing, and any hosted or
 shared journal.

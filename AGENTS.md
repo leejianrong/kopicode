@@ -1,13 +1,14 @@
 # AGENTS.md — kopicode
 
-kopicode is a terminal coding agent, and a harness you can tune per model. One engine
-(`internal/engine`) is driven by several front ends: a REPL, headless `run --print`,
-resident `serve` (JSON-RPC) and `mcp` (MCP server), and the `kopibench` benchmark runner.
-The bet is that harness quality — tool-call parse-and-repair, an edit tool that tolerates
-imprecision, forced verification — moves a cheap open-weight model's measured coding
-ability by a large margin, and that the rig proves it rather than asserting it. Go, one
-static binary, no CGo, no durable-execution runtime. What it is for and how to use it:
-[`README.md`](README.md).
+kopicode is a terminal coding agent and a harness for the models people use for coding.
+One engine (`internal/engine`) is driven by several front ends: a REPL, headless
+`run --print`, resident `serve` (JSON-RPC) and `mcp` (MCP server), and the `kopibench`
+benchmark runner. Two goals, in order ([ADR-0029](docs/adr/0029-positioning-capable-harness.md)):
+be what cuttlefish-crew needs (dependable under a fleet, drivable over `serve`, cheap to run),
+then close the gap to Claude Code, Codex CLI, opencode and oh-my-pi by following what they
+settled. The benchmark rig is the regression check for harness changes, and a claimed gain
+still needs a measurement. Go, one static binary, no CGo, no durable-execution runtime. What
+it is for and how to use it: [`README.md`](README.md).
 
 **Trust the code over the docs.** Where `docs/`, a docstring or this file disagree with the
 code, the code is right: verify, then fix the doc in the same PR. `ls internal/`,
