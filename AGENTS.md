@@ -77,8 +77,9 @@ make ci           # check + test-all + bench-smoke + xbuild: everything CI runs 
   `Co-Authored-By`, no "Generated with" footer, regardless of which agent did the work.
 - **Strict branch protection serialises landings.** Every merge puts other open PRs out
   of date, so each needs `gh pr update-branch <n>` and a full re-run before it can
-  merge. Wait for all seven checks to be *created and resolved*, not merely
-  "not pending."
+  merge. Wait for every check to be *created and resolved*, not merely
+  "not pending." A docs-only PR skips the heavy jobs (`Changed files` decides, in `ci.yml`);
+  a skipped job counts as passing, and the secret scan always runs.
 
 ### Worktrees: lease them, do not sweep them
 
