@@ -30,7 +30,7 @@ more work is queued.
 
 ## Environment and commands
 
-- **Go 1.26.5** from the official tarball at `~/.local/go`. **Never export `GOROOT`**: the
+- **Go 1.26.9** from the official tarball at `~/.local/go`. **Never export `GOROOT`**: the
   `go` binary finds its own root, and a stale `GOROOT` (an old `/usr/local/go`) makes every
   Go command fail with "cannot find GOROOT directory". `PATH` needs `~/.local/go/bin` and
   `~/go/bin`. If `go` fails that way, `env | grep GOROOT` and fix the shell profile.
