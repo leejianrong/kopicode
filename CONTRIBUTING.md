@@ -6,7 +6,7 @@ crossed"), and the reasoning behind the design is in [`docs/adr/`](docs/adr/READ
 
 ## Set up
 
-You need Go 1.26.5 (the version `go.mod` pins), `make`, and `git`.
+You need Go 1.26.9 (the version `go.mod` pins), `make`, and `git`.
 
 ```bash
 git clone https://github.com/leejianrong/kopicode.git && cd kopicode
