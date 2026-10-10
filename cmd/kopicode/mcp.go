@@ -11,15 +11,15 @@ package main
 // stdin/stdout. What differs from `serve` is the vocabulary on top:
 //
 //	initialize / notifications/initialized / ping
-//	tools/list, tools/call           four tools, below
+//	tools/list, tools/call           five tools, below
 //	notifications/progress           a session's events, tied to the call
 //	notifications/cancelled          cancels the turn behind a call
 //	elicitation/create               server → client: remote_interactive consent
 //
 // # Tools
 //
-// kopicode_start, kopicode_submit, kopicode_cancel and kopicode_close mirror
-// serve's four methods. start and submit block until the turn settles, as a
+// kopicode_start, kopicode_submit, kopicode_cancel, kopicode_handoff and
+// kopicode_close mirror serve's methods (kopicode_handoff is session.handoff). start and submit block until the turn settles, as a
 // tools/call must, and return the same outcome `run --print`'s last line gives
 // (stop, exit_code, turns, and on start the record path). A task that did not
 // complete is an isError result, not a protocol error: the call worked and the
@@ -67,10 +67,11 @@ import (
 var mcpProtocolVersions = []string{"2025-06-18", "2025-03-26", "2024-11-05"}
 
 const (
-	toolStart  = "kopicode_start"
-	toolSubmit = "kopicode_submit"
-	toolCancel = "kopicode_cancel"
-	toolClose  = "kopicode_close"
+	toolStart   = "kopicode_start"
+	toolSubmit  = "kopicode_submit"
+	toolCancel  = "kopicode_cancel"
+	toolHandoff = "kopicode_handoff"
+	toolClose   = "kopicode_close"
 )
 
 // mcpInstructions is shown to the connecting agent in initialize's result.
@@ -358,10 +359,10 @@ func (s *mcpServer) dispatchCall(raw mcpLine) {
 		return
 	}
 	switch p.Name {
-	case toolStart, toolSubmit, toolCancel, toolClose:
+	case toolStart, toolSubmit, toolCancel, toolHandoff, toolClose:
 	default:
-		s.writeError(raw.ID, codeInvalidParams, fmt.Sprintf("unknown tool %q; this server has %s, %s, %s and %s",
-			p.Name, toolStart, toolSubmit, toolCancel, toolClose))
+		s.writeError(raw.ID, codeInvalidParams, fmt.Sprintf("unknown tool %q; this server has %s, %s, %s, %s and %s",
+			p.Name, toolStart, toolSubmit, toolCancel, toolHandoff, toolClose))
 		return
 	}
 
@@ -390,6 +391,8 @@ func (s *mcpServer) dispatchCall(raw mcpLine) {
 			res = s.toolSubmit(call, p.Arguments)
 		case toolCancel:
 			res = s.toolCancel(p.Arguments)
+		case toolHandoff:
+			res = s.toolHandoff(call, p.Arguments)
 		case toolClose:
 			res = s.toolClose(p.Arguments)
 		}
@@ -417,6 +420,8 @@ type startArgs struct {
 	ConsentMode         string   `json:"consent_mode"`
 	ContainmentProvided bool     `json:"containment_provided"`
 	NeverAllow          []string `json:"never_allow"`
+	Handoff             string   `json:"handoff"`
+	HandoffFrom         string   `json:"handoff_from"`
 }
 
 func (s *mcpServer) toolStart(call *mcpCall, raw json.RawMessage) toolResult {
@@ -449,6 +454,7 @@ func (s *mcpServer) toolStart(call *mcpCall, raw json.RawMessage) toolResult {
 		Model: a.Model, Harness: a.Harness, HarnessConfig: a.HarnessConfig,
 		MaxTurns: a.MaxTurns, TokenBudget: a.TokenBudget,
 		ConsentMode: a.ConsentMode, ContainmentProvided: a.ContainmentProvided, NeverAllow: a.NeverAllow,
+		Handoff: a.Handoff, ParentSession: a.HandoffFrom,
 	}, s.observer(a.Session), s.turn(a.Session, call, ch)); err != nil {
 		return errorResult("%s", err.Message)
 	}
@@ -499,6 +505,49 @@ func (s *mcpServer) toolCancel(raw json.RawMessage) toolResult {
 		Session   string `json:"session"`
 		Cancelled bool   `json:"cancelled"`
 	}{a.Session, true}, false)
+}
+
+type handoffArgs struct {
+	Session string `json:"session"`
+	Goal    string `json:"goal"`
+}
+
+// toolHandoff drafts a handoff for an open session and waits for it. It queues
+// behind accepted turns, and a cancel of the call or of the session reaches it.
+func (s *mcpServer) toolHandoff(call *mcpCall, raw json.RawMessage) toolResult {
+	var a handoffArgs
+	if err := decodeArgs(raw, &a); err != nil {
+		return errorResult("%s arguments: %v", toolHandoff, err)
+	}
+	if a.Session == "" {
+		return errorResult("%s needs a session id", toolHandoff)
+	}
+	call.session.Store(a.Session)
+
+	type outcome struct {
+		r sessioncore.HandoffResult
+		e *sessioncore.Error
+	}
+	done := make(chan outcome, 1)
+	if err := s.mgr.Handoff(a.Session, a.Goal, func(r sessioncore.HandoffResult, e *sessioncore.Error) {
+		done <- outcome{r, e}
+	}); err != nil {
+		return errorResult("%s", err.Message)
+	}
+	select {
+	case o := <-done:
+		if o.e != nil {
+			return errorResult("%s", o.e.Message)
+		}
+		return structuredResult(struct {
+			Session  string `json:"session"`
+			Goal     string `json:"goal,omitempty"`
+			Document string `json:"document"`
+			Path     string `json:"path"`
+		}{o.r.Session, o.r.Goal, o.r.Document, o.r.Path}, false)
+	case <-s.stop:
+		return errorResult("the client disconnected")
+	}
 }
 
 func (s *mcpServer) toolClose(raw json.RawMessage) toolResult {
@@ -668,7 +717,9 @@ func mcpTools() []mcpTool {
     "session": {"type": "string", "description": "An id for the session; generated if omitted."},
     "model": {"type": "string", "description": "Model id override."},
     "harness": {"type": "string", "description": "Built-in harness config name override."},
-    "harness_config": {"type": "string", "description": "Path to a declared harness-config file; the same axis as harness."}
+    "harness_config": {"type": "string", "description": "Path to a declared harness-config file; the same axis as harness."},
+    "handoff": {"type": "string", "description": "A handoff document, as kopicode_handoff returned it, to start from: the session is told it once, as its first message, and its verification starts as not run."},
+    "handoff_from": {"type": "string", "description": "With handoff: the session id the document came from, recorded in the journal."}
   },
   "required": ["dir", "prompt", "consent_mode"],
   "additionalProperties": false
@@ -697,6 +748,22 @@ func mcpTools() []mcpTool {
 			InputSchema: json.RawMessage(`{
   "type": "object",
   "properties": {"session": {"type": "string", "description": "The session id."}},
+  "required": ["session"],
+  "additionalProperties": false
+}`),
+		},
+		{
+			Name:  toolHandoff,
+			Title: "Draft a handoff for a session",
+			Description: "Draft a handoff document for an open session: one model call with no tools, queued behind " +
+				"the turns it has already accepted. The session is left as it was. Returns the document and the path " +
+				"of its file; pass the document as kopicode_start's handoff to continue in a fresh session.",
+			InputSchema: json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "session": {"type": "string", "description": "The session id."},
+    "goal": {"type": "string", "description": "What the next session is for, if you know."}
+  },
   "required": ["session"],
   "additionalProperties": false
 }`),

@@ -60,6 +60,12 @@ import (
 //     context, the identical mechanism the REPL's Ctrl-C drives; it does not
 //     end the session, which stays open for further submits.
 //
+//   - session.handoff — params {session, goal?}. Drafts a handoff document
+//     (ADR-0026) for an open session: one model call with no tools, queued
+//     behind the turns already accepted, cancellable with session.cancel. The
+//     session is left as it was. The result carries the document and the path of
+//     its projection file; start the next session with session.start's handoff.
+//
 //   - session.close — params {session}. Ends that one session while the process
 //     stays up (KAN-1795): the close queues behind any turns already accepted, so
 //     they run to completion first (session.cancel first for an immediate end),
@@ -161,6 +167,7 @@ const (
 	methodSessionCancel  = "session.cancel"
 	methodSessionClose   = "session.close"
 	methodSessionUsage   = "session.usage"
+	methodSessionHandoff = "session.handoff"
 	methodServerHello    = "server.hello"    // capabilities, see capabilities.go
 	methodAskRequest     = "ask.request"     // server → client request (ADR-0020)
 	methodSessionEvent   = "session.event"   // server → client notification
@@ -306,6 +313,13 @@ type startParams struct {
 	// client as an ask.request instead of the process ask policy or the fixed
 	// refusal. Needs consent_mode "remote_interactive".
 	AskMode string `json:"ask_mode"`
+
+	// Handoff is a handoff document, as session.handoff returned it, to start
+	// from (ADR-0026): the session is told it once, as its first message, and
+	// starts with verification not run. HandoffFrom names the session it came
+	// from, for the record.
+	Handoff     string `json:"handoff"`
+	HandoffFrom string `json:"handoff_from"`
 }
 
 type submitParams struct {
@@ -315,6 +329,21 @@ type submitParams struct {
 
 type cancelParams struct {
 	Session string `json:"session"`
+}
+
+// handoffParams / handoffResult are session.handoff's shapes. Document is the
+// whole text, the model's sections and the facts block kopicode wrote from the
+// journal; Path is where it was written on the server's disk.
+type handoffParams struct {
+	Session string `json:"session"`
+	Goal    string `json:"goal"`
+}
+
+type handoffResult struct {
+	Session  string `json:"session"`
+	Goal     string `json:"goal,omitempty"`
+	Document string `json:"document"`
+	Path     string `json:"path"`
 }
 
 // turnResult is what session.start and session.submit return: the stop the turn
@@ -574,11 +603,13 @@ func (s *server) handleLine(line string) {
 		s.dispatchClose(req)
 	case methodSessionUsage:
 		s.handleUsage(req)
+	case methodSessionHandoff:
+		s.dispatchHandoff(req)
 	case methodServerHello:
 		s.writeResult(req.ID, currentCapabilities())
 	default:
 		s.writeError(req.ID, codeMethodNotFound, fmt.Sprintf("unknown method %q; this surface has "+
-			"session.start, session.submit, session.cancel, session.close, session.usage and server.hello", req.Method))
+			"session.start, session.submit, session.cancel, session.handoff, session.close, session.usage and server.hello", req.Method))
 	}
 }
 
@@ -651,6 +682,7 @@ func (s *server) dispatchStart(req rpcRequest) {
 		MaxTurns: p.MaxTurns, TokenBudget: p.TokenBudget,
 		ConsentMode: p.ConsentMode, ContainmentProvided: p.ContainmentProvided, NeverAllow: p.NeverAllow,
 		ConsentTimeout: timeout, ReadOnly: p.ReadOnly, AskMode: p.AskMode,
+		Handoff: p.Handoff, ParentSession: p.HandoffFrom,
 	}, s.notifier(p.Session), sessioncore.Turn{Done: func(r sessioncore.TurnResult) {
 		s.writeResult(id, turnResultOf(r))
 	}}); err != nil {
@@ -678,6 +710,31 @@ func (s *server) dispatchSubmit(req rpcRequest) {
 	if err := s.mgr.Submit(p.Session, p.Prompt, sessioncore.Turn{Done: func(r sessioncore.TurnResult) {
 		s.writeResult(id, turnResultOf(r))
 	}}); err != nil {
+		s.writeSessionError(req.ID, err)
+	}
+}
+
+// dispatchHandoff queues a handoff draft behind the turns a session has already
+// accepted and answers when the document is ready. Like submit it never waits on
+// the read loop.
+func (s *server) dispatchHandoff(req rpcRequest) {
+	var p handoffParams
+	if err := json.Unmarshal(req.Params, &p); err != nil {
+		s.writeError(req.ID, codeInvalidParams, fmt.Sprintf("session.handoff params: %v", err))
+		return
+	}
+	if p.Session == "" {
+		s.writeError(req.ID, codeInvalidParams, "session.handoff needs a session id")
+		return
+	}
+	id := req.ID
+	if err := s.mgr.Handoff(p.Session, p.Goal, func(r sessioncore.HandoffResult, e *sessioncore.Error) {
+		if e != nil {
+			s.writeSessionError(id, e)
+			return
+		}
+		s.writeResult(id, handoffResult{Session: r.Session, Goal: r.Goal, Document: r.Document, Path: r.Path})
+	}); err != nil {
 		s.writeSessionError(req.ID, err)
 	}
 }

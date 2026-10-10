@@ -47,5 +47,5 @@ What the survey of other harnesses (2026-10) found:
 
 - Step 1 (#205): the `internal/handoff` document and facts block, and the `HandoffWritten` event.
 - Step 2 (KAN-1966): `Engine.Handoff` (one tool-less call, history untouched), `Options.Handoff` / `ParentSession` (the document arrives as a `ProjectInstructionsLoaded` with scope `handoff`; `SessionStarted.parent_session` links back), and `/handoff [goal]` in the REPL. The REPL closes the old session before opening the new one, because a working tree has one.
-- Step 3 (KAN-1967): `session.handoff` on `serve` and `mcp`. Not built.
+- Step 3 (KAN-1967): `session.handoff` on `serve` (queued behind accepted turns, cancellable), `kopicode_handoff` on `mcp`, and `handoff` / `handoff_from` on both start calls; feature `session.handoff`.
 - Step 4 (KAN-1968): the paired measurement. Not built; the claim stays "unmeasured".

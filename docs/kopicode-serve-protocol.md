@@ -121,9 +121,9 @@ restart from the first new response: they count this process's requests.
 Features: `session.usage`, `usage.tokens_split`, `usage.context`, `usage.context_window`,
 `usage.cost`.
 
-## The four methods
+## The five methods
 
-ADR-0013 decision 3 fixed three; `session.close` (KAN-1795) is the fourth. There is
+ADR-0013 decision 3 fixed three; `session.close` (KAN-1795) is the fourth and `session.handoff` (ADR-0026) the fifth. There is
 still no listing call and no credential in any params. A session lives until it is
 closed with `session.close` or the process shuts down.
 
@@ -147,6 +147,8 @@ its first turn.
 | `max_turns` | integer | no | turns one prompt may take before the session stops with `max_turns` (ADR-0022). Positive (zero and below are a usage error, not "unset"); omit for the harness default of 20. The count restarts at every prompt (`session.submit`). Moves the session's `harness_config_hash` |
 | `token_budget` | integer | no | tokens (prompt + completion) the **whole session** may spend before it stops with `budget_exhausted`; `0` is unbounded, omit for the default of 2,000,000. Never resets, so a long-lived session must raise it or restart. Moves the hash |
 | `read_only` | boolean | no | refuse every file write for this session (ADR-0019): `write_file` and `edit_file` are denied by the gate itself, inside the root or outside it, in every mode, and the client is never asked. Shell is **not** made read-only — it stays governed by `consent_mode` — so this is not a sandbox. A usage error under `"auto"`, which runs shell unasked |
+| `handoff` | string | no | a handoff document (ADR-0026), as [`session.handoff`](#sessionhandoff) returned it, to start from. The session is told it once, as its first message, under a `<handoff>` tag; its journal records it (a `project_instructions_loaded` with scope `handoff`) and its verification starts as not run whatever the document says. Feature `session.handoff` |
+| `handoff_from` | string | no | with `handoff`: the id of the session the document came from, recorded as `parent_session` on this session's `session_started`. Ignored without `handoff` |
 | `never_allow` | array of strings | no | extra never-allow entries for `consent_mode: "auto"` (ADR-0017), each `"command [token ...]"`; see [`"auto"`](#auto-adr-0017). Adds to the built-in list, never removes from it. Sending it under any other mode is a usage error |
 
 **Result** (`turnResult`): the turn's outcome, projected the way `run --print`'s last line
@@ -192,6 +194,32 @@ still acknowledged.
 signal was delivered; the cancelled turn reports its own `stop: "cancelled"` through its
 own `session.start`/`session.submit` response.
 
+### `session.handoff`
+
+Drafts a handoff document ([ADR-0026](adr/0026-handoff.md)) for an open session: **one model
+call with no tools**, made from the session's own history, then a facts block kopicode writes
+from the journal (files written and deleted, the last verification, denied calls, usage). It
+queues behind the turns the session has already accepted, like `session.submit`, and
+`session.cancel` reaches it the same way. It **does not end the session** and does not touch its
+conversation; the call's spend counts toward the session's token budget. The document is written to
+`.kopicode/handoff/<session>.md` on the server's disk and journaled as `handoff_written`.
+
+To continue the work, close the session (or not) and `session.start` another with
+`handoff` set to the returned `document`. **When to hand off is the caller's policy**: kopicode
+never does it on its own.
+
+| param | type | required | meaning |
+|---|---|---|---|
+| `session` | string | yes | an open session's id |
+| `goal` | string | no | what the next session is for, in the caller's words; it steers the draft and is recorded |
+
+**Result**: `{ "session": "...", "goal": "...", "document": "...", "path": "..." }`; `goal` is
+absent when none was given. A session that has run no turn answers `-32003`; a draft that fails
+(the provider is down, the call was cancelled) answers `-32603`.
+
+Feature: `session.handoff`, which covers this method and `session.start`'s `handoff` and
+`handoff_from`.
+
 ### `session.close`
 
 Ends **one** session while the process stays up. The close queues behind any turns the
@@ -226,7 +254,7 @@ list of stable lower-case dotted names, added in the change that ships a capabil
 and removed only with a protocol bump. Current names: `allow_commands`, `ask.request`, `consent.note`, `consent_mode.auto`,
 `consent_mode.remote_interactive`, `consent_mode.unattended_policy`, `consent_request.command`,
 `consent_timeout.flag`, `consent_timeout.session`, `mcp`, `provider_url.flag`, `server.hello`, `session.close`,
-`session.limits`, `session.read_only`, `session.usage`, `usage.context`, `usage.context_window`, `usage.cost`,
+`session.handoff`, `session.limits`, `session.read_only`, `session.usage`, `usage.context`, `usage.context_window`, `usage.cost`,
 `usage.tokens_split`.
 `cmd/kopicode/capabilities_test.go` ties the list to the consent modes and methods in the code.
 
@@ -363,13 +391,13 @@ The first four are JSON-RPC's reserved values; the server-defined ones sit in th
 |---|---|---|
 | -32700 | parse error | a line that is not valid JSON |
 | -32600 | invalid request | a message with no method |
-| -32601 | method not found | a method outside the four above |
+| -32601 | method not found | a method outside the five above |
 | -32602 | invalid params | a method's params are missing or malformed |
-| -32000 | unknown session | `session.submit`/`session.cancel`/`session.close` named an id with no open session, or `session.submit` named one whose close is already accepted |
+| -32000 | unknown session | `session.submit`/`session.cancel`/`session.handoff`/`session.close` named an id with no open session, or `session.submit` named one whose close is already accepted |
 | -32001 | session exists | `session.start` named an id already open in this process |
 | -32002 | open failed | `engine.Open` refused: a bad model, a missing credential |
-| -32003 | usage error | the arm could not be resolved (an unknown model or harness); or `session.start`'s `consent_mode` is missing/unrecognised, or `"unattended_policy"` is requested without `containment_provided: true` (ADR-0016); or `never_allow` is sent without `consent_mode: "auto"`, or holds a malformed entry (ADR-0017) |
-| -32603 | internal error | `session.close` could not write the session's `session_ended` |
+| -32003 | usage error | the arm could not be resolved (an unknown model or harness); or `session.start`'s `consent_mode` is missing/unrecognised, or `"unattended_policy"` is requested without `containment_provided: true` (ADR-0016); or `never_allow` is sent without `consent_mode: "auto"`, or holds a malformed entry (ADR-0017); or `session.handoff` named a session that has run no turn |
+| -32603 | internal error | `session.close` could not write the session's `session_ended`; or `session.handoff`'s draft failed |
 | -32005 | session locked | `session.start`'s `dir` is already held by another live session |
 
 `-32004` is retired: it was `session busy`, a `session.submit` while a turn was in flight,
