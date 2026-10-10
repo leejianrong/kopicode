@@ -66,6 +66,14 @@ import (
 //     session is left as it was. The result carries the document and the path of
 //     its projection file; start the next session with session.start's handoff.
 //
+//   - server.sessions — no params. The session table (ADR-0030): each open
+//     session's state (idle, running, awaiting_consent, awaiting_answer, ended),
+//     turn, last event time, usage, last stop and the id of the request it waits
+//     on, read from the live table rather than rebuilt from the journal.
+//   - session.events — params {session, after_seq?, limit?}. The journal's events
+//     after a seq, blob-aware, for a client that missed some. Every
+//     session.event notification carries its seq for this.
+//
 //   - session.close — params {session}. Ends that one session while the process
 //     stays up (KAN-1795): the close queues behind any turns already accepted, so
 //     they run to completion first (session.cancel first for an immediate end),
@@ -168,6 +176,8 @@ const (
 	methodSessionClose   = "session.close"
 	methodSessionUsage   = "session.usage"
 	methodSessionHandoff = "session.handoff"
+	methodServerSessions = "server.sessions" // the session table, ADR-0030
+	methodSessionEvents  = "session.events"  // journal replay after a seq, ADR-0030
 	methodServerHello    = "server.hello"    // capabilities, see capabilities.go
 	methodAskRequest     = "ask.request"     // server → client request (ADR-0020)
 	methodSessionEvent   = "session.event"   // server → client notification
@@ -605,11 +615,16 @@ func (s *server) handleLine(line string) {
 		s.handleUsage(req)
 	case methodSessionHandoff:
 		s.dispatchHandoff(req)
+	case methodServerSessions:
+		s.handleSessions(req)
+	case methodSessionEvents:
+		s.handleEvents(req)
 	case methodServerHello:
 		s.writeResult(req.ID, currentCapabilities())
 	default:
 		s.writeError(req.ID, codeMethodNotFound, fmt.Sprintf("unknown method %q; this surface has "+
-			"session.start, session.submit, session.cancel, session.handoff, session.close, session.usage and server.hello", req.Method))
+			"session.start, session.submit, session.cancel, session.handoff, session.close, session.usage, "+
+			"session.events, server.sessions and server.hello", req.Method))
 	}
 }
 

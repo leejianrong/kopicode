@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	sessioncore "github.com/leejianrong/kopicode/cmd/kopicode/session"
 	"github.com/leejianrong/kopicode/internal/engine"
 )
 
@@ -38,9 +39,10 @@ func (c *fakeConsentClock) NewTimer(time.Duration) (<-chan time.Time, func()) {
 // newConsentTestServer is just enough of a *server for remoteConsenter.Ask's
 // write/registerConsentWaiter/deliverConsentReply calls: an encoder that
 // discards its output (these tests read pending state directly, never the
-// wire) and nothing else.
+// wire) and an empty session table, which Ask marks a session awaiting in.
 func newConsentTestServer() *server {
-	return &server{enc: json.NewEncoder(io.Discard)}
+	return &server{enc: json.NewEncoder(io.Discard),
+		mgr: sessioncore.New(context.Background(), engine.Options{}, io.Discard, nil)}
 }
 
 // awaitPendingConsentID polls until Ask has registered exactly the one waiter

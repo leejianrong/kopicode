@@ -1,6 +1,6 @@
 # ADR-0030: `serve` outlives its client and says what each session is doing
 
-*Proposed.* Builds on [ADR-0013](0013-agent-controlled-resident-session-surface.md) (the resident surface), [ADR-0016](0016-live-remote-consent-for-agent-orchestrated-sessions.md) and [ADR-0021](0021-usage-reporting.md). Written after reading how cuttlefish-crew drives `serve` today.
+*Accepted.* Builds on [ADR-0013](0013-agent-controlled-resident-session-surface.md) (the resident surface), [ADR-0016](0016-live-remote-consent-for-agent-orchestrated-sessions.md) and [ADR-0021](0021-usage-reporting.md). Written after reading how cuttlefish-crew drives `serve` today.
 
 ## Context
 
@@ -30,3 +30,15 @@ Today a `serve` child ends its sessions when its client's stdin closes. A cuttle
 - Orphan processes become possible, which is what the idle timeout and `server.shutdown` are for.
 - The scale cost of several sessions in one process is unmeasured. A load test with many concurrent mock-provider sessions is the first card of the epic.
 - The needs-attention states are what a fleet view cares about most at 100 projects.
+
+## Status of the build
+
+- **Decisions 3 and 4 are built** (KOP-185 `server.sessions`, KOP-186 `session.events`): the session table
+  with its five states, and a blob-aware replay with `after_seq`, `limit` and `more`. Notifications already
+  carried `seq`.
+- Two choices the text left open. An ended session stays in the table (the newest 256) and its events stay
+  readable, so a client that reconnects can see how it finished; and `session.events` pages by `limit` rather
+  than returning everything, because a replayed event holds its whole text.
+- Decisions 1, 2 and 5 (the socket, one client at a time, the lifecycle) are not built yet. `server.sessions`
+  and `session.events` work over stdio today, and the same methods will serve a reconnecting client.
+- The `mcp` front end shares the session manager but has no tool for either; the ADR names `serve` only.

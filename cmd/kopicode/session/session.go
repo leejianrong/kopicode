@@ -23,7 +23,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/leejianrong/kopicode/internal/engine"
@@ -176,10 +178,17 @@ type Manager struct {
 	mu       sync.Mutex
 	sessions map[string]*managed
 	wg       sync.WaitGroup
+	// ended keeps the last word on sessions that have ended, newest last and
+	// bounded by endedKept, so a client that reconnects can still be told how a
+	// session finished. A restarted id leaves it.
+	ended []Info
 
 	// startMu makes Start's duplicate-id check and its registration one atomic
 	// step, so two concurrent starts for one id cannot both open a session.
 	startMu sync.Mutex
+
+	// now is the clock Sessions' last-event times are read from; a test sets it.
+	now func() time.Time
 }
 
 // SetRemoteAsk gives the manager a live ask, called once after New and before
@@ -190,13 +199,31 @@ func (m *Manager) SetRemoteAsk(f RemoteAsk) { m.remoteAsk = f }
 // policies, the provider base URL); Dir, Selection and the consent fields are
 // per-session. remote may be nil.
 func New(ctx context.Context, base engine.Options, stderr io.Writer, remote RemoteConsent) *Manager {
-	return &Manager{ctx: ctx, base: base, stderr: stderr, remote: remote, sessions: map[string]*managed{}}
+	return &Manager{ctx: ctx, base: base, stderr: stderr, remote: remote, sessions: map[string]*managed{}, now: time.Now}
 }
+
+// endedKept bounds how many ended sessions the Manager remembers.
+const endedKept = 256
 
 // managed is one open engine session and its queue of turns.
 type managed struct {
 	id   string
+	dir  string
 	sess *engine.Session
+
+	// lastEvent is when the session last announced a recorded event, as Unix
+	// nanoseconds; 0 until it has. It is written from the observer, which runs
+	// inside the journal's append, so it is atomic rather than under mu.
+	lastEvent atomic.Int64
+
+	// busy, awaiting, pending and lastStop are what Sessions reports. All are
+	// guarded by mu. busy is true while the worker runs a turn or a handoff;
+	// awaiting and pending are set by a skin while it holds a question for the
+	// client (see Awaiting).
+	busy     bool
+	awaiting State
+	pending  string
+	lastStop string
 
 	cond    *sync.Cond
 	queue   []job
@@ -260,7 +287,15 @@ func (m *Manager) Start(p StartParams, events engine.Observer, turn Turn) *Error
 	opts.Dir = p.Dir
 	opts.SessionID = p.ID
 	opts.Selection = selection
-	opts.Events = events
+	ms := &managed{id: p.ID}
+	opts.Events = func(ev engine.Event) {
+		if ev.Kind != engine.EventDelta {
+			ms.lastEvent.Store(m.now().UnixNano())
+		}
+		if events != nil {
+			events(ev)
+		}
+	}
 	opts.Handoff, opts.ParentSession = p.Handoff, p.ParentSession
 	if rerr := m.buildConsentOptions(p, &opts); rerr != nil {
 		return rerr
@@ -275,11 +310,12 @@ func (m *Manager) Start(p StartParams, events engine.Observer, turn Turn) *Error
 		return &Error{Kind: kind, Message: err.Error()}
 	}
 
-	ms := &managed{id: p.ID, sess: sess}
+	ms.sess, ms.dir = sess, sess.Dir()
 	ms.cond = sync.NewCond(&m.mu)
 	ms.queue = []job{{prompt: p.Prompt, isStart: true, turn: turn}}
 	m.mu.Lock()
 	m.sessions[p.ID] = ms
+	m.ended = slices.DeleteFunc(m.ended, func(i Info) bool { return i.ID == p.ID })
 	m.mu.Unlock()
 
 	m.wg.Add(1)
@@ -384,7 +420,9 @@ func (m *Manager) finishClose(ms *managed, j job) {
 	ms.closed = true
 	m.mu.Unlock()
 
-	if err := ms.sess.Close(m.ctx); err != nil {
+	err := ms.sess.Close(m.ctx)
+	m.remember(ms)
+	if err != nil {
 		_, _ = fmt.Fprintf(m.stderr, "kopicode: closing session %q: %v\n", ms.id, err)
 		j.closeDone(errf(KindInternal, "closing session %q: %v", ms.id, err))
 		return
@@ -419,6 +457,7 @@ func (m *Manager) worker(ms *managed) {
 		}
 		turnCtx, cancel := context.WithCancel(m.ctx)
 		ms.cancel = cancel
+		ms.busy = true
 		m.mu.Unlock()
 
 		if j.isHandoff {
@@ -426,6 +465,7 @@ func (m *Manager) worker(ms *managed) {
 			cancel()
 			m.mu.Lock()
 			ms.cancel = nil
+			ms.busy = false
 			m.mu.Unlock()
 			switch {
 			case errors.Is(err, engine.ErrNothingToHand):
@@ -446,6 +486,8 @@ func (m *Manager) worker(ms *managed) {
 
 		m.mu.Lock()
 		ms.cancel = nil
+		ms.busy = false
+		ms.lastStop = res.Stop.String()
 		m.mu.Unlock()
 
 		out := TurnResult{
@@ -494,6 +536,7 @@ func (m *Manager) Shutdown() {
 		if err := ms.sess.Close(m.ctx); err != nil {
 			_, _ = fmt.Fprintf(m.stderr, "kopicode: closing session %q: %v\n", ms.id, err)
 		}
+		m.remember(ms)
 	}
 }
 
