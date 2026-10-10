@@ -60,6 +60,7 @@ func fixtures() map[journal.Type]journal.Payload {
 				TreeState: "dirty",
 				Source:    "ldflags",
 			},
+			ParentSession: "20261009T101112Z-ab12cd34",
 		},
 		journal.TypeUserMessage:      journal.UserMessage{Text: text("fix the failing test in internal/parse")},
 		journal.TypeAssistantMessage: journal.AssistantMessage{Text: text("Reading the test first.")},

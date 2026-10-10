@@ -16,7 +16,7 @@ type SkillsFunc func() ([]engine.Skill, []string)
 // builtinCommands are the slash commands that are never skills. A skill with
 // one of these names is still listed, marked, and reached through the model's
 // own reading of it.
-var builtinCommands = []string{"/context", "/exit", "/mode", "/quit", "/skills"}
+var builtinCommands = []string{"/context", "/exit", "/handoff", "/mode", "/quit", "/skills"}
 
 // IsBuiltinCommand reports whether name (without the slash) is a built-in
 // command, so a front end can leave a skill with that name out of what it tells

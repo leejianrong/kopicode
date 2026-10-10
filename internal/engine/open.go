@@ -288,6 +288,16 @@ type Options struct {
 	// serve and mcp leave it unset, so their sessions are as they were.
 	Skills []Skill
 
+	// Handoff is the text of a handoff document (ADR-0026) a new session starts
+	// from: told to it once, as a user turn under a <handoff> tag, after the
+	// instructions and the skills catalogue, and journaled as a
+	// ProjectInstructionsLoaded with scope "handoff". Verification starts
+	// NotRun whatever the document says. Ignored on a resumed or forked session.
+	Handoff string
+	// ParentSession is the session the Handoff came from, recorded on
+	// SessionStarted. Only meaningful with Handoff.
+	ParentSession string
+
 	// UserInstructions is the path of the user-level AGENTS.md (ADR-0024), fed
 	// to a new session before the repository's own. Empty means none; a missing
 	// file is skipped. Only the REPL sets it.
@@ -915,16 +925,17 @@ func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session,
 		// One binary, one identity, one call. The surface prints this for
 		// --version and the record carries it on SessionStarted, and a field
 		// here would be a second answer to who this is (ADR-0007 decision 7).
-		Build:       buildInfo(),
-		CWD:         abs,
-		RepoHead:    head,
-		Provider:    prov,
-		Journal:     teed,
-		Tools:       set,
-		Permissions: gate,
-		Ask:         askFn,
-		AskSource:   askSource,
-		Syntax:      &syntax.Gate{Root: set.Root.Path()},
+		Build:         buildInfo(),
+		CWD:           abs,
+		ParentSession: parentSession(opts),
+		RepoHead:      head,
+		Provider:      prov,
+		Journal:       teed,
+		Tools:         set,
+		Permissions:   gate,
+		Ask:           askFn,
+		AskSource:     askSource,
+		Syntax:        &syntax.Gate{Root: set.Root.Path()},
 		// Verify is left nil on purpose: nil means the default verifier, and
 		// Options offers no way to say otherwise. See Options.
 		Snapshots:     snaps,
@@ -950,6 +961,9 @@ func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session,
 			return fail(err)
 		}
 		if err := eng.loadSkillCatalogue(ctx, abs, opts.Skills); err != nil {
+			return fail(err)
+		}
+		if err := eng.loadHandoff(ctx, opts.Handoff); err != nil {
 			return fail(err)
 		}
 	}

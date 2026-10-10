@@ -42,3 +42,10 @@ What the survey of other harnesses (2026-10) found:
 - `session.handoff` is a new wire addition: a string in `features` in `cmd/kopicode/capabilities.go` and a row in `docs/kopicode-serve-protocol.md`.
 - cuttlefish can replace its own summariser call with the harness-written facts block, keeping its trigger.
 - Instruction files (an AGENTS.md hierarchy walked from the working directory, nearest last, with a byte cap) are a separate, cheaper piece of work and get their own ADR. They are not part of this one.
+
+## Status of the build
+
+- Step 1 (#205): the `internal/handoff` document and facts block, and the `HandoffWritten` event.
+- Step 2 (KAN-1966): `Engine.Handoff` (one tool-less call, history untouched), `Options.Handoff` / `ParentSession` (the document arrives as a `ProjectInstructionsLoaded` with scope `handoff`; `SessionStarted.parent_session` links back), and `/handoff [goal]` in the REPL. The REPL closes the old session before opening the new one, because a working tree has one.
+- Step 3 (KAN-1967): `session.handoff` on `serve` and `mcp`. Not built.
+- Step 4 (KAN-1968): the paired measurement. Not built; the claim stays "unmeasured".
