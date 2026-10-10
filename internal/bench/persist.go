@@ -71,6 +71,7 @@ type persistedTask struct {
 	JournalDir   string              `json:"journal_dir"`
 	Stop         string              `json:"stop"`
 	Turns        int                 `json:"turns"`
+	Handoffs     int                 `json:"handoffs,omitempty"`
 	Tokens       journal.TokenCounts `json:"tokens"`
 	SessionErr   string              `json:"session_err"`
 	Panicked     bool                `json:"panicked"`
@@ -125,6 +126,7 @@ func toPersisted(r *RunResult) persistedRun {
 			JournalDir: t.JournalDir,
 			Stop:       t.Stop,
 			Turns:      t.Turns,
+			Handoffs:   t.Handoffs,
 			Tokens:     t.Tokens,
 			SessionErr: t.SessionErr,
 			Panicked:   t.Panicked,
@@ -180,6 +182,7 @@ func fromPersisted(p persistedRun) *RunResult {
 			JournalDir: t.JournalDir,
 			Stop:       t.Stop,
 			Turns:      t.Turns,
+			Handoffs:   t.Handoffs,
 			Tokens:     t.Tokens,
 			SessionErr: t.SessionErr,
 			Panicked:   t.Panicked,
