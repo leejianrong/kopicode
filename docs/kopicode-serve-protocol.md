@@ -37,6 +37,33 @@ a parse-error response and the loop continues — one bad message does not end t
 <-- {"jsonrpc":"2.0","id":1,"result":{"session":"s1","record":"/repo/.kopicode/sessions/s1","stop":"completed","exit_code":0,"turns":1}}
 ```
 
+### Over a socket: `serve --listen <path>` (ADR-0030)
+
+`kopicode serve --listen /run/user/1000/kopicode.sock` serves the same wire, line for line, on a unix
+socket instead of stdio. The difference is who owns the process: over stdio, the sessions end when the
+client's stdin does; on a socket, **the process and its sessions outlive any client**, so a supervisor
+that restarts reconnects and finds them where it left them (`server.sessions` says what each is doing,
+`session.events` replays what it missed).
+
+- **Access.** The socket is created mode `0600`; the owner is the only client, as the child's own pipe is
+  for stdio. There is no TCP listener and nothing to authenticate.
+- **One client at a time.** A new connection closes the one before it, without a message. Notifications
+  sent while nobody is connected are dropped; the record is the journal.
+- **Pending questions are asked again.** A `consent.request` or `ask.request` still waiting for an answer
+  is sent to the new client under the same id, and the turn it holds up carries on when that client
+  answers. One nobody answers expires after its timeout, as it does over stdio.
+- **Responses stay with their connection.** A response goes to the connection its request arrived on. A
+  turn that finishes after its client was replaced answers to nobody: the new client cannot know what its
+  predecessor's id meant, and reads the outcome from `server.sessions` (`last_stop`) and `session.events`.
+- **Ending it.** `SIGINT` or `SIGTERM` closes every session (each writes its `session_ended`), removes the
+  socket and exits `0`. (`--idle-timeout` and `server.shutdown` are ADR-0030 decision 5, not yet built.)
+- **One process per path.** The path is claimed with an advisory lock on `<path>.lock`, which dies with
+  its holder. A path a live `serve` holds is refused (exit `2`); a socket left behind by a crash is
+  replaced; anything at the path that is not a socket is refused and left alone. The `.lock` file stays.
+- Unix only: `--listen` on another platform is a usage error. Stdio, the default, is unchanged.
+
+Feature: `serve.listen`.
+
 ## Message shapes
 
 **Request** (client → server). `id` is echoed back verbatim on the response so the client
@@ -314,7 +341,7 @@ dirty bit. `protocol` moves only for a change that breaks an existing client. `f
 list of stable lower-case dotted names, added in the change that ships a capability, never renamed,
 and removed only with a protocol bump. Current names: `allow_commands`, `ask.request`, `consent.note`, `consent_mode.auto`,
 `consent_mode.remote_interactive`, `consent_mode.unattended_policy`, `consent_request.command`,
-`consent_timeout.flag`, `consent_timeout.session`, `mcp`, `provider_url.flag`, `server.hello`, `server.sessions`,
+`consent_timeout.flag`, `consent_timeout.session`, `mcp`, `provider_url.flag`, `serve.listen`, `server.hello`, `server.sessions`,
 `session.close`, `session.events_since`, `session.handoff`, `session.limits`, `session.read_only`, `session.usage`,
 `usage.context`, `usage.context_window`, `usage.cost`, `usage.tokens_split`.
 `cmd/kopicode/capabilities_test.go` ties the list to the consent modes and methods in the code.
