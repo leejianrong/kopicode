@@ -40,13 +40,22 @@ func TestFeatureListTracksTheCode(t *testing.T) {
 			t.Errorf("consent_mode %q is accepted by session.start but has no feature name", mode)
 		}
 	}
-	for method, feature := range map[string]string{methodSessionClose: "session.close", methodServerHello: "server.hello", methodAskRequest: "ask.request", methodSessionUsage: "session.usage"} {
+	for method, feature := range map[string]string{methodSessionClose: "session.close", methodServerHello: "server.hello", methodAskRequest: "ask.request", methodSessionUsage: "session.usage", methodServerSessions: "server.sessions"} {
 		if method != feature {
 			t.Errorf("method %q and feature %q should share a name", method, feature)
 		}
 		if !slices.Contains(features, feature) {
 			t.Errorf("method %q has no feature name", method)
 		}
+	}
+}
+
+// session.events is the one method whose feature name differs from it: the name
+// says what it does for a client, "events since a seq", and names are never
+// renamed (ADR-0030 decision 6).
+func TestSessionEventsHasItsFeatureName(t *testing.T) {
+	if methodSessionEvents != "session.events" || !slices.Contains(features, "session.events_since") {
+		t.Errorf("method %q, features %v", methodSessionEvents, features)
 	}
 }
 

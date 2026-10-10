@@ -164,6 +164,7 @@ func (r *remoteConsenter) Ask(ctx context.Context, req engine.ConsentRequest) (e
 
 	id, waiter := r.srv.registerConsentWaiter()
 	defer r.srv.abandonConsentWaiter(id)
+	defer r.srv.mgr.Awaiting(r.session, sessioncore.StateAwaitingConsent, id)()
 
 	r.srv.write(rpcRequestOut{
 		JSONRPC: jsonrpcVersion,
@@ -338,6 +339,7 @@ func (a *remoteAsker) Ask(ctx context.Context, req engine.AskRequest) (engine.As
 	}
 	id, waiter := a.srv.registerConsentWaiter()
 	defer a.srv.abandonConsentWaiter(id)
+	defer a.srv.mgr.Awaiting(a.session, sessioncore.StateAwaitingAnswer, id)()
 
 	a.srv.write(rpcRequestOut{
 		JSONRPC: jsonrpcVersion,
