@@ -32,6 +32,7 @@ var features = []string{
 	"provider_url.flag",
 	"server.hello",
 	"session.close",
+	"session.handoff",
 	"session.limits",
 	"session.read_only",
 	"session.usage",

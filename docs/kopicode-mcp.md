@@ -41,15 +41,16 @@ event. Diagnostics go to stderr only. Protocol revisions `2025-06-18`, `2025-03-
 | `kopicode_start` | Opens a session in `dir` and runs `prompt` to completion. |
 | `kopicode_submit` | Queues the next turn on an open session and waits for it. Never rejected as busy: a submit during a turn waits its place. |
 | `kopicode_cancel` | Cancels the turn running now on a session, and only that one. |
+| `kopicode_handoff` | Drafts a handoff document for an open session (ADR-0026): one model call with no tools, queued behind the turns it has accepted. The session is left as it was. Returns `document` and `path`; pass the document as `kopicode_start`'s `handoff` to continue in a fresh session. When to hand off is the caller's policy. |
 | `kopicode_close` | Ends a session after the turns it has accepted, writes its closing event, releases its working tree so the id can be reused. |
 
 `kopicode_start` arguments: `dir` and `prompt` and **`consent_mode`** (all required);
 `containment_provided` (required, and true, for `unattended_policy`); `never_allow` (`auto`
-only); `session` (generated as `mcp-<hex>` if omitted); `model`, `harness`, `harness_config`, `max_turns`, `token_budget` (ADR-0022).
+only); `session` (generated as `mcp-<hex>` if omitted); `model`, `harness`, `harness_config`, `max_turns`, `token_budget` (ADR-0022); `handoff` (a document from `kopicode_handoff`, told to the new session once as its first message) with `handoff_from` (the session it came from, recorded in the journal).
 `consent_mode` is never defaulted — see [Consent](#consent). A misspelt argument is refused, not
 ignored.
 
-`kopicode_submit`: `session`, `prompt`. `kopicode_cancel` and `kopicode_close`: `session`.
+`kopicode_submit`: `session`, `prompt`. `kopicode_handoff`: `session`, and optionally `goal`. `kopicode_cancel` and `kopicode_close`: `session`.
 
 ### Results
 

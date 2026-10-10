@@ -119,7 +119,7 @@ func progressEvents(t *testing.T, h *serveHarness, token any) []map[string]any {
 	return out
 }
 
-func TestMCPInitializeNegotiatesAndListsTheFourTools(t *testing.T) {
+func TestMCPInitializeNegotiatesAndListsTheFiveTools(t *testing.T) {
 	h := startMCP(t, engine.Options{})
 	resp := initialize(h, 1, false)
 	result, _ := resp["result"].(map[string]any)
@@ -152,7 +152,7 @@ func TestMCPInitializeNegotiatesAndListsTheFourTools(t *testing.T) {
 			t.Errorf("tool %v lacks a schema or description", m["name"])
 		}
 	}
-	if strings.Join(names, ",") != "kopicode_start,kopicode_submit,kopicode_cancel,kopicode_close" {
+	if strings.Join(names, ",") != "kopicode_start,kopicode_submit,kopicode_cancel,kopicode_handoff,kopicode_close" {
 		t.Errorf("tools = %v", names)
 	}
 

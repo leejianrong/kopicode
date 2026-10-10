@@ -104,6 +104,12 @@ type StartParams struct {
 	// usage error under ConsentAuto, which would run shell unasked.
 	ReadOnly bool
 
+	// Handoff is a handoff document (ADR-0026) the session starts from, and
+	// ParentSession the session it came from, recorded in the journal. Empty
+	// means the session starts fresh.
+	Handoff       string
+	ParentSession string
+
 	// ConsentTimeout overrides the process-wide live-consent timeout for this
 	// session alone. Zero means "use the process default"; it is meaningful
 	// only under ConsentRemoteInteractive, and the caller has already checked
@@ -118,6 +124,15 @@ type StartParams struct {
 type Turn struct {
 	Begin func()
 	Done  func(TurnResult)
+}
+
+// HandoffResult is a drafted handoff (ADR-0026): the document, and the file it
+// was projected to on the server's disk.
+type HandoffResult struct {
+	Session  string
+	Goal     string
+	Document string
+	Path     string
 }
 
 // TurnResult is what a turn settled on, projected the way `run --print`'s last
@@ -197,6 +212,13 @@ type job struct {
 	turn      Turn
 	isClose   bool
 	closeDone func(*Error)
+
+	// isHandoff is a handoff draft: one model call that leaves the session as
+	// it was. It queues behind accepted turns because the engine runs one call
+	// at a time, and session.cancel reaches it like a turn.
+	isHandoff   bool
+	goal        string
+	handoffDone func(HandoffResult, *Error)
 }
 
 // Start opens a session and queues its first turn. engine.Open runs inline — it
@@ -239,6 +261,7 @@ func (m *Manager) Start(p StartParams, events engine.Observer, turn Turn) *Error
 	opts.SessionID = p.ID
 	opts.Selection = selection
 	opts.Events = events
+	opts.Handoff, opts.ParentSession = p.Handoff, p.ParentSession
 	if rerr := m.buildConsentOptions(p, &opts); rerr != nil {
 		return rerr
 	}
@@ -278,6 +301,26 @@ func (m *Manager) Submit(id, prompt string, turn Turn) *Error {
 		return errf(KindUnknownSession, "session %q is closing; start a new one", id)
 	}
 	ms.queue = append(ms.queue, job{prompt: prompt, turn: turn})
+	ms.cond.Signal()
+	return nil
+}
+
+// Handoff queues a handoff draft on an open session, behind the turns it has
+// already accepted, and never waits: done is called from the session's worker
+// with the document, or with an error. It does not end the session and does not
+// change its conversation. A session that has run no turn yet answers with
+// KindUsage, since there is nothing to hand off.
+func (m *Manager) Handoff(id, goal string, done func(HandoffResult, *Error)) *Error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ms := m.sessions[id]
+	if ms == nil {
+		return errf(KindUnknownSession, "no open session %q to hand off", id)
+	}
+	if ms.closing {
+		return errf(KindUnknownSession, "session %q is closing; start a new one", id)
+	}
+	ms.queue = append(ms.queue, job{isHandoff: true, goal: goal, handoffDone: done})
 	ms.cond.Signal()
 	return nil
 }
@@ -377,6 +420,23 @@ func (m *Manager) worker(ms *managed) {
 		turnCtx, cancel := context.WithCancel(m.ctx)
 		ms.cancel = cancel
 		m.mu.Unlock()
+
+		if j.isHandoff {
+			res, err := ms.sess.Handoff(turnCtx, j.goal)
+			cancel()
+			m.mu.Lock()
+			ms.cancel = nil
+			m.mu.Unlock()
+			switch {
+			case errors.Is(err, engine.ErrNothingToHand):
+				j.handoffDone(HandoffResult{}, errf(KindUsage, "%v", err))
+			case err != nil:
+				j.handoffDone(HandoffResult{}, errf(KindInternal, "handoff for session %q: %v", ms.id, err))
+			default:
+				j.handoffDone(HandoffResult{Session: ms.id, Goal: j.goal, Document: res.Document, Path: res.Path}, nil)
+			}
+			continue
+		}
 
 		if j.turn.Begin != nil {
 			j.turn.Begin()
