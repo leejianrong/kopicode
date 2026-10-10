@@ -41,8 +41,9 @@ func (c *fakeConsentClock) NewTimer(time.Duration) (<-chan time.Time, func()) {
 // discards its output (these tests read pending state directly, never the
 // wire) and an empty session table, which Ask marks a session awaiting in.
 func newConsentTestServer() *server {
-	return &server{enc: json.NewEncoder(io.Discard),
-		mgr: sessioncore.New(context.Background(), engine.Options{}, io.Discard, nil)}
+	s := &server{mgr: sessioncore.New(context.Background(), engine.Options{}, io.Discard, nil)}
+	s.attach(newConn(io.Discard, nil))
+	return s
 }
 
 // awaitPendingConsentID polls until Ask has registered exactly the one waiter

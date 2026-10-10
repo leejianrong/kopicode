@@ -9,8 +9,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 
 	sessioncore "github.com/leejianrong/kopicode/cmd/kopicode/session"
@@ -30,8 +34,10 @@ import (
 // of tasks rather than paying process-startup cost per task and rather than
 // restarting to get the next turn. The orchestrator owns the child's
 // stdin/stdout, so the OS's own process-ownership model is the access control
-// and there is no connection to authenticate (ADR-0013 decision 1); a listening
-// socket, which nothing here needs, would have to design that from scratch.
+// and there is no connection to authenticate (ADR-0013 decision 1). `--listen
+// <socket>` (ADR-0030, serve_listen.go) is the second transport, for a client
+// that must be able to restart without ending its sessions; the socket's mode
+// 0600 is its access control, and stdio stays the default.
 //
 // # The wire: newline-delimited JSON-RPC 2.0 (decision 2)
 //
@@ -220,6 +226,11 @@ type rpcRequest struct {
 	ID      json.RawMessage `json:"id,omitempty"`
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params,omitempty"`
+
+	// conn is the connection the request arrived on, and where its response goes.
+	// A request's id belongs to its own client, so a response is never sent to a
+	// client that replaced it (ADR-0030 decision 2).
+	conn *conn
 }
 
 // rpcLine is every field an inbound line might carry, decoded once so
@@ -416,10 +427,20 @@ type eventParams struct {
 // base options every session inherits, and hands the run loop the process's own
 // stdio.
 func serveCmd(args []string, stdout, stderr io.Writer) int {
+	var listen string
 	base, timeout, code, ok := residentOptions("serve", "a task arrives over the wire as session.start's prompt, "+
-		"not on the command line", args, stderr)
+		"not on the command line", args, stderr, func(fs *flag.FlagSet) {
+		fs.StringVar(&listen, "listen", "", "listen on this unix socket (mode 0600) instead of stdio: the process "+
+			"and its sessions outlive a client, and a new connection replaces the one before it (ADR-0030)")
+	})
 	if !ok {
 		return code
+	}
+	if listen != "" {
+		// A signal is the way a supervisor ends a process it cannot close stdin of.
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		return serveListen(ctx, listen, stderr, base, timeout)
 	}
 	return serveWith(context.Background(), os.Stdin, stdout, stderr, base, timeout)
 }
@@ -427,7 +448,7 @@ func serveCmd(args []string, stdout, stderr io.Writer) int {
 // residentOptions parses the process-level flags the two resident front ends
 // (`serve` and `mcp`) share and builds the base options every session inherits.
 // ok is false when the process should exit with code instead of running.
-func residentOptions(name, noArgsHint string, args []string, stderr io.Writer) (base engine.Options, consentTimeout time.Duration, code int, ok bool) {
+func residentOptions(name, noArgsHint string, args []string, stderr io.Writer, extra ...func(*flag.FlagSet)) (base engine.Options, consentTimeout time.Duration, code int, ok bool) {
 	fs := flag.NewFlagSet("kopicode "+name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	debug := fs.Bool("debug", false, "engine diagnostics on stderr")
@@ -447,6 +468,9 @@ func residentOptions(name, noArgsHint string, args []string, stderr io.Writer) (
 	timeoutFlag := fs.Duration("consent-timeout", remoteConsentTimeout, "how long a live consent request "+
 		"(consent_mode remote_interactive) waits for the client's answer before it is denied, for example 5m; "+
 		"between 1s and 24h")
+	for _, add := range extra {
+		add(fs)
+	}
 	if err := fs.Parse(args); err != nil {
 		// flag has already printed the error and the usage. A help request is not
 		// an error: -h/--help exits 0, everything else is a usage error.
@@ -507,6 +531,16 @@ func residentOptions(name, noArgsHint string, args []string, stderr io.Writer) (
 // Dir and Selection are per-session, resolved from each session.start.
 // consentTimeout bounds every live consent request (`--consent-timeout`).
 func serveWith(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, base engine.Options, consentTimeout time.Duration) int {
+	s := newServer(ctx, stderr, base, consentTimeout)
+	c := newConn(stdout, nil)
+	// Stdout is the one connection there is, and a failed write to it is reported.
+	c.report = func(err error) { say(stderr, "kopicode: writing the serve output: %v\n", err) }
+	s.attach(c)
+	return s.run(stdin, c)
+}
+
+// newServer builds the server around its session manager.
+func newServer(ctx context.Context, stderr io.Writer, base engine.Options, consentTimeout time.Duration) *server {
 	s := &server{stderr: stderr, consentTimeout: consentTimeout}
 	// The Manager is the session lifecycle both resident front ends share
 	// (ADR-0015 decision 3); this file is only the JSON-RPC skin over it.
@@ -516,12 +550,7 @@ func serveWith(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, b
 	s.mgr.SetRemoteAsk(func(id string, timeout time.Duration) engine.Answerer {
 		return newRemoteAsker(s, id, timeout).Ask
 	})
-	s.enc = json.NewEncoder(stdout)
-	// Off, for the reason journal.Marshal and print.go's emitter both give: the
-	// default rewrites <, > and & as \uXXXX, so a diff or tool output would read
-	// as different bytes on this stream than in the record it came from.
-	s.enc.SetEscapeHTML(false)
-	return s.run(stdin)
+	return s
 }
 
 // server is the JSON-RPC skin: it frames the wire and maps sessioncore.Manager's
@@ -533,11 +562,15 @@ type server struct {
 	// consentTimeout bounds every live consent request (--consent-timeout).
 	consentTimeout time.Duration
 
-	// enc and encMu serialize every write to stdout. Notifications come off a
-	// turn's goroutine and responses come off both a turn's goroutine and the
-	// read loop, so the encoder is shared and must be guarded.
-	enc   *json.Encoder
-	encMu sync.Mutex
+	// cur is the connection notifications and server-initiated requests go to:
+	// stdout for the life of a stdio process, the latest client on a socket
+	// (--listen), nil while a socket has none. sent holds each consent.request
+	// and ask.request still waiting for an answer, so a client that replaces
+	// the one that was asked is asked again. connMu guards both, and is held
+	// across the write of a request so a replacement cannot see it half-sent.
+	connMu sync.Mutex
+	cur    *conn
+	sent   map[string]rpcRequestOut
 
 	// consentMu, consentSeq and pending back every remoteConsenter's blocking
 	// round trip (ADR-0016, see serve_consent.go). Deliberately its own lock: a
@@ -552,22 +585,29 @@ type server struct {
 // run reads one JSON message per line until stdin closes, dispatching each, then
 // shuts every open session down. A line that will not parse gets a parse-error
 // response and the loop continues — one bad message does not end the process.
-func (s *server) run(stdin io.Reader) int {
-	br := bufio.NewReader(stdin)
+func (s *server) run(stdin io.Reader, c *conn) int {
+	s.readLines(stdin, c)
+	s.mgr.Shutdown()
+	return exitSuccess
+}
+
+// readLines dispatches each line of r, which arrived on c, until r ends. It does
+// not end the sessions: a stdio process does that when its one client goes, and a
+// socket process keeps them for the next client.
+func (s *server) readLines(r io.Reader, c *conn) {
+	br := bufio.NewReader(r)
 	for {
 		line, err := br.ReadString('\n')
 		if trimmed := strings.TrimSpace(line); trimmed != "" {
-			s.handleLine(trimmed)
+			s.handleLine(c, trimmed)
 		}
 		if err != nil {
-			if err != io.EOF {
+			if err != io.EOF && !c.isClosed() {
 				say(s.stderr, "kopicode: reading the serve input: %v\n", err)
 			}
-			break
+			return
 		}
 	}
-	s.mgr.Shutdown()
-	return exitSuccess
 }
 
 // handleLine parses and dispatches one message. A request with an id gets
@@ -581,10 +621,10 @@ func (s *server) run(stdin io.Reader) int {
 // response. deliverReply tries the second reading first; only a line that is
 // neither a request nor a recognisable reply falls through to the original
 // refusal.
-func (s *server) handleLine(line string) {
+func (s *server) handleLine(c *conn, line string) {
 	var raw rpcLine
 	if err := json.Unmarshal([]byte(line), &raw); err != nil {
-		s.writeError(nil, codeParseError, fmt.Sprintf("not valid JSON: %v", err))
+		s.writeError(rpcRequest{conn: c}, codeParseError, fmt.Sprintf("not valid JSON: %v", err))
 		return
 	}
 	if raw.Method == "" {
@@ -597,10 +637,10 @@ func (s *server) handleLine(line string) {
 			s.deliverConsentReply(raw)
 			return
 		}
-		s.writeError(raw.ID, codeInvalidRequest, "request has no method")
+		s.writeError(rpcRequest{ID: raw.ID, conn: c}, codeInvalidRequest, "request has no method")
 		return
 	}
-	req := rpcRequest{JSONRPC: raw.JSONRPC, ID: raw.ID, Method: raw.Method, Params: raw.Params}
+	req := rpcRequest{JSONRPC: raw.JSONRPC, ID: raw.ID, Method: raw.Method, Params: raw.Params, conn: c}
 
 	switch req.Method {
 	case methodSessionStart:
@@ -620,9 +660,9 @@ func (s *server) handleLine(line string) {
 	case methodSessionEvents:
 		s.handleEvents(req)
 	case methodServerHello:
-		s.writeResult(req.ID, currentCapabilities())
+		s.writeResult(req, currentCapabilities())
 	default:
-		s.writeError(req.ID, codeMethodNotFound, fmt.Sprintf("unknown method %q; this surface has "+
+		s.writeError(req, codeMethodNotFound, fmt.Sprintf("unknown method %q; this surface has "+
 			"session.start, session.submit, session.cancel, session.handoff, session.close, session.usage, "+
 			"session.events, server.sessions and server.hello", req.Method))
 	}
@@ -646,9 +686,9 @@ func rpcErrorFor(e *sessioncore.Error) (int, string) {
 	}
 }
 
-func (s *server) writeSessionError(id json.RawMessage, e *sessioncore.Error) {
+func (s *server) writeSessionError(to rpcRequest, e *sessioncore.Error) {
 	code, msg := rpcErrorFor(e)
-	s.writeError(id, code, msg)
+	s.writeError(to, code, msg)
 }
 
 func turnResultOf(r sessioncore.TurnResult) turnResult {
@@ -662,18 +702,18 @@ func turnResultOf(r sessioncore.TurnResult) turnResult {
 func (s *server) dispatchStart(req rpcRequest) {
 	var p startParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
-		s.writeError(req.ID, codeInvalidParams, fmt.Sprintf("session.start params: %v", err))
+		s.writeError(req, codeInvalidParams, fmt.Sprintf("session.start params: %v", err))
 		return
 	}
 	switch {
 	case p.Session == "":
-		s.writeError(req.ID, codeInvalidParams, "session.start needs a session id to key the session by")
+		s.writeError(req, codeInvalidParams, "session.start needs a session id to key the session by")
 		return
 	case p.Dir == "":
-		s.writeError(req.ID, codeInvalidParams, "session.start needs a dir: the working tree to run in")
+		s.writeError(req, codeInvalidParams, "session.start needs a dir: the working tree to run in")
 		return
 	case p.Prompt == "":
-		s.writeError(req.ID, codeInvalidParams, "session.start needs a prompt: the first turn's task")
+		s.writeError(req, codeInvalidParams, "session.start needs a prompt: the first turn's task")
 		return
 	}
 
@@ -684,13 +724,13 @@ func (s *server) dispatchStart(req rpcRequest) {
 			d, err = parseConsentTimeout(d)
 		}
 		if err != nil {
-			s.writeError(req.ID, codeUsageError, fmt.Sprintf("session.start consent_timeout %q: %v", p.ConsentTimeout, err))
+			s.writeError(req, codeUsageError, fmt.Sprintf("session.start consent_timeout %q: %v", p.ConsentTimeout, err))
 			return
 		}
 		timeout = d
 	}
 
-	id := req.ID
+	id := req
 	if err := s.mgr.Start(sessioncore.StartParams{
 		ID: p.Session, Dir: p.Dir, Prompt: p.Prompt,
 		Model: p.Model, Harness: p.Harness, HarnessConfig: p.HarnessConfig,
@@ -701,7 +741,7 @@ func (s *server) dispatchStart(req rpcRequest) {
 	}, s.notifier(p.Session), sessioncore.Turn{Done: func(r sessioncore.TurnResult) {
 		s.writeResult(id, turnResultOf(r))
 	}}); err != nil {
-		s.writeSessionError(req.ID, err)
+		s.writeSessionError(req, err)
 	}
 }
 
@@ -710,22 +750,22 @@ func (s *server) dispatchStart(req rpcRequest) {
 func (s *server) dispatchSubmit(req rpcRequest) {
 	var p submitParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
-		s.writeError(req.ID, codeInvalidParams, fmt.Sprintf("session.submit params: %v", err))
+		s.writeError(req, codeInvalidParams, fmt.Sprintf("session.submit params: %v", err))
 		return
 	}
 	if p.Session == "" {
-		s.writeError(req.ID, codeInvalidParams, "session.submit needs a session id")
+		s.writeError(req, codeInvalidParams, "session.submit needs a session id")
 		return
 	}
 	if p.Prompt == "" {
-		s.writeError(req.ID, codeInvalidParams, "session.submit needs a prompt: the next turn's task")
+		s.writeError(req, codeInvalidParams, "session.submit needs a prompt: the next turn's task")
 		return
 	}
-	id := req.ID
+	id := req
 	if err := s.mgr.Submit(p.Session, p.Prompt, sessioncore.Turn{Done: func(r sessioncore.TurnResult) {
 		s.writeResult(id, turnResultOf(r))
 	}}); err != nil {
-		s.writeSessionError(req.ID, err)
+		s.writeSessionError(req, err)
 	}
 }
 
@@ -735,14 +775,14 @@ func (s *server) dispatchSubmit(req rpcRequest) {
 func (s *server) dispatchHandoff(req rpcRequest) {
 	var p handoffParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
-		s.writeError(req.ID, codeInvalidParams, fmt.Sprintf("session.handoff params: %v", err))
+		s.writeError(req, codeInvalidParams, fmt.Sprintf("session.handoff params: %v", err))
 		return
 	}
 	if p.Session == "" {
-		s.writeError(req.ID, codeInvalidParams, "session.handoff needs a session id")
+		s.writeError(req, codeInvalidParams, "session.handoff needs a session id")
 		return
 	}
-	id := req.ID
+	id := req
 	if err := s.mgr.Handoff(p.Session, p.Goal, func(r sessioncore.HandoffResult, e *sessioncore.Error) {
 		if e != nil {
 			s.writeSessionError(id, e)
@@ -750,7 +790,7 @@ func (s *server) dispatchHandoff(req rpcRequest) {
 		}
 		s.writeResult(id, handoffResult{Session: r.Session, Goal: r.Goal, Document: r.Document, Path: r.Path})
 	}); err != nil {
-		s.writeSessionError(req.ID, err)
+		s.writeSessionError(req, err)
 	}
 }
 
@@ -760,14 +800,14 @@ func (s *server) dispatchHandoff(req rpcRequest) {
 func (s *server) dispatchClose(req rpcRequest) {
 	var p closeParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
-		s.writeError(req.ID, codeInvalidParams, fmt.Sprintf("session.close params: %v", err))
+		s.writeError(req, codeInvalidParams, fmt.Sprintf("session.close params: %v", err))
 		return
 	}
 	if p.Session == "" {
-		s.writeError(req.ID, codeInvalidParams, "session.close needs a session id")
+		s.writeError(req, codeInvalidParams, "session.close needs a session id")
 		return
 	}
-	id := req.ID
+	id := req
 	if err := s.mgr.Close(p.Session, func(e *sessioncore.Error) {
 		if e != nil {
 			s.writeSessionError(id, e)
@@ -775,7 +815,7 @@ func (s *server) dispatchClose(req rpcRequest) {
 		}
 		s.writeResult(id, closeResult{Session: p.Session, Closed: true})
 	}); err != nil {
-		s.writeSessionError(req.ID, err)
+		s.writeSessionError(req, err)
 	}
 }
 
@@ -784,19 +824,19 @@ func (s *server) dispatchClose(req rpcRequest) {
 func (s *server) handleUsage(req rpcRequest) {
 	var p usageParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
-		s.writeError(req.ID, codeInvalidParams, fmt.Sprintf("session.usage params: %v", err))
+		s.writeError(req, codeInvalidParams, fmt.Sprintf("session.usage params: %v", err))
 		return
 	}
 	if p.Session == "" {
-		s.writeError(req.ID, codeInvalidParams, "session.usage needs a session id")
+		s.writeError(req, codeInvalidParams, "session.usage needs a session id")
 		return
 	}
 	u, err := s.mgr.Usage(p.Session)
 	if err != nil {
-		s.writeSessionError(req.ID, err)
+		s.writeSessionError(req, err)
 		return
 	}
-	s.writeResult(req.ID, usageResult{Session: p.Session, Usage: usageSummaryOf(u)})
+	s.writeResult(req, usageResult{Session: p.Session, Usage: usageSummaryOf(u)})
 }
 
 // handleCancel cancels a session's in-flight turn. It runs inline on the read
@@ -805,18 +845,18 @@ func (s *server) handleUsage(req rpcRequest) {
 func (s *server) handleCancel(req rpcRequest) {
 	var p cancelParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
-		s.writeError(req.ID, codeInvalidParams, fmt.Sprintf("session.cancel params: %v", err))
+		s.writeError(req, codeInvalidParams, fmt.Sprintf("session.cancel params: %v", err))
 		return
 	}
 	if p.Session == "" {
-		s.writeError(req.ID, codeInvalidParams, "session.cancel needs a session id")
+		s.writeError(req, codeInvalidParams, "session.cancel needs a session id")
 		return
 	}
 	if err := s.mgr.Cancel(p.Session); err != nil {
-		s.writeSessionError(req.ID, err)
+		s.writeSessionError(req, err)
 		return
 	}
-	s.writeResult(req.ID, cancelResult{Session: p.Session, Cancelled: true})
+	s.writeResult(req, cancelResult{Session: p.Session, Cancelled: true})
 }
 
 // --- writing the wire -------------------------------------------------------
@@ -838,25 +878,142 @@ func (s *server) notifier(session string) engine.Observer {
 	}
 }
 
-func (s *server) writeResult(id json.RawMessage, result any) {
-	s.write(rpcResponse{JSONRPC: jsonrpcVersion, ID: idOrNull(id), Result: result})
+func (s *server) writeResult(to rpcRequest, result any) {
+	s.reply(to).write(rpcResponse{JSONRPC: jsonrpcVersion, ID: idOrNull(to.ID), Result: result})
 }
 
-func (s *server) writeError(id json.RawMessage, code int, message string) {
-	s.write(rpcResponse{JSONRPC: jsonrpcVersion, ID: idOrNull(id), Error: &rpcError{Code: code, Message: message}})
+func (s *server) writeError(to rpcRequest, code int, message string) {
+	s.reply(to).write(rpcResponse{JSONRPC: jsonrpcVersion, ID: idOrNull(to.ID), Error: &rpcError{Code: code, Message: message}})
 }
 
-// write encodes one value as a line under the shared lock. A write failure —
-// stdout gone, a broken pipe — is reported once to stderr; there is nowhere else
-// to put it, and a resident process whose client vanished has nothing left to
-// say to it.
+// reply is where a response to to goes: the connection the request arrived on,
+// whether or not it is still the current one. Its id means something only to that
+// client, so a response to a client that has been replaced is dropped, never sent
+// to its successor. A request built without a connection (a test's) answers on
+// the current one.
+func (s *server) reply(to rpcRequest) *conn {
+	if to.conn != nil {
+		return to.conn
+	}
+	return s.current()
+}
+
+// write sends a notification to the current client, or drops it when there is
+// none: what a client misses while away it reads back with session.events.
 func (s *server) write(v any) {
-	s.encMu.Lock()
-	defer s.encMu.Unlock()
-	if err := s.enc.Encode(v); err != nil {
-		say(s.stderr, "kopicode: writing the serve output: %v\n", err)
+	s.current().write(v)
+}
+
+func (s *server) current() *conn {
+	s.connMu.Lock()
+	defer s.connMu.Unlock()
+	return s.cur
+}
+
+// sendRequest sends a consent.request or ask.request under id to the current
+// client and remembers it until forgotten, so a client that arrives later is
+// asked as well.
+func (s *server) sendRequest(id string, msg rpcRequestOut) {
+	s.connMu.Lock()
+	defer s.connMu.Unlock()
+	if s.sent == nil {
+		s.sent = map[string]rpcRequestOut{}
+	}
+	s.sent[id] = msg
+	s.cur.write(msg)
+}
+
+// forgetRequest drops a request that has been answered, has timed out or whose
+// turn ended.
+func (s *server) forgetRequest(id string) {
+	s.connMu.Lock()
+	defer s.connMu.Unlock()
+	delete(s.sent, id)
+}
+
+// attach makes c the connection the server talks to and sends it every request
+// still waiting for an answer, in the order they were asked. The caller has
+// already closed the connection it replaces.
+func (s *server) attach(c *conn) {
+	s.connMu.Lock()
+	defer s.connMu.Unlock()
+	s.cur = c
+	ids := make([]string, 0, len(s.sent))
+	for id := range s.sent {
+		ids = append(ids, id)
+	}
+	// "c-<n>" with n counting up: order by length, then text, is order by n.
+	slices.SortFunc(ids, func(a, b string) int {
+		if len(a) != len(b) {
+			return len(a) - len(b)
+		}
+		return strings.Compare(a, b)
+	})
+	for _, id := range ids {
+		c.write(s.sent[id])
 	}
 }
+
+// conn is one client connection: an encoder over its stream, and the way to end
+// it. A nil *conn is a connection that is not there, and every method on it is a
+// no-op, which is what a socket server with no client writes to.
+type conn struct {
+	mu     sync.Mutex // serialises writes
+	enc    *json.Encoder
+	raw    io.Closer   // the stream to close on replacement; nil for stdio
+	closed atomic.Bool // atomic because close must not wait for a write that is stuck
+	// report is told of a failed write. Nil means the failure is the client
+	// leaving: the connection is closed and nothing is said.
+	report func(error)
+}
+
+func newConn(w io.Writer, raw io.Closer) *conn {
+	enc := json.NewEncoder(w)
+	// Off, for the reason journal.Marshal and print.go's emitter both give: the
+	// default rewrites <, > and & as \uXXXX, so a diff or tool output would read
+	// as different bytes on this stream than in the record it came from.
+	enc.SetEscapeHTML(false)
+	return &conn{enc: enc, raw: raw}
+}
+
+// write encodes one value as a line under the connection's lock, so the
+// notifications off a turn's goroutine and the responses off the read loop never
+// interleave. A write failure on stdout is reported once per attempt to stderr;
+// there is nowhere else to put it, and a resident process whose client vanished
+// has nothing left to say to it.
+func (c *conn) write(v any) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed.Load() {
+		return
+	}
+	if err := c.enc.Encode(v); err != nil {
+		if c.report != nil {
+			c.report(err)
+			return
+		}
+		c.close()
+	}
+}
+
+// close ends the connection. A write blocked on a client that stopped reading
+// fails at once, which is how a replacement gets past a stuck predecessor.
+func (c *conn) close() {
+	if c == nil {
+		return
+	}
+	// Marked first, so the reader that fails because of this close knows it was
+	// asked to, and done without the write lock, which a blocked write holds.
+	c.closed.Store(true)
+	if c.raw != nil {
+		_ = c.raw.Close()
+	}
+}
+
+func (c *conn) isClosed() bool { return c.closed.Load() }
 
 // idOrNull keeps a response's id a JSON null when the request had none, which is
 // what JSON-RPC requires for an error that could not be tied to a request.

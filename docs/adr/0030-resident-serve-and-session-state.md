@@ -39,6 +39,10 @@ Today a `serve` child ends its sessions when its client's stdin closes. A cuttle
 - Two choices the text left open. An ended session stays in the table (the newest 256) and its events stay
   readable, so a client that reconnects can see how it finished; and `session.events` pages by `limit` rather
   than returning everything, because a replayed event holds its whole text.
-- Decisions 1, 2 and 5 (the socket, one client at a time, the lifecycle) are not built yet. `server.sessions`
-  and `session.events` work over stdio today, and the same methods will serve a reconnecting client.
+- **Decisions 1 and 2 are built** (KOP-184): `serve --listen`, one client at a time, pending requests re-sent.
+  Details the text left open: a response goes to the connection its request came from and is dropped if that
+  client was replaced (ids belong to their client); the path is claimed with a lock file rather than by
+  connecting to it, because a probe connection would itself replace the live client; and `SIGINT` or
+  `SIGTERM` closes the sessions and removes the socket. Unix only.
+- Decision 5 (`--idle-timeout`, `server.shutdown`) is not built yet (KOP-187).
 - The `mcp` front end shares the session manager but has no tool for either; the ADR names `serve` only.

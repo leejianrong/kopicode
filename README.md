@@ -128,7 +128,8 @@ does not pass yours through, give it the key with the client's own option (for C
 `-e OPENROUTER_API_KEY=...`, which stores the key in that client's config).
 
 `kopicode serve` is the same sessions over NDJSON JSON-RPC for an orchestrator that spawns
-kopicode as a child; `kopicode version --json` lists the protocol version and the features
+kopicode as a child (or, with `--listen <socket>`, a long-lived process whose sessions survive its client
+restarting); `kopicode version --json` lists the protocol version and the features
 your binary supports, so a client can require one. See [`docs/kopicode-mcp.md`](docs/kopicode-mcp.md) and
 [`docs/kopicode-serve-protocol.md`](docs/kopicode-serve-protocol.md).
 

@@ -77,22 +77,22 @@ func (s *server) handleSessions(req rpcRequest) {
 		}
 		rows = append(rows, row)
 	}
-	s.writeResult(req.ID, sessionsResult{Sessions: rows})
+	s.writeResult(req, sessionsResult{Sessions: rows})
 }
 
 // handleEvents answers session.events from the session's journal.
 func (s *server) handleEvents(req rpcRequest) {
 	var p eventsParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
-		s.writeError(req.ID, codeInvalidParams, fmt.Sprintf("session.events params: %v", err))
+		s.writeError(req, codeInvalidParams, fmt.Sprintf("session.events params: %v", err))
 		return
 	}
 	if p.Session == "" {
-		s.writeError(req.ID, codeInvalidParams, "session.events needs a session id")
+		s.writeError(req, codeInvalidParams, "session.events needs a session id")
 		return
 	}
 	if p.Limit < 0 {
-		s.writeError(req.ID, codeInvalidParams, "session.events limit cannot be negative")
+		s.writeError(req, codeInvalidParams, "session.events limit cannot be negative")
 		return
 	}
 	// A page reads the journal from its start, so a long session's is real work:
@@ -100,7 +100,7 @@ func (s *server) handleEvents(req rpcRequest) {
 	go func() {
 		page, err := s.mgr.Events(context.Background(), p.Session, p.AfterSeq, p.Limit)
 		if err != nil {
-			s.writeSessionError(req.ID, err)
+			s.writeSessionError(req, err)
 			return
 		}
 		res := eventsResult{Session: p.Session, Events: make([]record, 0, len(page.Events)),
@@ -109,6 +109,6 @@ func (s *server) handleEvents(req rpcRequest) {
 			res.Events = append(res.Events, recordOf(ev))
 			res.LastSeq = ev.Seq
 		}
-		s.writeResult(req.ID, res)
+		s.writeResult(req, res)
 	}()
 }

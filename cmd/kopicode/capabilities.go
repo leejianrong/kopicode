@@ -30,6 +30,7 @@ var features = []string{
 	"consent_timeout.session",
 	"mcp",
 	"provider_url.flag",
+	"serve.listen",
 	"server.hello",
 	"server.sessions",
 	"session.close",
