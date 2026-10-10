@@ -752,6 +752,10 @@ type HandoffWritten struct {
 	Document Text `json:"document"`
 	// Path is the projection file, absolute. Absent when none was written.
 	Path string `json:"path,omitempty"`
+	// Reply is the model's reply to the drafting request, as it came back, before
+	// it was cut into sections. The document is derived from it, so a reply the
+	// parser could not use is still in the record to be read and re-parsed.
+	Reply Text `json:"reply,omitempty"`
 }
 
 func (HandoffWritten) Type() Type { return TypeHandoffWritten }

@@ -76,6 +76,11 @@ type TaskResult struct {
 	Stop string
 	// Turns is how many turns the session used.
 	Turns int
+	// Handoffs is how many times the run handed off at the turn cap and carried
+	// on in a fresh session (ADR-0026, KAN-1968); zero for a plain run. Turns and
+	// Tokens are then the sum over every segment, and SessionID and JournalDir
+	// name the last one.
+	Handoffs int
 	// Tokens is the session's reported usage. Zero on the mock provider is a
 	// real zero: replayed traffic carries the recorded counts.
 	Tokens journal.TokenCounts

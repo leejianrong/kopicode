@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/leejianrong/kopicode/internal/corpus"
 	"github.com/leejianrong/kopicode/internal/engine"
@@ -72,6 +73,13 @@ type SessionOutcome struct {
 	Stop   string
 	Turns  int
 	Tokens journal.TokenCounts
+	// Handoffs is how many times the session handed off at the turn cap and
+	// carried on in a fresh one; zero for a plain run. Turns and Tokens are then
+	// the sum over every segment.
+	Handoffs int
+	// LastSessionID is the journal session the run ended in. It is the task's
+	// own id unless the run handed off.
+	LastSessionID string
 }
 
 // Agent runs one task's session.
@@ -99,6 +107,11 @@ type EngineAgent struct {
 	// RecordPrefix is prepended to the task id to name each recording. Empty
 	// means "recorded_".
 	RecordPrefix string
+	// HandoffAtCap is how many times a task that stops at the turn cap may hand
+	// off and go on in a fresh session (ADR-0026, KAN-1968). Zero is the plain
+	// run. Each segment gets the arm's full turn budget, so a run's ceiling is
+	// (HandoffAtCap+1) times it.
+	HandoffAtCap int
 
 	// recordBaseURL points a recording client at an httptest server. Unexported
 	// for the same reason testProvider is: only this package's tests need it.
@@ -213,60 +226,154 @@ func (a EngineAgent) runSession(ctx context.Context, spec SessionSpec) (SessionO
 		return SessionOutcome{}, fmt.Errorf("bench: building the permission gate for %s: %w", spec.Task.ID, err)
 	}
 
-	jrn, err := journal.Open(spec.OutDir, spec.SessionID)
-	if err != nil {
-		return SessionOutcome{}, fmt.Errorf("bench: opening the journal for %s: %w", spec.Task.ID, err)
+	// A session is one or more segments. Without HandoffAtCap there is exactly
+	// one and nothing below differs from a plain run. With it, a segment that
+	// stops at the turn cap drafts a handoff (ADR-0026), is closed, and the next
+	// segment starts from the document with a fresh turn budget, in the same
+	// worktree. That is the arm the handoff measurement (KAN-1968) compares with
+	// one long session of the same total budget.
+	var (
+		out     SessionOutcome
+		runErr  error
+		closeEr error
+		prompt  = spec.Task.Statement
+		parent  string
+		handoff string
+	)
+	for seg := 0; ; seg++ {
+		id := spec.SessionID
+		if seg > 0 {
+			id = fmt.Sprintf("%s-h%d", spec.SessionID, seg)
+		}
+		s, err := a.openSegment(ctx, spec, set, gate, id, parent, handoff)
+		if err != nil {
+			return out, errors.Join(runErr, closeEr, err)
+		}
+
+		res, rerr := s.eng.Run(ctx, prompt)
+		runErr = errors.Join(runErr, rerr)
+
+		again := rerr == nil && res.Stop == engine.StopMaxTurns && seg < a.HandoffAtCap && ctx.Err() == nil
+		var doc string
+		if again {
+			// The goal is the task itself, so the draft is anchored on what was
+			// asked and not only on what the model remembers of it.
+			h, herr := s.eng.Handoff(ctx, spec.Task.Statement)
+			if herr != nil {
+				runErr = errors.Join(runErr, fmt.Errorf("bench: drafting the handoff for %s: %w", spec.Task.ID, herr))
+				again = false
+			} else {
+				doc = h.Document
+			}
+		}
+
+		// Close writes SessionEnded whatever Run said, and the journal ignores a
+		// cancelled context on Append, so a task killed by Ctrl-C still records
+		// why it ended. A close failure is reported alongside the run's own error
+		// rather than in place of it.
+		spent := s.eng.Tokens()
+		closeEr = errors.Join(closeEr, s.close(ctx, a, spec, id))
+
+		// Summed over segments. spent includes the handoff call itself, which is
+		// a real cost of the arm and belongs in its tokens.
+		out.Stop = res.Stop.Reason()
+		out.Turns += res.Turns
+		out.Tokens = addTokens(out.Tokens, spent)
+		if again {
+			out.Handoffs++
+		}
+		out.LastSessionID = id
+		if !again {
+			break
+		}
+		parent, handoff = id, doc
+		prompt = "Continue the work described in the handoff. When the task is done, stop."
 	}
-	defer func() { _ = jrn.Close() }()
+	return out, errors.Join(runErr, closeEr)
+}
+
+// segment is one engine of a session and what it holds open.
+type segment struct {
+	eng  *engine.Engine
+	jrn  *journal.FileJournal
+	prov engine.Provider
+}
+
+// openSegment builds, starts and (for a later segment) briefs one engine. The
+// tool set, gate and working tree are shared by every segment: the worktree is
+// the continuity a handoff has to carry the model across.
+func (a EngineAgent) openSegment(ctx context.Context, spec SessionSpec, set *tools.Set, gate *permission.Gate, id, parent, handoff string) (*segment, error) {
+	jrn, err := journal.Open(spec.OutDir, id)
+	if err != nil {
+		return nil, fmt.Errorf("bench: opening the journal for %s: %w", spec.Task.ID, err)
+	}
 
 	// The journal exists now, so the live provider's retry observer — if this
 	// is a live run — has somewhere to append to. See a.provider.
 	prov, err := a.provider(spec, jrn)
 	if err != nil {
-		return SessionOutcome{}, err
+		_ = jrn.Close()
+		return nil, err
 	}
 
 	eng, err := engine.New(engine.Config{
-		SessionID:   spec.SessionID,
-		Selection:   spec.Selection,
-		Build:       spec.Build,
-		CWD:         spec.Dir,
-		Provider:    prov,
-		Journal:     jrn,
-		Tools:       set,
-		Permissions: gate,
-		Syntax:      &syntax.Gate{Root: set.Root.Path()},
+		SessionID:     id,
+		ParentSession: parent,
+		Selection:     spec.Selection,
+		Build:         spec.Build,
+		CWD:           spec.Dir,
+		Provider:      prov,
+		Journal:       jrn,
+		Tools:         set,
+		Permissions:   gate,
+		Syntax:        &syntax.Gate{Root: set.Root.Path()},
 	})
 	if err != nil {
-		return SessionOutcome{}, fmt.Errorf("bench: building the engine for %s: %w", spec.Task.ID, err)
+		_ = jrn.Close()
+		return nil, fmt.Errorf("bench: building the engine for %s: %w", spec.Task.ID, err)
 	}
-
 	if err := eng.Start(ctx); err != nil {
-		return SessionOutcome{}, fmt.Errorf("bench: starting the session for %s: %w", spec.Task.ID, err)
+		_ = jrn.Close()
+		return nil, fmt.Errorf("bench: starting the session for %s: %w", spec.Task.ID, err)
 	}
+	if handoff != "" {
+		if err := eng.StartFromHandoff(ctx, handoff); err != nil {
+			_ = eng.Close(ctx)
+			_ = jrn.Close()
+			return nil, fmt.Errorf("bench: starting %s from its handoff: %w", id, err)
+		}
+	}
+	return &segment{eng: eng, jrn: jrn, prov: prov}, nil
+}
 
-	res, runErr := eng.Run(ctx, spec.Task.Statement)
-
-	// Close writes SessionEnded whatever Run said, and the journal ignores a
-	// cancelled context on Append, so a task killed by Ctrl-C still records why
-	// it ended. A close failure is reported alongside the run's own error
-	// rather than in place of it.
-	closeErr := eng.Close(ctx)
-
+// close ends the segment's engine, writes a recording if one was asked for, and
+// closes its journal.
+func (s *segment) close(ctx context.Context, a EngineAgent, spec SessionSpec, id string) error {
+	err := s.eng.Close(ctx)
 	// Written after Close, not after Run: a streamed reply is only complete
 	// once its body has been read to the end or closed.
-	if rp, ok := prov.(recordingProvider); ok {
+	if rp, ok := s.prov.(recordingProvider); ok {
 		prefix := a.RecordPrefix
 		if prefix == "" {
 			prefix = "recorded_"
 		}
-		if _, err := rp.finish(a.RecordDir, RecordedName(prefix, spec.Task.ID), spec.Selection.ModelID); err != nil {
-			closeErr = errors.Join(closeErr, err)
+		name := spec.Task.ID
+		if id != spec.SessionID {
+			name += strings.TrimPrefix(id, spec.SessionID)
+		}
+		if _, ferr := rp.finish(a.RecordDir, RecordedName(prefix, name), spec.Selection.ModelID); ferr != nil {
+			err = errors.Join(err, ferr)
 		}
 	}
+	return errors.Join(err, s.jrn.Close())
+}
 
-	out := SessionOutcome{Stop: res.Stop.Reason(), Turns: res.Turns, Tokens: res.Tokens}
-	return out, errors.Join(runErr, closeErr)
+// addTokens sums two usage counts.
+func addTokens(a, b journal.TokenCounts) journal.TokenCounts {
+	return journal.TokenCounts{
+		Prompt: a.Prompt + b.Prompt, Completion: a.Completion + b.Completion, Total: a.Total + b.Total,
+		CacheRead: a.CacheRead + b.CacheRead, CacheWrite: a.CacheWrite + b.CacheWrite,
+	}
 }
 
 // requireProviderCredential fails fast when a live run will have no

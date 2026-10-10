@@ -70,6 +70,9 @@ type Options struct {
 	// RecordPrefix prefixes each recorded fixture's name. Empty means
 	// "recorded_".
 	RecordPrefix string
+	// HandoffAtCap lets a task that stops at the turn cap hand off and go on in a
+	// fresh session up to this many times (ADR-0026). Zero is the plain run.
+	HandoffAtCap int
 }
 
 // RunCorpus loads the corpus and runs it against one arm.
@@ -110,6 +113,7 @@ func RunCorpus(ctx context.Context, opts Options) (*RunResult, error) {
 		Agent: EngineAgent{
 			Provider: opts.Provider, Fixture: opts.Fixture,
 			RecordDir: opts.RecordDir, RecordPrefix: opts.RecordPrefix,
+			HandoffAtCap: opts.HandoffAtCap,
 		},
 		Provider: opts.Provider,
 		// Every run through this entry point classifies. [Runner.Classifier]

@@ -440,7 +440,13 @@ func (r *Runner) runTask(ctx context.Context, env taskEnv, task corpus.Task) (re
 		Selection: r.Selection,
 		Build:     r.Build,
 	})
-	res.Stop, res.Turns, res.Tokens = out.Stop, out.Turns, out.Tokens
+	res.Stop, res.Turns, res.Tokens, res.Handoffs = out.Stop, out.Turns, out.Tokens, out.Handoffs
+	if out.LastSessionID != "" && out.LastSessionID != res.SessionID {
+		// A run that handed off ended in a later session; that is the one the
+		// classifier and a post-mortem need to read.
+		res.SessionID = out.LastSessionID
+		res.JournalDir = journal.SessionDir(taskOut, res.SessionID)
+	}
 	if err != nil {
 		res.SessionErr = err.Error()
 		log.Debug("session failed", "error", err)

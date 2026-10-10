@@ -141,6 +141,10 @@ func taskNotes(t TaskResult) []string {
 		notes = append(notes, "the oracle was killed by "+t.Oracle.Signal+
 			", which is not the same as a suite that failed")
 	}
+	if t.Handoffs > 0 {
+		notes = append(notes, fmt.Sprintf("handed off %d time(s) at the turn cap; turns and tokens are summed over %d sessions, and the record is the last one",
+			t.Handoffs, t.Handoffs+1))
+	}
 	if t.WorktreeKept && t.Worktree != "" {
 		notes = append(notes, "worktree kept at "+t.Worktree)
 	}

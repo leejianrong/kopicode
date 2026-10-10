@@ -213,6 +213,7 @@ func fixtures() map[journal.Type]journal.Payload {
 			Goal:     "finish the retry backoff and make the suite pass",
 			Document: text("## Goal\nFinish the retry backoff."),
 			Path:     "/home/jian/projects/kopicode/.kopicode/handoff/s1.md",
+			Reply:    text("## Goal\nFinish the retry backoff."),
 		},
 		journal.TypeProjectInstructionsLoaded: journal.ProjectInstructionsLoaded{
 			Path:    "/home/jian/projects/kopicode/AGENTS.md",
