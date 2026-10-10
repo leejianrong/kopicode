@@ -70,7 +70,7 @@ func TestBuiltinsIgnoreExtraWordsAndASlashAloneListsThem(t *testing.T) {
 	if len(prompts) != 0 {
 		t.Errorf("a built-in with extra words, or a bare slash, reached the model: %q", prompts)
 	}
-	if !strings.Contains(out, "/deploy  does deploy") || !strings.Contains(out, "commands: /context /exit /mode /quit /skills") {
+	if !strings.Contains(out, "/deploy  does deploy") || !strings.Contains(out, "commands: /context /exit /handoff /mode /quit /skills") {
 		t.Errorf("output:\n%s", out)
 	}
 }

@@ -163,6 +163,10 @@ type Config struct {
 	// Optional; nil leaves all three out.
 	Skills SkillsFunc
 
+	// Handoff drives /handoff (ADR-0026). Optional; nil makes /handoff say it is
+	// not available.
+	Handoff HandoffControl
+
 	// Usage reports the session's usage for /context. Optional; nil makes
 	// /context say there is nothing to report.
 	Usage UsageFunc
@@ -195,6 +199,8 @@ type Loop struct {
 	usage    UsageFunc
 	mode     ModeControl
 	skills   SkillsFunc
+
+	handoffCtl HandoffControl
 
 	// promptEndsLine records whether the line editor finishes the line
 	// itself. Its raw-mode path always does and its plain path never does;
@@ -244,6 +250,7 @@ func New(cfg Config) (*Loop, error) {
 		usage:          cfg.Usage,
 		mode:           cfg.Mode,
 		skills:         cfg.Skills,
+		handoffCtl:     cfg.Handoff,
 		promptEndsLine: term.IsInteractive(),
 	}
 	l.ed = lineedit.New(lineedit.Config{
@@ -336,6 +343,12 @@ func (l *Loop) loop(ctx context.Context) (engine.Stop, error) {
 		case commandSkills:
 			l.showSkills()
 			continue
+		case commandHandoff:
+			if err := l.handoff(ctx, goalOf(line)); err != nil {
+				l.Fail(err.Error())
+				return engine.StopHarnessError, err
+			}
+			continue
 		case commandSlash:
 			l.Notice("commands: " + strings.Join(builtinCommands, " ") + "; /skills lists skills you can run as /<name>")
 			continue
@@ -366,9 +379,43 @@ func (l *Loop) loop(ctx context.Context) (engine.Stop, error) {
 // context untouched, which is what "returns to the prompt with the session
 // alive" means mechanically.
 func (l *Loop) runTurn(ctx context.Context, prompt string) (engine.Result, error) {
+	var (
+		res engine.Result
+		err error
+	)
+	l.streamed.Reset()
+	interrupted := l.interruptible(ctx, func(turnCtx context.Context) {
+		res, err = l.turn(turnCtx, prompt, l)
+	})
+
+	l.Progress("")
+	l.out.flushLine()
+
+	if interrupted {
+		// The turn's own stop may be anything the loop managed to settle on
+		// before the cancellation reached it; what the user did is not in doubt,
+		// so the result says so.
+		//
+		// Nothing is printed here. The engine journals a TurnCancelled the
+		// moment it observes the cancelled context and announces it through the
+		// same event stream this loop renders, so the line the user reads is a
+		// rendering of the record rather than the surface's own account of it
+		// (KAN-857). A turn that finished in the window between the signal and
+		// the cancellation reaching the loop has nothing to render, which is
+		// correct: nothing was interrupted.
+		return engine.Result{Stop: engine.StopCancelled, Turns: res.Turns, Tokens: res.Tokens}, nil
+	}
+	return res, err
+}
+
+// interruptible runs fn under a context a Ctrl-C cancels, and reports whether
+// one did. The context is a child of the session's, so cancelling it reaches
+// everything the engine threaded it into and leaves the session's own context
+// untouched.
+func (l *Loop) interruptible(ctx context.Context, fn func(context.Context)) bool {
 	l.drainSignals()
 
-	turnCtx, cancel := context.WithCancel(ctx)
+	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	var interrupted atomic.Bool
@@ -388,30 +435,11 @@ func (l *Loop) runTurn(ctx context.Context, prompt string) (engine.Result, error
 		}()
 	}
 
-	l.streamed.Reset()
-	res, err := l.turn(turnCtx, prompt, l)
+	fn(runCtx)
 
 	close(done)
 	wg.Wait()
-
-	l.Progress("")
-	l.out.flushLine()
-
-	if interrupted.Load() {
-		// The turn's own stop may be anything the loop managed to settle on
-		// before the cancellation reached it; what the user did is not in doubt,
-		// so the result says so.
-		//
-		// Nothing is printed here. The engine journals a TurnCancelled the
-		// moment it observes the cancelled context and announces it through the
-		// same event stream this loop renders, so the line the user reads is a
-		// rendering of the record rather than the surface's own account of it
-		// (KAN-857). A turn that finished in the window between the signal and
-		// the cancellation reaching the loop has nothing to render, which is
-		// correct: nothing was interrupted.
-		return engine.Result{Stop: engine.StopCancelled, Turns: res.Turns, Tokens: res.Tokens}, nil
-	}
-	return res, err
+	return interrupted.Load()
 }
 
 // drainSignals discards interrupts that arrived while no turn was running.
@@ -475,6 +503,7 @@ const (
 	commandContext
 	commandMode
 	commandSkills
+	commandHandoff
 	commandSlash
 )
 
@@ -490,6 +519,8 @@ func command(line string) (lineCommand, string) {
 		return commandContext, ""
 	case "/skills":
 		return commandSkills, ""
+	case "/handoff":
+		return commandHandoff, ""
 	case "/":
 		return commandSlash, ""
 	case "/mode":

@@ -67,6 +67,10 @@ type Config struct {
 	CWD      string
 	RepoHead string
 
+	// ParentSession is the session whose handoff this one began from, recorded
+	// on SessionStarted (ADR-0026). Empty for any other session.
+	ParentSession string
+
 	// Provider is the model provider. Required.
 	Provider Provider
 
@@ -509,6 +513,7 @@ func (e *Engine) Start(ctx context.Context) error {
 		// disagreeing about which would be worse than either.
 		HarnessConfigHash: e.cfg.Selection.HarnessConfigHash,
 		Build:             e.cfg.Build,
+		ParentSession:     e.cfg.ParentSession,
 	})
 	if err != nil {
 		return err

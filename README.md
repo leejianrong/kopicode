@@ -59,7 +59,7 @@ directory or a command prefix); Enter or `n` denies. Anything else you type also
 the text goes to the model as a suggestion: `use uv and a venv` (or `no, use uv`) refuses the call and
 tells the agent what you want instead. A sentence that starts with "yes" is still a suggestion, never a yes. `Ctrl-C` cancels the
 turn in flight without ending the session; `/context` shows how much of the model's window the session is using, what it has spent and the
-provider-reported cost; `/mode auto` (or `kopicode --mode auto`) stops the prompts for shell inside the project, keeping a fixed never-allow list, and `/mode default` brings them back; `/exit` (or `/quit`) ends it. Your first task is best a small, well-described
+provider-reported cost; `/mode auto` (or `kopicode --mode auto`) stops the prompts for shell inside the project, keeping a fixed never-allow list, and `/mode default` brings them back; `/handoff [goal]` drafts a handoff document (one model call, session unchanged), opens it in `$VISUAL`/`$EDITOR` if set, and on a `y` ends the session and starts a fresh one from it, with verification reset to not run ([ADR-0026](docs/adr/0026-handoff.md)); `/exit` (or `/quit`) ends it. Your first task is best a small, well-described
 bug in a repo with tests: [`docs/trying-kopicode.md`](docs/trying-kopicode.md) walks through
 two real ones. A one-line fix cost about $0.04.
 

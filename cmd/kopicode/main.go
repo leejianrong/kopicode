@@ -438,6 +438,9 @@ func openAndDriveSession(std streams, opts engine.Options, open func(context.Con
 	// because neither is invoked until Loop.Run — by which point sess is set,
 	// or this function has already returned.
 	var sess *engine.Session
+	// ended is set once /handoff has closed sess and no replacement is running,
+	// so the loop's own final Close does not close it a second time.
+	ended := false
 
 	loop, err := repl.New(repl.Config{
 		In:          std.in,
@@ -449,8 +452,38 @@ func openAndDriveSession(std streams, opts engine.Options, open func(context.Con
 		Turn: func(ctx context.Context, prompt string, _ repl.Surface) (engine.Result, error) {
 			return sess.Run(ctx, prompt)
 		},
-		Close: func(ctx context.Context) error { return sess.Close(ctx) },
+		Close: func(ctx context.Context) error {
+			if ended {
+				return nil
+			}
+			return sess.Close(ctx)
+		},
 		Usage: func() engine.Usage { return sess.Usage() },
+		Handoff: repl.HandoffControl{
+			Draft: func(ctx context.Context, goal string) (repl.HandoffDraft, error) {
+				res, err := sess.Handoff(ctx, goal)
+				return repl.HandoffDraft{Document: res.Document, Path: res.Path}, err
+			},
+			Edit: handoffEditor(std),
+			Read: engine.ReadHandoff,
+			Start: func(ctx context.Context, doc string) (string, error) {
+				// The old session is closed first: a working tree has one.
+				next := opts
+				next.SessionID, next.Resume, next.Fork = "", false, nil
+				next.Handoff, next.ParentSession = doc, sess.ID()
+				next.StartAuto = sess.Auto()
+				if err := sess.Close(ctx); err != nil {
+					return "", fmt.Errorf("closing the session before the handoff: %w", err)
+				}
+				ended = true
+				fresh, err := engine.Open(ctx, next)
+				if err != nil {
+					return "", err
+				}
+				sess, ended = fresh, false
+				return sess.ID(), nil
+			},
+		},
 		Skills: func() ([]engine.Skill, []string) {
 			return engine.DiscoverSkills(opts.Dir, opts.Selection.Settings.SkillsPaths)
 		},
@@ -557,4 +590,14 @@ func setupLogging(debug bool, stderr io.Writer) {
 		level = slog.LevelError
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(out, &slog.HandlerOptions{Level: level})))
+}
+
+// handoffEditor is /handoff's editor hook: the person's $VISUAL or $EDITOR on a
+// terminal, or nil when there is none to open, which /handoff says in words.
+func handoffEditor(std streams) func(string) error {
+	argv := editorCommand()
+	if len(argv) == 0 || !std.terminal.IsInteractive() {
+		return nil
+	}
+	return func(path string) error { return editFile(std, argv, path) }
 }

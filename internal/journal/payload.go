@@ -135,6 +135,10 @@ type SessionStarted struct {
 	// HarnessConfigHash from different builds; this is what tells them apart
 	// (ADR-0007 decisions 6 and 7).
 	Build BuildInfo `json:"build"`
+	// ParentSession is the session whose handoff this one began from
+	// (ADR-0026). Absent for every other session. The handoff text itself is in
+	// this journal as a ProjectInstructionsLoaded with scope "handoff".
+	ParentSession string `json:"parent_session,omitempty"`
 }
 
 func (SessionStarted) Type() Type { return TypeSessionStarted }
@@ -684,6 +688,10 @@ const InstructionsScopeUser = "user"
 // InstructionsScopeSkills marks one that is the catalogue of skills the model
 // can read (ADR-0025), already framed, with no file behind it.
 const InstructionsScopeSkills = "skills"
+
+// InstructionsScopeHandoff marks one that is the handoff a session began from
+// (ADR-0026), already framed, with no file behind it.
+const InstructionsScopeHandoff = "handoff"
 
 // ProjectInstructionsLoaded records that a genuinely new session's bootstrap
 // found the repository's own AGENTS.md and fed it into the conversation
