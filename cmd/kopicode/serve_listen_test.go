@@ -152,11 +152,16 @@ func shortDir(t *testing.T) string {
 
 func startListening(t *testing.T, base engine.Options, path string) *listening {
 	t.Helper()
+	return startListeningIdle(t, base, path, 0)
+}
+
+func startListeningIdle(t *testing.T, base engine.Options, path string, idle time.Duration) *listening {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	l := &listening{path: path, cancel: cancel, done: make(chan struct{}), stderr: &syncBuffer{}}
 	go func() {
 		defer close(l.done)
-		l.code = serveListen(ctx, path, l.stderr, base, remoteConsentTimeout)
+		l.code = serveListen(ctx, path, l.stderr, base, remoteConsentTimeout, idle)
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -323,7 +328,7 @@ func TestListenRefusesAPathALiveProcessHolds(t *testing.T) {
 	live := dialSocket(t, path)
 
 	var stderr strings.Builder
-	if code := serveListen(context.Background(), path, &stderr, engine.Options{}, remoteConsentTimeout); code != exitUsage {
+	if code := serveListen(context.Background(), path, &stderr, engine.Options{}, remoteConsentTimeout, 0); code != exitUsage {
 		t.Errorf("second serve on a held path exited %d, want %d", code, exitUsage)
 	}
 	if !strings.Contains(stderr.String(), "holds this socket") {
@@ -359,7 +364,7 @@ func TestListenReplacesAStaleSocketButNotAFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stderr strings.Builder
-	if code := serveListen(context.Background(), file, &stderr, engine.Options{}, remoteConsentTimeout); code != exitUsage {
+	if code := serveListen(context.Background(), file, &stderr, engine.Options{}, remoteConsentTimeout, 0); code != exitUsage {
 		t.Errorf("serve over a regular file exited %d, want %d", code, exitUsage)
 	}
 	if got, _ := os.ReadFile(file); string(got) != "keep me" {
@@ -394,6 +399,122 @@ func TestListenStoppingClosesSessionsAndRemovesTheSocket(t *testing.T) {
 	c.awaitGone()
 	if strings.Contains(l.stderr.String(), "reading the serve input") {
 		t.Errorf("a client closed by the shutdown was reported as an error: %s", l.stderr.String())
+	}
+}
+
+// exited reports whether serveListen has returned, within wait.
+func (l *listening) exited(wait time.Duration) bool {
+	select {
+	case <-l.done:
+		return true
+	case <-time.After(wait):
+		return false
+	}
+}
+
+// TestListenServerShutdownClosesSessionsAndEndsTheProcess: server.shutdown is
+// answered only after every session is closed, then the process removes its socket
+// and exits on its own.
+func TestListenServerShutdownClosesSessionsAndEndsTheProcess(t *testing.T) {
+	t.Setenv(engine.APIKeyEnv, "kopicode-test-credential")
+	srv := scriptedProvider(t, sseBody("done"))
+	path := filepath.Join(shortDir(t), "s.sock")
+	l := startListening(t, engine.Options{ProviderBaseURL: srv.URL}, path)
+
+	c := dialSocket(t, path)
+	c.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
+		"params": startPayload("s1", t.TempDir(), "hi")})
+	record, _ := c.awaitResponse(1)["result"].(map[string]any)["record"].(string)
+
+	c.send(map[string]any{"jsonrpc": "2.0", "id": 2, "method": methodServerShutdown})
+	res, _ := c.awaitResponse(2)["result"].(map[string]any)
+	if res["shutdown"] != true || !numEq(res["sessions_closed"], 1) {
+		t.Fatalf("server.shutdown answered %v", res)
+	}
+	// The answer is sent after the sessions are closed, so the record is already whole.
+	raw, err := os.ReadFile(filepath.Join(record, "events.jsonl"))
+	if err != nil || !strings.Contains(string(raw), `"SessionEnded"`) {
+		t.Errorf("the answer came before the session was closed (%v)", err)
+	}
+	if !l.exited(10 * time.Second) {
+		t.Fatal("serve --listen did not exit after server.shutdown")
+	}
+	if l.code != exitSuccess {
+		t.Errorf("exit = %d", l.code)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("the socket is still there (%v)", err)
+	}
+	c.awaitGone()
+}
+
+// TestListenIdleTimeoutExitsWithNoClientAndNoSession: a process nobody ever
+// connects to does not run for ever.
+func TestListenIdleTimeoutExitsWithNoClientAndNoSession(t *testing.T) {
+	path := filepath.Join(shortDir(t), "s.sock")
+	l := startListeningIdle(t, engine.Options{}, path, 150*time.Millisecond)
+	if !l.exited(10 * time.Second) {
+		t.Fatal("an idle serve --listen did not exit")
+	}
+	if l.code != exitSuccess {
+		t.Errorf("exit = %d", l.code)
+	}
+	if !strings.Contains(l.stderr.String(), "no client and no open session") {
+		t.Errorf("the exit did not say why: %s", l.stderr.String())
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("the socket is still there (%v)", err)
+	}
+}
+
+// TestListenIdleTimeoutWaitsForAClientAndForSessions: a connected client keeps
+// the process, and so does an open session with nobody attached; only when both are
+// gone does the clock run out.
+func TestListenIdleTimeoutWaitsForAClientAndForSessions(t *testing.T) {
+	t.Setenv(engine.APIKeyEnv, "kopicode-test-credential")
+	srv := scriptedProvider(t, sseBody("done"))
+	path := filepath.Join(shortDir(t), "s.sock")
+	const idle = 200 * time.Millisecond
+	l := startListeningIdle(t, engine.Options{ProviderBaseURL: srv.URL}, path, idle)
+
+	a := dialSocket(t, path)
+	a.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
+		"params": startPayload("s1", t.TempDir(), "hi")})
+	if r := a.awaitResponse(1); r["error"] != nil {
+		t.Fatalf("session.start: %v", r["error"])
+	}
+	_ = a.conn.Close()
+
+	// Nobody is connected, but the session is open: several idle periods pass.
+	if l.exited(5 * idle) {
+		t.Fatalf("exited with an open session and no client: %s", l.stderr.String())
+	}
+
+	// The session closes while a client is attached: the client alone keeps it.
+	b := dialSocket(t, path)
+	b.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionClose, "params": map[string]any{"session": "s1"}})
+	if r := b.awaitResponse(1); r["error"] != nil {
+		t.Fatalf("session.close: %v", r["error"])
+	}
+	if l.exited(5 * idle) {
+		t.Fatalf("exited with a client connected: %s", l.stderr.String())
+	}
+
+	_ = b.conn.Close()
+	if !l.exited(10 * time.Second) {
+		t.Fatal("did not exit once the last client and session were gone")
+	}
+}
+
+// TestServeIdleTimeoutCannotBeNegative: 0 is how it is turned off.
+func TestServeIdleTimeoutCannotBeNegative(t *testing.T) {
+	var stderr syncBuffer
+	path := filepath.Join(shortDir(t), "s.sock")
+	if code := serveCmd([]string{"--listen", path, "--idle-timeout=-1s"}, io.Discard, &stderr); code != exitUsage {
+		t.Errorf("exit = %d, want usage; stderr: %s", code, stderr.String())
+	}
+	if _, err := os.Stat(path); err == nil {
+		t.Error("it listened anyway")
 	}
 }
 

@@ -55,8 +55,12 @@ that restarts reconnects and finds them where it left them (`server.sessions` sa
 - **Responses stay with their connection.** A response goes to the connection its request arrived on. A
   turn that finishes after its client was replaced answers to nobody: the new client cannot know what its
   predecessor's id meant, and reads the outcome from `server.sessions` (`last_stop`) and `session.events`.
-- **Ending it.** `SIGINT` or `SIGTERM` closes every session (each writes its `session_ended`), removes the
-  socket and exits `0`. (`--idle-timeout` and `server.shutdown` are ADR-0030 decision 5, not yet built.)
+- **Ending it.** `SIGINT` or `SIGTERM`, a [`server.shutdown`](#servershutdown) request, or the idle
+  timeout closes every session (each writes its `session_ended`), removes the socket and exits `0`.
+- **Idle timeout.** `--idle-timeout <duration>` (default `30m`; `0` never exits on idleness; negative is a
+  usage error) ends the process after that long with **no client connected and no open session**. Either
+  one keeps it alive: a connected client that has opened nothing, or a session nobody is attached to. An
+  ended session does not count. The reason is written to stderr. It applies to `--listen` only.
 - **One process per path.** The path is claimed with an advisory lock on `<path>.lock`, which dies with
   its holder. A path a live `serve` holds is refused (exit `2`); a socket left behind by a crash is
   replaced; anything at the path that is not a socket is refused and left alone. The `.lock` file stays.
@@ -151,8 +155,8 @@ Features: `session.usage`, `usage.tokens_split`, `usage.context`, `usage.context
 ## The methods
 
 ADR-0013 decision 3 fixed three; `session.close` (KAN-1795) is the fourth and `session.handoff` (ADR-0026) the fifth.
-`server.sessions` and `session.events` (ADR-0030) are the two a client uses to find out what its sessions are doing;
-they are described after `session.close`. There is no credential in any params. A session lives until it is closed
+`server.sessions` and `session.events` (ADR-0030) are the two a client uses to find out what its sessions are doing, and
+`server.shutdown` ends the process; they are described after `session.close`. There is no credential in any params. A session lives until it is closed
 with `session.close` or the process shuts down.
 
 ### `session.start`
@@ -294,6 +298,24 @@ not listed, whatever is on disk.
 
 Feature: `server.sessions`.
 
+### `server.shutdown`
+
+Ends the process (ADR-0030). No params. Every open session is closed first, its turn in flight
+cancelled and its `session_ended` written, and **the answer is sent only once that is done**; the
+connection is then closed, the socket removed and the process exits `0`. Over stdio it ends the process
+too, though stdin is still open. A caller that only wants one session gone uses `session.close`.
+
+```json
+--> { "jsonrpc": "2.0", "id": 9, "method": "server.shutdown" }
+<-- { "jsonrpc": "2.0", "id": 9, "result": { "shutdown": true, "sessions_closed": 2 } }
+```
+
+`sessions_closed` is how many sessions were open. A `session.start` that arrives while the process is
+closing may open a session the process then closes without a reply; a caller that has asked for shutdown
+should not send more.
+
+Feature: `server.shutdown`.
+
 ### `session.events`
 
 Replays a session's recorded events after a sequence number (ADR-0030), so a client that missed some, because
@@ -341,7 +363,7 @@ dirty bit. `protocol` moves only for a change that breaks an existing client. `f
 list of stable lower-case dotted names, added in the change that ships a capability, never renamed,
 and removed only with a protocol bump. Current names: `allow_commands`, `ask.request`, `consent.note`, `consent_mode.auto`,
 `consent_mode.remote_interactive`, `consent_mode.unattended_policy`, `consent_request.command`,
-`consent_timeout.flag`, `consent_timeout.session`, `mcp`, `provider_url.flag`, `serve.listen`, `server.hello`, `server.sessions`,
+`consent_timeout.flag`, `consent_timeout.session`, `mcp`, `provider_url.flag`, `serve.listen`, `server.hello`, `server.sessions`, `server.shutdown`,
 `session.close`, `session.events_since`, `session.handoff`, `session.limits`, `session.read_only`, `session.usage`,
 `usage.context`, `usage.context_window`, `usage.cost`, `usage.tokens_split`.
 `cmd/kopicode/capabilities_test.go` ties the list to the consent modes and methods in the code.

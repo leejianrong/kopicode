@@ -33,6 +33,7 @@ var features = []string{
 	"serve.listen",
 	"server.hello",
 	"server.sessions",
+	"server.shutdown",
 	"session.close",
 	"session.events_since",
 	"session.handoff",
