@@ -76,6 +76,8 @@ import (
 //     session's state (idle, running, awaiting_consent, awaiting_answer, ended),
 //     turn, last event time, usage, last stop and the id of the request it waits
 //     on, read from the live table rather than rebuilt from the journal.
+//   - server.shutdown — no params. Closes every open session, then answers
+//     {shutdown, sessions_closed} and ends the process (ADR-0030).
 //   - session.events — params {session, after_seq?, limit?}. The journal's events
 //     after a seq, blob-aware, for a client that missed some. Every
 //     session.event notification carries its seq for this.
@@ -184,6 +186,7 @@ const (
 	methodSessionHandoff = "session.handoff"
 	methodServerSessions = "server.sessions" // the session table, ADR-0030
 	methodSessionEvents  = "session.events"  // journal replay after a seq, ADR-0030
+	methodServerShutdown = "server.shutdown" // close every session and end the process, ADR-0030
 	methodServerHello    = "server.hello"    // capabilities, see capabilities.go
 	methodAskRequest     = "ask.request"     // server → client request (ADR-0020)
 	methodSessionEvent   = "session.event"   // server → client notification
@@ -428,19 +431,26 @@ type eventParams struct {
 // stdio.
 func serveCmd(args []string, stdout, stderr io.Writer) int {
 	var listen string
+	var idle time.Duration
 	base, timeout, code, ok := residentOptions("serve", "a task arrives over the wire as session.start's prompt, "+
 		"not on the command line", args, stderr, func(fs *flag.FlagSet) {
 		fs.StringVar(&listen, "listen", "", "listen on this unix socket (mode 0600) instead of stdio: the process "+
 			"and its sessions outlive a client, and a new connection replaces the one before it (ADR-0030)")
+		fs.DurationVar(&idle, "idle-timeout", defaultIdleTimeout, "with --listen: exit after this long with no client "+
+			"connected and no open session, for example 30m; 0 never exits on idleness")
 	})
 	if !ok {
 		return code
+	}
+	if idle < 0 {
+		say(stderr, "kopicode: serve --idle-timeout cannot be negative (0 disables it)\n")
+		return exitUsage
 	}
 	if listen != "" {
 		// A signal is the way a supervisor ends a process it cannot close stdin of.
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		return serveListen(ctx, listen, stderr, base, timeout)
+		return serveListen(ctx, listen, stderr, base, timeout, idle)
 	}
 	return serveWith(context.Background(), os.Stdin, stdout, stderr, base, timeout)
 }
@@ -541,7 +551,7 @@ func serveWith(ctx context.Context, stdin io.Reader, stdout, stderr io.Writer, b
 
 // newServer builds the server around its session manager.
 func newServer(ctx context.Context, stderr io.Writer, base engine.Options, consentTimeout time.Duration) *server {
-	s := &server{stderr: stderr, consentTimeout: consentTimeout}
+	s := &server{stderr: stderr, consentTimeout: consentTimeout, shutdown: make(chan struct{})}
 	// The Manager is the session lifecycle both resident front ends share
 	// (ADR-0015 decision 3); this file is only the JSON-RPC skin over it.
 	s.mgr = sessioncore.New(ctx, base, stderr, func(id string, timeout time.Duration) engine.Consenter {
@@ -572,6 +582,11 @@ type server struct {
 	cur    *conn
 	sent   map[string]rpcRequestOut
 
+	// shutdown is closed, once, when the process has been asked to end: by
+	// server.shutdown or by the idle timeout (see requestShutdown).
+	shutdown     chan struct{}
+	shutdownOnce sync.Once
+
 	// consentMu, consentSeq and pending back every remoteConsenter's blocking
 	// round trip (ADR-0016, see serve_consent.go). Deliberately its own lock: a
 	// consent wait has nothing to do with session bookkeeping, and a turn
@@ -586,7 +601,17 @@ type server struct {
 // shuts every open session down. A line that will not parse gets a parse-error
 // response and the loop continues — one bad message does not end the process.
 func (s *server) run(stdin io.Reader, c *conn) int {
-	s.readLines(stdin, c)
+	// Reading stdin cannot be interrupted, so a server.shutdown is waited for
+	// beside it: the process is about to exit and takes the reader with it.
+	done := make(chan struct{})
+	go func() {
+		s.readLines(stdin, c)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-s.shutdown:
+	}
 	s.mgr.Shutdown()
 	return exitSuccess
 }
@@ -659,12 +684,14 @@ func (s *server) handleLine(c *conn, line string) {
 		s.handleSessions(req)
 	case methodSessionEvents:
 		s.handleEvents(req)
+	case methodServerShutdown:
+		s.handleShutdown(req)
 	case methodServerHello:
 		s.writeResult(req, currentCapabilities())
 	default:
 		s.writeError(req, codeMethodNotFound, fmt.Sprintf("unknown method %q; this surface has "+
 			"session.start, session.submit, session.cancel, session.handoff, session.close, session.usage, "+
-			"session.events, server.sessions and server.hello", req.Method))
+			"session.events, server.sessions, server.shutdown and server.hello", req.Method))
 	}
 }
 
@@ -1013,7 +1040,7 @@ func (c *conn) close() {
 	}
 }
 
-func (c *conn) isClosed() bool { return c.closed.Load() }
+func (c *conn) isClosed() bool { return c == nil || c.closed.Load() }
 
 // idOrNull keeps a response's id a JSON null when the request had none, which is
 // what JSON-RPC requires for an error that could not be tied to a request.

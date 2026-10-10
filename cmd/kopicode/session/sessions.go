@@ -93,6 +93,20 @@ func (m *Manager) Sessions() []Info {
 	return rows
 }
 
+// Open is how many sessions are open now: the ended ones [Manager.Sessions] still
+// lists do not count.
+func (m *Manager) Open() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, ms := range m.sessions {
+		if !ms.closed {
+			n++
+		}
+	}
+	return n
+}
+
 // state is the session's state; the caller holds m.mu.
 func (ms *managed) state() State {
 	switch {
