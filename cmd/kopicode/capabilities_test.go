@@ -40,7 +40,7 @@ func TestFeatureListTracksTheCode(t *testing.T) {
 			t.Errorf("consent_mode %q is accepted by session.start but has no feature name", mode)
 		}
 	}
-	for method, feature := range map[string]string{methodSessionClose: "session.close", methodServerHello: "server.hello", methodAskRequest: "ask.request", methodSessionUsage: "session.usage", methodServerSessions: "server.sessions"} {
+	for method, feature := range map[string]string{methodSessionClose: "session.close", methodServerHello: "server.hello", methodAskRequest: "ask.request", methodSessionUsage: "session.usage", methodServerSessions: "server.sessions", methodServerShutdown: "server.shutdown"} {
 		if method != feature {
 			t.Errorf("method %q and feature %q should share a name", method, feature)
 		}

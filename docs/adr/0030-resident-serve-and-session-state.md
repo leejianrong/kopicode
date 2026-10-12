@@ -44,5 +44,7 @@ Today a `serve` child ends its sessions when its client's stdin closes. A cuttle
   client was replaced (ids belong to their client); the path is claimed with a lock file rather than by
   connecting to it, because a probe connection would itself replace the live client; and `SIGINT` or
   `SIGTERM` closes the sessions and removes the socket. Unix only.
-- Decision 5 (`--idle-timeout`, `server.shutdown`) is not built yet (KOP-187).
+- **Decision 5 is built** (KOP-187). Idle means no client connected *and* no open session; either keeps the
+  process alive, and an ended session does not count. `server.shutdown` answers after the sessions are closed,
+  then the process exits, over stdio as well as on a socket. `--idle-timeout` applies to `--listen` only.
 - The `mcp` front end shares the session manager but has no tool for either; the ADR names `serve` only.

@@ -44,7 +44,7 @@ import (
 // serveListen runs a listening serve process until ctx ends, then closes every
 // session and removes the socket. A path another live process holds is refused,
 // and a stale one left by a crash is replaced.
-func serveListen(ctx context.Context, path string, stderr io.Writer, base engine.Options, consentTimeout time.Duration) int {
+func serveListen(ctx context.Context, path string, stderr io.Writer, base engine.Options, consentTimeout time.Duration, idle time.Duration) int {
 	ln, release, err := listenSocket(path)
 	if err != nil {
 		say(stderr, "kopicode: serve --listen %s: %v\n", path, err)
@@ -56,16 +56,20 @@ func serveListen(ctx context.Context, path string, stderr io.Writer, base engine
 	s := newServer(context.Background(), stderr, base, consentTimeout)
 
 	go func() {
-		<-ctx.Done()
+		select {
+		case <-ctx.Done():
+		case <-s.shutdown:
+		}
 		_ = ln.Close()
 	}()
+	go s.watchIdle(ctx, idle)
 	say(stderr, "kopicode: serve listening on %s\n", path)
 
 	var readers sync.WaitGroup
 	for {
 		nc, err := ln.Accept()
 		if err != nil {
-			if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
+			if ctx.Err() != nil || s.stopping() || errors.Is(err, net.ErrClosed) {
 				break
 			}
 			say(stderr, "kopicode: accepting a connection: %v\n", err)
@@ -87,6 +91,61 @@ func serveListen(ctx context.Context, path string, stderr io.Writer, base engine
 	s.mgr.Shutdown()
 	release()
 	return exitSuccess
+}
+
+// defaultIdleTimeout is how long a listening serve waits with nobody connected
+// and no session open before it exits (ADR-0030 decision 5). Long enough that a
+// supervisor restarting a client does not lose the process, short enough that
+// an orphan does not run for ever.
+const defaultIdleTimeout = 30 * time.Minute
+
+// requestShutdown ends the process's run loop: it is safe to call more than
+// once and from any goroutine.
+func (s *server) requestShutdown() { s.shutdownOnce.Do(func() { close(s.shutdown) }) }
+
+func (s *server) stopping() bool {
+	select {
+	case <-s.shutdown:
+		return true
+	default:
+		return false
+	}
+}
+
+// watchIdle asks the process to exit once it has had no client and no open
+// session for idle. A client that is connected but has opened nothing keeps it
+// alive, and so does a session nobody is attached to: that is the point of
+// listening. idle <= 0 never exits. It returns when ctx ends or a shutdown has
+// been requested.
+func (s *server) watchIdle(ctx context.Context, idle time.Duration) {
+	if idle <= 0 {
+		return
+	}
+	t := time.NewTicker(min(max(idle/4, 5*time.Millisecond), 5*time.Second))
+	defer t.Stop()
+	var since time.Time
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-s.shutdown:
+			return
+		case now := <-t.C:
+			if !s.current().isClosed() || s.mgr.Open() > 0 {
+				since = time.Time{}
+				continue
+			}
+			if since.IsZero() {
+				since = now
+				continue
+			}
+			if now.Sub(since) >= idle {
+				say(s.stderr, "kopicode: serve --listen: no client and no open session for %s, exiting\n", idle)
+				s.requestShutdown()
+				return
+			}
+		}
+	}
 }
 
 // replace makes c the one client, closing the one before it. The old

@@ -96,6 +96,20 @@ func (m *Manager) Sessions() []Info {
 	return rows
 }
 
+// Open is how many sessions are open now: the ended ones [Manager.Sessions] still
+// lists do not count.
+func (m *Manager) Open() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, ms := range m.sessions {
+		if !ms.closed {
+			n++
+		}
+	}
+	return n
+}
+
 // engineSession is the open engine session, or nil while a StartAsync is still
 // opening it. sess is written under mu by the worker, so it is read under mu.
 func (ms *managed) engineSession(mu *sync.Mutex) *engine.Session {

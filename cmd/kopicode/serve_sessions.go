@@ -112,3 +112,24 @@ func (s *server) handleEvents(req rpcRequest) {
 		s.writeResult(req, res)
 	}()
 }
+
+// shutdownResult is server.shutdown's answer.
+type shutdownResult struct {
+	Shutdown bool `json:"shutdown"`
+	// SessionsClosed is how many sessions were open and have now been closed.
+	SessionsClosed int `json:"sessions_closed"`
+}
+
+// handleShutdown answers server.shutdown (ADR-0030 decision 5): every open session
+// is closed first, its in-flight turn cancelled and its SessionEnded written, and
+// the answer goes out only once that is done. The process then ends: the
+// connection is closed behind the answer, the socket removed. It runs off the
+// read loop, because closing a session waits for its turn to stop.
+func (s *server) handleShutdown(req rpcRequest) {
+	go func() {
+		n := s.mgr.Open()
+		s.mgr.Shutdown()
+		s.writeResult(req, shutdownResult{Shutdown: true, SessionsClosed: n})
+		s.requestShutdown()
+	}()
+}
