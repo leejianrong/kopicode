@@ -137,6 +137,10 @@ If the model goes in circles (the same call with the same result three times, or
 file, with nothing written in between) the REPL tells it so and what to try instead
 ([ADR-0028](docs/adr/0028-stall-detector.md)). `--stall-threshold N` changes the count and `0` turns it off.
 
+A `run_shell` or `grep` result over 32 KiB is shown to the model as its start and its end with a note saying how much
+was left out; the journal keeps all of it ([ADR-0033](docs/adr/0033-tool-output-cap.md)). `--output-cap N` changes the
+limit and `0` shows everything.
+
 A session is bounded: each prompt gets at most **20 model calls** (the turn cap) and the
 session at most 2M tokens. A task that needs more ends with `stop: max_turns` rather than
 running on; the work done so far stays in the tree, and replying continues it with a fresh
