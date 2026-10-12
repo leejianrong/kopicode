@@ -29,11 +29,11 @@ import (
 //     `.output_item.added`, `.function_call_arguments.*`, `.output_text.done`) is
 //     read and ignored: it carries nothing the finished items do not.
 //
-// Reasoning text arrives as `response.reasoning_summary_text.delta` or
-// `response.reasoning_text.delta`. Neither was observed (the live calls asked for
-// no reasoning), so the names come from the open-source client's vocabulary and
-// are unverified; a stream that uses another name loses its reasoning text, not
-// its answer.
+// Reasoning text arrives as `response.reasoning_summary_text.delta` when the
+// request asks for a summary (`reasoning: {"summary": "auto"}`; checked live, with
+// a `reasoning` item beside the message). `response.reasoning_text.delta` is the
+// open-source client's other name and was not observed. A stream that uses a name
+// not listed here loses its reasoning text, not its answer.
 
 // ErrBackendFailure reports a stream the backend itself ended with an error
 // event. The code and message it sent are in the text; they are not secrets.
