@@ -28,7 +28,7 @@ Today a `serve` child ends its sessions when its client's stdin closes. A cuttle
 
 - cuttlefish can reconnect after a restart and carry on mid-round instead of re-running it. Whether it does is its own decision; stdio keeps working.
 - Orphan processes become possible, which is what the idle timeout and `server.shutdown` are for.
-- The scale cost of several sessions in one process is unmeasured. A load test with many concurrent mock-provider sessions is the first card of the epic.
+- The scale cost of several sessions in one process is measured in [`docs/serve-load.md`](../serve-load.md) (KOP-182): about 35 KiB and 4 goroutines per idle session, turns overlap fully, `server.sessions` stays under 2 ms with 200 sessions mid-turn. It changes nothing here. It found one cost, that `session.start` opens a session serially on the read loop (KOP-188).
 - The needs-attention states are what a fleet view cares about most at 100 projects.
 
 ## Status of the build

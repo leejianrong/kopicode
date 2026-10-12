@@ -916,6 +916,11 @@ func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session,
 	if err != nil {
 		return fail(err)
 	}
+	// A live client keeps a connection pool of its own; a resident process must not
+	// hold one per session that has ended.
+	if ci, ok := prov.(interface{ CloseIdleConnections() }); ok {
+		s.closers = append(s.closers, func() error { ci.CloseIdleConnections(); return nil })
+	}
 
 	askFn, askSource := mustAnswerer(opts.Ask, opts.AskMode, opts.AskPolicy)
 

@@ -197,6 +197,12 @@ func defaultTransport() http.RoundTripper {
 	return clone
 }
 
+// CloseIdleConnections closes the keep-alive connections this client holds. Every
+// client has a transport of its own (see defaultTransport), so a process that
+// opens and closes many sessions would otherwise keep an idle connection per
+// finished session until the transport's idle timeout.
+func (c *Client) CloseIdleConnections() { c.http.CloseIdleConnections() }
+
 // maxSessionIDLen is the longest x-session-id OpenRouter accepts.
 const maxSessionIDLen = 256
 
