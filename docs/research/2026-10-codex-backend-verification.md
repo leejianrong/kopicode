@@ -50,3 +50,22 @@ The request that worked, text only: `{"model", "instructions", "input":[{"type":
 3. Whether `x-codex-turn-state` has to be echoed.
 4. Reasoning controls (`reasoning.effort`) and how reasoning summaries stream.
 5. Whether `session_id` / `originator` headers matter for routing or abuse checks. The calls here sent neither and worked.
+
+## 7. Follow-up (KOP-197, same day): tool results, history, sampling, reasoning
+
+Five more small calls on the same login, recorded under `internal/provider/testdata/codex/`. They settle items 2 and 4 of §6.
+
+| probe | result |
+|---|---|
+| history `[user message, function_call, function_call_output]` with the same `call_id`, `store:false` | 200. The model answered from the output ("a.txt contains: PINEAPPLE"). The call is echoed back as `{"type":"function_call","call_id","name","arguments":"<json string>"}` and the result is `{"type":"function_call_output","call_id","output":"<string>"}`. |
+| history `[user, assistant message (output_text), user]` | 200, and the model used the earlier turn. Assistant history is `{"type":"message","role":"assistant","content":[{"type":"output_text","text"}]}`. |
+| `temperature: 0.2` | **400** `{"detail":"Unsupported parameter: temperature"}`. |
+| `previous_response_id` with `store:false` | **400** `{"detail":"Unsupported parameter: previous_response_id"}`. |
+| `reasoning: {"effort":"low","summary":"auto"}` | 200. A `reasoning` output item (with an opaque `encrypted_content`, scrubbed in the recording) precedes the message; the summary streams as `response.reasoning_summary_text.delta` (with `response.reasoning_summary_part.added/done` and `response.reasoning_summary_text.done`). |
+
+What follows for the client:
+
+- History is always replayed in full, and no sampling parameter is sent. The client never sends `temperature`, `top_p`, `max_output_tokens` or `previous_response_id`.
+- A backend refusal of a parameter is a plain 400 whose body is `{"detail": "..."}`, not an SSE error. That is the first failure shape recorded for KOP-199; the quota and expiry shapes are still unknown.
+- Reasoning items are not replayed in the history. Whether dropping them degrades a long session is not measured; the live probes were one turn long.
+- Still unknown: quota-spent and expired-token responses, whether `x-codex-turn-state` has to be echoed, and `session_id` / `originator` headers (none were sent and nothing failed).

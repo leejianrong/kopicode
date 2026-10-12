@@ -260,21 +260,6 @@ func TestCodexClientSendsTheRequestTheBackendAccepted(t *testing.T) {
 	}
 }
 
-func TestCodexClientRefusesToolHistoryForNow(t *testing.T) {
-	c, err := NewCodexClient(fakeCreds(t), WithCodexBaseURL("http://127.0.0.1:1"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, m := range []Message{
-		{Role: RoleTool, Content: "x", ToolCallID: "c"},
-		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "c", Name: "n"}}},
-	} {
-		if _, err := c.Complete(context.Background(), Request{ModelID: "m", Messages: []Message{m}}); !errors.Is(err, ErrCodexToolHistory) {
-			t.Errorf("err = %v, want ErrCodexToolHistory", err)
-		}
-	}
-}
-
 func TestCodexClientReturnsAnAPIErrorWhole(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
@@ -325,5 +310,122 @@ func TestCodexCredentialNeverAppearsInErrorsOrRenderings(t *testing.T) {
 func TestNewCodexClientRefusesEmptyCredentials(t *testing.T) {
 	if _, err := NewCodexClient(codexauth.Credentials{}); err == nil {
 		t.Error("a client was built with no token")
+	}
+}
+
+// inputOf encodes a request and returns the decoded input array.
+func inputOf(t *testing.T, msgs []Message) []map[string]any {
+	t.Helper()
+	body, err := encodeResponses(Request{ModelID: "m", Messages: msgs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var w struct {
+		Input []map[string]any `json:"input"`
+	}
+	if err := json.Unmarshal(body, &w); err != nil {
+		t.Fatal(err)
+	}
+	return w.Input
+}
+
+// The shape checked live: a tool call echoed back as a function_call item and its
+// result as a function_call_output with the same call_id, and the model answered
+// from it (testdata/codex/tool_result.sse).
+func TestEncodeSendsToolCallsAndResultsAsTheBackendTookThem(t *testing.T) {
+	in := inputOf(t, []Message{
+		{Role: RoleUser, Content: "what is in a.txt?"},
+		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "call_1", Name: "read_file", Arguments: json.RawMessage(`"{\"path\":\"a.txt\"}"`)}}},
+		{Role: RoleTool, ToolCallID: "call_1", Content: "the file says: PINEAPPLE"},
+	})
+	if len(in) != 3 {
+		t.Fatalf("input has %d items, want 3 (a tool-only assistant turn has no text item): %v", len(in), in)
+	}
+	if in[1]["type"] != "function_call" || in[1]["call_id"] != "call_1" || in[1]["name"] != "read_file" ||
+		in[1]["arguments"] != `{"path":"a.txt"}` {
+		t.Errorf("call item = %v", in[1])
+	}
+	if in[2]["type"] != "function_call_output" || in[2]["call_id"] != "call_1" || in[2]["output"] != "the file says: PINEAPPLE" {
+		t.Errorf("output item = %v", in[2])
+	}
+}
+
+func TestEncodeKeepsAnAssistantsTextBesideItsCallsAndAcceptsBareArguments(t *testing.T) {
+	in := inputOf(t, []Message{
+		{Role: RoleAssistant, Content: "let me look", ToolCalls: []ToolCall{
+			{ID: "c1", Name: "a", Arguments: json.RawMessage(`{"x":1}`)},
+			{ID: "c2", Name: "b"},
+		}},
+		{Role: RoleTool, ToolCallID: "c1", Content: ""},
+	})
+	if len(in) != 4 || in[0]["type"] != "message" || in[1]["arguments"] != `{"x":1}` || in[2]["arguments"] != "{}" {
+		t.Fatalf("input = %v", in)
+	}
+	if out, ok := in[3]["output"]; !ok || out != "" {
+		t.Errorf("an empty tool result must still be sent as output \"\": %v", in[3])
+	}
+}
+
+func TestResponsesStreamDecodesAnAnswerFromAToolResult(t *testing.T) {
+	for file, want := range map[string]string{"tool_result.sse": "PINEAPPLE", "multi_turn.sse": "PINEAPPLE"} {
+		s := NewResponsesStream(context.Background(), strings.NewReader(string(readFixture(t, file))))
+		drainStream(t, s)
+		if s.Err() != nil {
+			t.Fatalf("%s: %v", file, s.Err())
+		}
+		reply, err := s.Reply()
+		if err != nil || !strings.Contains(reply.Content, want) || reply.FinishReason != "stop" {
+			t.Errorf("%s: reply %+v err %v", file, reply, err)
+		}
+	}
+}
+
+func TestResponsesStreamKeepsReasoningSummaryApartFromTheAnswer(t *testing.T) {
+	s := NewResponsesStream(context.Background(), strings.NewReader(string(readFixture(t, "reasoning.sse"))))
+	content, reasoning := drainStream(t, s)
+	if s.Err() != nil {
+		t.Fatal(s.Err())
+	}
+	if content != "391" || !strings.Contains(reasoning, "Calculating multiplication") {
+		t.Errorf("content %q reasoning %q", content, reasoning)
+	}
+	reply, _ := s.Reply()
+	if reply.Content != "391" || reply.Reasoning != reasoning {
+		t.Errorf("reply = %+v", reply)
+	}
+}
+
+// What the backend answers to the two parameters it does not take. The client does
+// not send either (see CodexClient), so these are the record of why.
+func TestUnsupportedParametersAreReturnedAsAPIErrorsWithTheBackendsOwnDetail(t *testing.T) {
+	for file, want := range map[string]string{
+		"error_unsupported_temperature.json":          "Unsupported parameter: temperature",
+		"error_unsupported_previous_response_id.json": "Unsupported parameter: previous_response_id",
+	} {
+		body := readFixture(t, file)
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write(body)
+		}))
+		c, _ := NewCodexClient(fakeCreds(t), WithCodexBaseURL(srv.URL))
+		_, err := c.Complete(context.Background(), Request{ModelID: "m", Messages: []Message{{Role: RoleUser, Content: "x"}}})
+		srv.Close()
+		var api *APIError
+		if !errors.As(err, &api) || api.Status != 400 || !strings.Contains(api.Body, want) {
+			t.Errorf("%s: err = %v", file, err)
+		}
+	}
+}
+
+func TestEncodeNeverSendsSamplingOrAPreviousResponse(t *testing.T) {
+	body, err := encodeResponses(Request{ModelID: "m", Sampling: Sampling{Temperature: 0.7, TopP: 0.9, MaxTokens: 100},
+		Messages: []Message{{Role: RoleUser, Content: "x"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, banned := range []string{"temperature", "top_p", "max_tokens", "max_output_tokens", "previous_response_id", `"seed"`} {
+		if strings.Contains(string(body), banned) {
+			t.Errorf("the body carries %s, which the backend rejects or has not been checked to take", banned)
+		}
 	}
 }

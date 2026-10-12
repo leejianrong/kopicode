@@ -19,23 +19,19 @@ const CodexBaseURL = "https://chatgpt.com/backend-api/codex"
 // responsesPath is the Responses endpoint under the base URL.
 const responsesPath = "/responses"
 
-// ErrCodexToolHistory reports a request whose history holds a tool call or a tool
-// result. Slice 1 of the Codex client (KOP-194) sends text turns only; the shape of
-// a tool result going back as input is unverified and is slice 2 (KOP-197).
-var ErrCodexToolHistory = errors.New("provider: the Codex client does not yet send tool calls or tool results in the history")
-
 // CodexClient is the provider for a ChatGPT/Codex subscription (ADR-0035). It
 // satisfies engine.Provider structurally, like [Client], and keeps the same
 // promise about credentials: the bearer token is read in one place, the HTTP
 // request builder, and nowhere else in this file.
 //
-// What it does not do yet, by slice: tool calls and tool results in the history
-// (KOP-197), quota and expiry failure shapes (KOP-199), retries, and any wiring
-// into the engine (KOP-198). A failed request is returned as an [APIError], whole,
-// and not retried.
+// What it does not do yet, by slice: quota and expiry failure shapes (KOP-199),
+// retries, and any wiring into the engine (KOP-198). A failed request is returned
+// as an [APIError], whole, and not retried.
 //
-// Sampling is not sent. The live calls that worked sent none, and a reasoning
-// model may refuse a temperature; whether it is accepted is not known.
+// Sampling is not sent: the backend answers a `temperature` with a 400
+// ("Unsupported parameter: temperature"), and a `previous_response_id` the same
+// way, so history is always replayed in full with `store: false`
+// (docs/research/2026-10-codex-backend-verification.md, §7).
 type CodexClient struct {
 	creds   codexauth.Credentials
 	baseURL string
@@ -128,16 +124,33 @@ func (c *CodexClient) newHTTPRequest(ctx context.Context, body []byte) (*http.Re
 type responsesRequest struct {
 	Model        string          `json:"model"`
 	Instructions string          `json:"instructions"`
-	Input        []responsesItem `json:"input"`
+	Input        []any           `json:"input"`
 	Tools        []responsesTool `json:"tools,omitempty"`
 	Stream       bool            `json:"stream"`
 	Store        bool            `json:"store"`
 }
 
+// responsesItem is a message in the history.
 type responsesItem struct {
 	Type    string             `json:"type"`
 	Role    string             `json:"role"`
 	Content []responsesContent `json:"content"`
+}
+
+// responsesCall echoes a call the model made, and responsesCallOutput answers it.
+// Both were checked live: the model reads the output and answers from it, given
+// the matching call_id.
+type responsesCall struct {
+	Type      string `json:"type"`
+	CallID    string `json:"call_id"`
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+type responsesCallOutput struct {
+	Type   string `json:"type"`
+	CallID string `json:"call_id"`
+	Output string `json:"output"`
 }
 
 type responsesContent struct {
@@ -164,13 +177,10 @@ func encodeResponses(req Request) ([]byte, error) {
 	if req.ModelID == "" {
 		return nil, errors.New("provider: request names no model")
 	}
-	w := responsesRequest{Model: req.ModelID, Stream: true, Store: false, Input: []responsesItem{}}
+	w := responsesRequest{Model: req.ModelID, Stream: true, Store: false, Input: []any{}}
 
 	var system []string
 	for _, m := range req.Messages {
-		if len(m.ToolCalls) > 0 || m.Role == RoleTool {
-			return nil, ErrCodexToolHistory
-		}
 		switch m.Role {
 		case RoleSystem:
 			system = append(system, m.Content)
@@ -178,8 +188,20 @@ func encodeResponses(req Request) ([]byte, error) {
 			w.Input = append(w.Input, responsesItem{Type: "message", Role: "user",
 				Content: []responsesContent{{Type: "input_text", Text: m.Content}}})
 		case RoleAssistant:
-			w.Input = append(w.Input, responsesItem{Type: "message", Role: "assistant",
-				Content: []responsesContent{{Type: "output_text", Text: m.Content}}})
+			// An assistant turn that was only tool calls has no text item.
+			if m.Content != "" || len(m.ToolCalls) == 0 {
+				w.Input = append(w.Input, responsesItem{Type: "message", Role: "assistant",
+					Content: []responsesContent{{Type: "output_text", Text: m.Content}}})
+			}
+			for _, tc := range m.ToolCalls {
+				w.Input = append(w.Input, responsesCall{
+					Type: "function_call", CallID: tc.ID, Name: tc.Name, Arguments: argumentsText(tc.Arguments),
+				})
+			}
+		case RoleTool:
+			w.Input = append(w.Input, responsesCallOutput{
+				Type: "function_call_output", CallID: m.ToolCallID, Output: m.Content,
+			})
 		default:
 			return nil, fmt.Errorf("provider: unknown message role %q", m.Role)
 		}
@@ -200,4 +222,23 @@ func encodeResponses(req Request) ([]byte, error) {
 		return nil, fmt.Errorf("provider: encoding request: %w", err)
 	}
 	return bytes.TrimRight(buf.Bytes(), "\n"), nil
+}
+
+// argumentsText turns a tool call's arguments into the string the Responses API
+// carries them as. The loop holds them as the bytes that arrived: a JSON string
+// holding the arguments object (what this client's own decoder produces, and what
+// the chat path produces) or the bare object; the first is unquoted, the second
+// sent as it is.
+func argumentsText(raw json.RawMessage) string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return "{}"
+	}
+	if raw[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw, &s); err == nil {
+			return s
+		}
+	}
+	return string(raw)
 }
