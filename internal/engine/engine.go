@@ -518,7 +518,7 @@ func (e *Engine) Start(ctx context.Context) error {
 		Provider: journalPin(e.cfg.Selection.Pin),
 		// The host only, and only for a custom endpoint (ADR-0027): the run is
 		// unpinned, and the record says where it went.
-		ProviderHost: harness.ProviderHost(e.cfg.Selection.ProviderURL),
+		ProviderHost: providerHostOf(e.cfg.Selection),
 		// Copied, never recomputed: one session has one arm, and two events
 		// disagreeing about which would be worse than either.
 		HarnessConfigHash: e.cfg.Selection.HarnessConfigHash,
@@ -580,4 +580,14 @@ func (e *Engine) append(ctx context.Context, turn int, payload journal.Payload) 
 		return journal.Event{}, fmt.Errorf("engine: journaling %s: %w", payload.Type(), err)
 	}
 	return ev, nil
+}
+
+// providerHostOf is the host SessionStarted records for an unpinned route: a
+// custom endpoint's (ADR-0027) or the Codex backend's (ADR-0035), and "" for
+// OpenRouter.
+func providerHostOf(sel Selection) string {
+	if sel.Provider == harness.ProviderCodex {
+		return harness.CodexHost
+	}
+	return harness.ProviderHost(sel.ProviderURL)
 }

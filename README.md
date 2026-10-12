@@ -107,6 +107,20 @@ for a loopback address and required otherwise. `http` is accepted for loopback o
 unpinned, are named `custom:` in the harness hash and so never pool with a measured arm, report no context
 window, and cannot anchor a benchmark number. `serve` and `mcp` take the same flag.
 
+**On a ChatGPT/Codex subscription** (ADR-0035): `--provider codex` (or `provider = "codex"` in the user config,
+never a repository's) uses the login Codex CLI already made, read from `~/.codex/auth.json` (or `CODEX_HOME`).
+Sign in with Codex CLI first; kopicode only reads the file, refuses one that other users can read, and does not
+refresh it, so an expired token tells you to run Codex CLI once. Name a model the backend serves.
+
+```bash
+kopicode --provider codex --model gpt-5.6-luna
+```
+
+This is for your own interactive and `run --print` use. `serve` and `mcp` refuse `--provider`, so a resident
+process never spends one person's subscription on other people's sessions. These runs are unpinned, are
+named `codex:` in the harness hash, report no cost (a subscription has no per-token price) and cannot anchor a
+benchmark number. The login's token is sent only to the Codex backend and is never written to the journal.
+
 **As a one-shot**, with the record as newline-delimited JSON on stdout:
 
 ```bash
@@ -203,6 +217,7 @@ mock provider with `make bench-smoke`.
 | --- | --- | --- |
 | `OPENROUTER_API_KEY` | environment | required; never written to the journal or logs |
 | `KOPICODE_PROVIDER_API_KEY`, `provider_url` | environment, and the user config or `--provider-url` | only with a custom endpoint (ADR-0027); the first is never sent to OpenRouter and the second never read from a repository |
+| `provider`, Codex CLI's `auth.json` | the user config or `--provider`; the login file | only with the Codex provider (ADR-0035); never read from a repository, never by `serve` or `mcp` |
 | `model`, `harness`, `harness_config` | `.kopicode/config.toml` or flags | flags win; `model` can also come from the user config |
 | `default_mode`, `auto_never_allow`, user `AGENTS.md` | `~/.config/kopicode/` | interactive `kopicode` only |
 | turn cap and other bounds | a declared harness config (`--harness-config`) | for example `max_turns = 40` when a session stops with `max_turns`; local-only, never anchors a published number. See [`docs/harness-tuning.md`](docs/harness-tuning.md) |

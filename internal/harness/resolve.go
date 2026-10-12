@@ -65,6 +65,10 @@ type Overrides struct {
 	// ProviderURL is --provider-url (ADR-0027): a custom endpoint. The user
 	// file's `provider_url` is the next rung, read only when UserConfig is set.
 	ProviderURL string
+	// Provider is --provider (ADR-0035): a provider family other than OpenRouter,
+	// `codex`. The user file's `provider` is the next rung, read only when
+	// UserConfig is set. Naming it together with a provider URL is a usage error.
+	Provider string
 	// Interactive says a person is at the keyboard (the REPL). Unless MaxTurns
 	// is given or the harness is a declared config that chose its own, the turn
 	// cap is then [InteractiveMaxTurns] rather than the corpus's 20.
@@ -130,6 +134,15 @@ func BindProviderURL(fs *flag.FlagSet, o *Overrides) {
 	fs.StringVar(&o.ProviderURL, FlagProviderURL, "",
 		"send requests to this OpenAI-compatible endpoint instead of OpenRouter, for a local model or a proxy "+
 			"(unpinned, never a benchmark arm; the key is KOPICODE_PROVIDER_API_KEY, optional on loopback; needs --model)")
+}
+
+// BindProvider registers --provider on fs, filling o (ADR-0035). Only the REPL
+// and `run --print` call it: serve and mcp must not let one person's subscription
+// serve other people's sessions, and kopibench's arms are always pinned.
+func BindProvider(fs *flag.FlagSet, o *Overrides) {
+	fs.StringVar(&o.Provider, FlagProvider, "",
+		"use a provider family other than OpenRouter: codex is a ChatGPT/Codex subscription, read from Codex CLI's "+
+			"login (unpinned, never a benchmark arm; needs --model; for your own development use)")
 }
 
 // Bind registers --model, --harness and --harness-config on fs and returns
@@ -215,6 +228,10 @@ type Selection struct {
 	// OpenRouter. When set the Pin is empty, the context window is unknown and
 	// the configuration name starts with [CustomConfigNamePrefix].
 	ProviderURL string
+	// Provider is the provider family (ADR-0035), or "" for OpenRouter. When
+	// set the Pin is empty, the context window is unknown and the configuration
+	// name starts with [CodexConfigNamePrefix].
+	Provider string
 
 	// ModelSource and HarnessSource say which rung of the precedence chain
 	// supplied each value. Diagnostics only — see [Source].
@@ -321,8 +338,34 @@ func Resolve(dir string, o Overrides) (Selection, error) {
 	if providerURL == "" {
 		providerURL = user.ProviderURL
 	}
+	providerName := o.Provider
+	if providerName == "" {
+		providerName = user.Provider
+	}
+	if providerName != "" {
+		if err := ValidateProvider(providerName); err != nil {
+			return Selection{}, err
+		}
+		if providerURL != "" {
+			return Selection{}, usagef("both a provider (%q) and a provider url are set; they are two different "+
+				"routes, name one", providerName)
+		}
+		if modelSource == SourceDefault {
+			return Selection{}, usagef("the Codex provider needs a model: the id %q is OpenRouter's, "+
+				"pass --model with a model the Codex backend serves", DefaultModelID)
+		}
+		return resolveUnpinned(dir, o, file, user, CodexConfigNamePrefix, ProviderCodex, "", modelID, modelSource)
+	}
 	if providerURL != "" {
-		return resolveCustom(dir, o, file, user, providerURL, modelID, modelSource)
+		if modelSource == SourceDefault {
+			return Selection{}, usagef("a custom provider url needs a model: the id %q is OpenRouter's, "+
+				"pass --model with the name your endpoint serves", DefaultModelID)
+		}
+		validated, err := ValidateProviderURL(providerURL)
+		if err != nil {
+			return Selection{}, err
+		}
+		return resolveUnpinned(dir, o, file, user, CustomConfigNamePrefix, "", validated, modelID, modelSource)
 	}
 
 	entry, ok := Lookup(modelID)
@@ -400,29 +443,22 @@ func Resolve(dir string, o Overrides) (Selection, error) {
 	}, nil
 }
 
-// resolveCustom is [Resolve] for a custom provider URL (ADR-0027).
+// resolveUnpinned is [Resolve] for a route nobody pinned: a custom provider URL
+// (ADR-0027) or the Codex provider (ADR-0035). The caller has validated the URL
+// and checked that a model was named.
 //
-// The model id is whatever the endpoint calls it, so the registry is not
-// consulted, and the default id would mean nothing to a local server, so one has
-// to be named. The harness configuration is the one --harness picks, else the
-// default model's. It is renamed with [CustomConfigNamePrefix], which changes the
-// hash: this run is not an arm of anything registered. No pin is declared, and
-// the context window is unknown rather than guessed (ADR-0021).
-func resolveCustom(dir string, o Overrides, file, user FileConfig, rawURL, modelID string, modelSource Source) (Selection, error) {
-	if modelSource == SourceDefault {
-		return Selection{}, usagef("a custom provider url needs a model: the id %q is OpenRouter's, "+
-			"pass --model with the name your endpoint serves", DefaultModelID)
-	}
-	providerURL, err := ValidateProviderURL(rawURL)
-	if err != nil {
-		return Selection{}, err
-	}
+// The model id is whatever the route calls it, so the registry is not consulted.
+// The harness configuration is the one --harness picks, else the default model's.
+// It is renamed with namePrefix, which changes the hash: this run is not an arm
+// of anything registered. No pin is declared, and the context window is unknown
+// rather than guessed (ADR-0021).
+func resolveUnpinned(dir string, o Overrides, file, user FileConfig, namePrefix, providerName, providerURL, modelID string, modelSource Source) (Selection, error) {
 	base, _ := Lookup(DefaultModelID)
 	cfg, harnessSource, declaredPath, err := resolveHarness(dir, o, file, base)
 	if err != nil {
 		return Selection{}, err
 	}
-	cfg.Name = CustomConfigNamePrefix + cfg.Name
+	cfg.Name = namePrefix + cfg.Name
 	if len(file.Verify) > 0 {
 		cfg.Verification.Source = VerificationConfigured
 	}
@@ -467,6 +503,7 @@ func resolveCustom(dir string, o Overrides, file, user FileConfig, rawURL, model
 			UserConfigPath: user.Path,
 		},
 		ProviderURL:   providerURL,
+		Provider:      providerName,
 		ModelSource:   modelSource,
 		HarnessSource: harnessSource,
 	}, nil

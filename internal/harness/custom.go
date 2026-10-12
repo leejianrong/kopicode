@@ -76,3 +76,27 @@ func ProviderURLIsLoopback(rawURL string) bool {
 	u, err := url.Parse(rawURL)
 	return err == nil && IsLoopbackHost(u.Hostname())
 }
+
+// FlagProvider is the flag that names a provider family other than OpenRouter
+// (ADR-0035).
+const FlagProvider = "provider"
+
+// ProviderCodex is the one such family: a ChatGPT/Codex subscription.
+const ProviderCodex = "codex"
+
+// CodexConfigNamePrefix marks a configuration resolved for the Codex provider. It
+// is in the hash preimage through [Config.Name], like [CustomConfigNamePrefix], so
+// a subscription run can never be compared with a pinned one.
+const CodexConfigNamePrefix = "codex:"
+
+// CodexHost is the host the journal records for a Codex session: the host only,
+// never a path, query or credential.
+const CodexHost = "chatgpt.com"
+
+// ValidateProvider checks the value of --provider or the `provider` key.
+func ValidateProvider(name string) error {
+	if name == ProviderCodex {
+		return nil
+	}
+	return usagef("unknown provider %q; the only value is %q (a ChatGPT/Codex subscription, ADR-0035)", name, ProviderCodex)
+}

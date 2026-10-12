@@ -475,6 +475,14 @@ func residentOptions(name, noArgsHint string, args []string, stderr io.Writer, e
 	// of OpenRouter. Each session.start must then name a model the endpoint serves.
 	providerURL := fs.String("provider-url", "", "send every session's requests to this OpenAI-compatible endpoint "+
 		"instead of OpenRouter (unpinned, never a benchmark arm; the key is KOPICODE_PROVIDER_API_KEY, optional on loopback)")
+	// ADR-0035 decision 4: the Codex provider uses one person's ChatGPT login and
+	// is for their own development use. A resident process serves sessions for
+	// someone else (cuttlefish is the case), so the flag is refused here, and the
+	// user file's `provider` key is never read by serve or mcp.
+	fs.Func("provider", "not available on serve or mcp (the Codex provider is for your own interactive use, ADR-0035)", func(string) error {
+		return errors.New("--provider is not available on `" + name + "`: the Codex provider uses one person's ChatGPT login " +
+			"and is for their own development use, not for sessions run on others' behalf (ADR-0035 decision 4)")
+	})
 	timeoutFlag := fs.Duration("consent-timeout", remoteConsentTimeout, "how long a live consent request "+
 		"(consent_mode remote_interactive) waits for the client's answer before it is denied, for example 5m; "+
 		"between 1s and 24h")
