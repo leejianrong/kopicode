@@ -65,6 +65,12 @@ not this list:
   parser and the renderer all walk one section list so they cannot drift. A passing verification is
   always rendered as dated, with an instruction to run it again. Step 1 of 3: the engine call, the
   REPL command and the wire method are not built yet.
+- **`internal/codexauth`** (ADR-0035, proposed) — reads the ChatGPT login Codex CLI already made
+  (`auth.json` under `CODEX_HOME`), read-only. Refuses a file that is not private to the user, a
+  non-ChatGPT login and an expired token, each by path and never by quoting the file. The access
+  token and account id are `Secret`s that render as `[redacted]` through fmt, JSON and slog; only
+  `Reveal()` returns them, for an Authorization header. The refresh and id tokens are not kept. No
+  refresh, no write, no network: nothing uses it yet (the provider is KOP-194).
 - **`internal/syntax`** — the post-edit gate: a language-native check (`gofmt -e`,
   `node --check`, `py_compile`, …) run immediately after an edit. `NotRun` is the zero
   value of `Outcome` — a gate that didn't run must never read as one that passed — and
