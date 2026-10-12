@@ -757,8 +757,11 @@ func (s *server) dispatchStart(req rpcRequest) {
 		timeout = d
 	}
 
+	// StartAsync: engine.Open runs on the session's worker, not on this read
+	// loop, so cancel, sessions and other starts are answered meanwhile (KAN-2015).
+	// A submit for this id that follows queues behind the open, in order.
 	id := req
-	if err := s.mgr.Start(sessioncore.StartParams{
+	if err := s.mgr.StartAsync(sessioncore.StartParams{
 		ID: p.Session, Dir: p.Dir, Prompt: p.Prompt,
 		Model: p.Model, Harness: p.Harness, HarnessConfig: p.HarnessConfig,
 		MaxTurns: p.MaxTurns, TokenBudget: p.TokenBudget,
@@ -767,6 +770,8 @@ func (s *server) dispatchStart(req rpcRequest) {
 		Handoff: p.Handoff, ParentSession: p.HandoffFrom,
 	}, s.notifier(p.Session), sessioncore.Turn{Done: func(r sessioncore.TurnResult) {
 		s.writeResult(id, turnResultOf(r))
+	}, Fail: func(e *sessioncore.Error) {
+		s.writeSessionError(id, e)
 	}}); err != nil {
 		s.writeSessionError(req, err)
 	}
@@ -791,6 +796,8 @@ func (s *server) dispatchSubmit(req rpcRequest) {
 	id := req
 	if err := s.mgr.Submit(p.Session, p.Prompt, sessioncore.Turn{Done: func(r sessioncore.TurnResult) {
 		s.writeResult(id, turnResultOf(r))
+	}, Fail: func(e *sessioncore.Error) {
+		s.writeSessionError(id, e) // the session it queued on never opened
 	}}); err != nil {
 		s.writeSessionError(req, err)
 	}
