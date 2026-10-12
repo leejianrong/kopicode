@@ -25,3 +25,13 @@ description = "the local .env is gitignored (/.env) and never committed; it exis
 paths = [
   '''^\.env$''',
 ]
+
+[[allowlists]]
+description = "prompt_cache_key in the recorded Codex backend streams (internal/provider/testdata/codex) is a random per-request UUID, not a credential; scanners read it as a generic key. Only UUID-shaped values in those two files are excused, so a token pasted there would still be caught. The current files carry a placeholder; this covers the first recording in history."
+condition = "AND"
+paths = [
+  '''^internal/provider/testdata/codex/(text_turn|tool_call)\.sse$''',
+]
+regexes = [
+  '''^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$''',
+]
