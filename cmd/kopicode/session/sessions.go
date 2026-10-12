@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/leejianrong/kopicode/internal/engine"
@@ -83,14 +84,24 @@ func (m *Manager) Sessions() []Info {
 		if ms == nil || rows[i].State == StateEnded {
 			continue
 		}
-		rows[i].Turn = ms.sess.Turns()
-		rows[i].Usage = ms.sess.Usage()
+		if sess := ms.engineSession(&m.mu); sess != nil {
+			rows[i].Turn = sess.Turns()
+			rows[i].Usage = sess.Usage()
+		}
 		if ns := ms.lastEvent.Load(); ns != 0 {
 			rows[i].LastEvent = time.Unix(0, ns).UTC()
 		}
 	}
 	slices.SortFunc(rows, func(a, b Info) int { return strings.Compare(a.ID, b.ID) })
 	return rows
+}
+
+// engineSession is the open engine session, or nil while a StartAsync is still
+// opening it. sess is written under mu by the worker, so it is read under mu.
+func (ms *managed) engineSession(mu *sync.Mutex) *engine.Session {
+	mu.Lock()
+	defer mu.Unlock()
+	return ms.sess
 }
 
 // state is the session's state; the caller holds m.mu.
@@ -161,6 +172,10 @@ func (m *Manager) Events(ctx context.Context, id string, after uint64, limit int
 	m.mu.Lock()
 	var dir string
 	if ms := m.sessions[id]; ms != nil {
+		if ms.sess == nil {
+			m.mu.Unlock()
+			return engine.EventPage{}, errf(KindUnknownSession, "session %q is still opening; ask again in a moment", id)
+		}
 		dir = ms.dir
 	} else {
 		for _, e := range m.ended {
