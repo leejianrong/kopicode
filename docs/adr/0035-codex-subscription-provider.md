@@ -1,6 +1,6 @@
 # ADR-0035: A second provider family, for a ChatGPT/Codex subscription
 
-*Proposed.* Builds on [ADR-0027](0027-custom-provider-url.md), which left "Codex OAuth" for later, and on `docs/research/2026-10-codex-oauth-spike.md` (KOP-177). It does not touch [ADR-0005](0005-benchmark-and-ab-methodology.md): a subscription route can never anchor a benchmark number. The owner read OpenAI's terms and said go on 2026-10-12, for personal development use. Whether to accept this design is still the owner's call.
+*Proposed*, and being built on the owner's instruction (KOP-194, KOP-197 and KOP-198 implement it; the failure shapes are KOP-199). Builds on [ADR-0027](0027-custom-provider-url.md), which left "Codex OAuth" for later, and on `docs/research/2026-10-codex-oauth-spike.md` (KOP-177). It does not touch [ADR-0005](0005-benchmark-and-ab-methodology.md): a subscription route can never anchor a benchmark number. The owner read OpenAI's terms and said go on 2026-10-12, for personal development use. Whether to accept this design is still the owner's call.
 
 ## Context
 

@@ -62,6 +62,10 @@ type FileConfig struct {
 	// (ADR-0027). User file only: a repository must not choose where its
 	// visitors' source code and prompts are sent.
 	ProviderURL string
+	// Provider is the `provider` key: a provider family other than OpenRouter
+	// (ADR-0035), `codex` for a ChatGPT subscription. User file only, for the
+	// same reason as provider_url.
+	Provider string
 }
 
 // LoadFileConfig finds and reads the repository's config file, starting at dir
@@ -260,6 +264,7 @@ func parseFileConfig(path, content string, user bool) (FileConfig, error) {
 			"harness_config": &cfg.HarnessConfig,
 			"default_mode":   &cfg.DefaultMode,
 			"provider_url":   &cfg.ProviderURL,
+			"provider":       &cfg.Provider,
 		}[key]
 		if target == nil {
 			// A key belonging to somebody else. Its value is not this reader's
@@ -464,6 +469,11 @@ func checkScope(key string, user bool) error {
 			return fmt.Errorf("provider_url belongs in the user config, not the repository's: a repository must not " +
 				"choose where its visitors' code and prompts are sent (ADR-0027)")
 		}
+	case "provider":
+		if !user {
+			return fmt.Errorf("provider belongs in the user config, not the repository's: a repository must not " +
+				"choose whose account its visitors' prompts are billed to (ADR-0035)")
+		}
 	case "harness", "harness_config", "verify":
 		if user {
 			return fmt.Errorf("%s is a per-repository key and is not read from the user config (ADR-0024)", key)
@@ -500,7 +510,7 @@ func parseStringList(v string) ([]string, error) {
 }
 
 // knownKeys are the keys this reader owns.
-var knownKeys = []string{"model", "harness", "harness_config", "verify", "default_mode", "auto_never_allow", "skills_paths", "provider_url"}
+var knownKeys = []string{"model", "harness", "harness_config", "verify", "default_mode", "auto_never_allow", "skills_paths", "provider_url", "provider"}
 
 // nearestKey names the key a misspelling was probably meant to be, or "" when
 // key is one we own or is nothing like one. A config file is shared and other

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/leejianrong/kopicode/internal/build"
+	"github.com/leejianrong/kopicode/internal/codexauth"
 	"github.com/leejianrong/kopicode/internal/harness"
 	"github.com/leejianrong/kopicode/internal/journal"
 	"github.com/leejianrong/kopicode/internal/lock"
@@ -446,6 +447,12 @@ const APIKeyEnv = "OPENROUTER_API_KEY"
 // CustomAPIKeyEnv is the credential for a custom provider URL (ADR-0027). The
 // OpenRouter key is never sent to any other host.
 const CustomAPIKeyEnv = provider.CustomKeyEnv
+
+// ErrNoCodexLogin is returned when the Codex provider (ADR-0035) is selected and
+// Codex CLI's login cannot be used: absent, not private to the user, not a ChatGPT
+// sign-in, malformed or expired. The wrapped error says which and what to do; none
+// carries any part of the file.
+var ErrNoCodexLogin = errors.New("engine: the Codex login cannot be used")
 
 // ErrNoCustomAPIKey is returned when a custom provider URL names a host that is
 // not loopback and KOPICODE_PROVIDER_API_KEY is not set.
@@ -1102,6 +1109,10 @@ func requireProviderCredential(opts Options) error {
 	if opts.Provider != nil {
 		return nil
 	}
+	if opts.Selection.Provider == harness.ProviderCodex {
+		_, err := loadCodexCredentials(opts)
+		return err
+	}
 	if u := opts.Selection.ProviderURL; u != "" {
 		if os.Getenv(CustomAPIKeyEnv) == "" && !harness.ProviderURLIsLoopback(u) {
 			return ErrNoCustomAPIKey
@@ -1112,6 +1123,27 @@ func requireProviderCredential(opts Options) error {
 		return ErrNoAPIKey
 	}
 	return nil
+}
+
+// loadCodexCredentials reads Codex CLI's login (ADR-0035). The directory is
+// CODEX_HOME or ~/.codex, which is Codex's own convention and not a kopicode
+// setting, so ADR-0007 decision 3's ban on ambient configuration does not reach it.
+// The clock is the session's, so an expired token is judged by the same time the
+// journal is stamped with.
+func loadCodexCredentials(opts Options) (codexauth.Credentials, error) {
+	dir, err := codexauth.Dir(os.Getenv)
+	if err != nil {
+		return codexauth.Credentials{}, fmt.Errorf("%w: %w", ErrNoCodexLogin, err)
+	}
+	now := time.Now
+	if opts.Now != nil {
+		now = opts.Now
+	}
+	creds, err := codexauth.Load(filepath.Join(dir, codexauth.FileName), now())
+	if err != nil {
+		return codexauth.Credentials{}, fmt.Errorf("%w: %w", ErrNoCodexLogin, err)
+	}
+	return creds, nil
 }
 
 // openProvider returns the provider the session will call.
@@ -1130,6 +1162,9 @@ func openProvider(opts Options, jrn journal.Journal) (Provider, error) {
 		return opts.Provider, nil
 	}
 
+	if opts.Selection.Provider == harness.ProviderCodex {
+		return openCodexProvider(opts)
+	}
 	if u := opts.Selection.ProviderURL; u != "" {
 		return openCustomProvider(opts, u, jrn)
 	}
@@ -1163,6 +1198,26 @@ func openProvider(opts Options, jrn journal.Journal) (Provider, error) {
 	c, err := provider.NewClient(provider.NewAPIKey(key), clientOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("engine: building the provider client: %w", err)
+	}
+	return c, nil
+}
+
+// openCodexProvider builds the client for the Codex provider (ADR-0035). No pin
+// and no OpenRouter key: the only credential is Codex CLI's login, sent only to the
+// Codex backend. ProviderBaseURL redirects it for tests, as it does for the others.
+func openCodexProvider(opts Options) (Provider, error) {
+	creds, err := loadCodexCredentials(opts)
+	if err != nil {
+		return nil, err
+	}
+	var clientOpts []provider.CodexOption
+	if opts.ProviderBaseURL != "" {
+		clientOpts = append(clientOpts, provider.WithCodexBaseURL(opts.ProviderBaseURL))
+	}
+	slog.Debug("connecting to the Codex provider", "host", harness.CodexHost, "model", opts.Selection.ModelID)
+	c, err := provider.NewCodexClient(creds, clientOpts...)
+	if err != nil {
+		return nil, fmt.Errorf("engine: building the Codex client: %w", err)
 	}
 	return c, nil
 }
