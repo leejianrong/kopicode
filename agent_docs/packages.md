@@ -107,7 +107,12 @@ not this list:
   `internal/engine` where it's consumed. Replay drives the fixture's recorded SSE
   frames through the same reader the live client uses — no goroutines, no map
   iteration anywhere in the output path, which is what a byte-identical replayed
-  journal rests on.
+  journal rests on. `CodexClient` (ADR-0035, slice 1 of KOP-194) is the second
+  implementation, for a ChatGPT/Codex subscription: the Responses API through
+  `NewResponsesStream`, which reuses `Stream` and keeps the backend's bytes as the
+  transcript. Text turns only so far (tool history is KOP-197, failure shapes KOP-199,
+  engine wiring KOP-198); nothing constructs it yet. Recordings are under
+  `testdata/codex/`.
 - **`internal/harness`** — ADR-0007 made mechanical: the model-id → (harness config,
   provider pin) registry, the config's hash, and `.kopicode/config.toml`'s precedence
   (`--model`/`--harness` > repo config > built-in default — **no environment variable
