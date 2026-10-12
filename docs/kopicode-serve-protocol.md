@@ -160,6 +160,16 @@ with `session.close` or the process shuts down.
 Opens a session on a working tree, keyed by the caller-supplied `session` id, and runs
 its first turn.
 
+The id, the arm and the consent mode are checked before the next line is read, so those
+errors (`-32001`, `-32003`) arrive at once. Opening the session itself (the repository checks,
+the tree lock, the journal) happens off the read loop: other sessions open in parallel, and
+`session.cancel`, `server.sessions` and the rest are answered meanwhile. The session is listed
+by `server.sessions` as `running` from the moment it is accepted. A request for the same
+`session` sent right after (a `session.submit`, `session.handoff`, `session.close`) queues
+behind the open, in order. If the open fails (`-32002`, `-32005`), the `session.start` and
+every request already queued on that id each get that error as their response, and the id is
+free again.
+
 | param | type | required | meaning |
 |---|---|---|---|
 | `session` | string | yes | the id to key the session by; the client's own, so it can cancel a turn whose start has not yet returned |

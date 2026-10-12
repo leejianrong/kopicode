@@ -122,10 +122,13 @@ type StartParams struct {
 // Turn is a queued turn's callbacks. Begin, when set, is called from the
 // session's worker immediately before the turn runs — a skin that routes events
 // to whichever call is in flight uses it to learn which one that is. Done is
-// called once, from the worker, when the turn settles.
+// called once, from the worker, when the turn settles. Fail is called instead of
+// Done, from the worker, when the session never opened (see [Manager.StartAsync])
+// and so the turn will not run. A nil Fail is ignored.
 type Turn struct {
 	Begin func()
 	Done  func(TurnResult)
+	Fail  func(*Error)
 }
 
 // HandoffResult is a drafted handoff (ADR-0026): the document, and the file it
@@ -183,10 +186,6 @@ type Manager struct {
 	// session finished. A restarted id leaves it.
 	ended []Info
 
-	// startMu makes Start's duplicate-id check and its registration one atomic
-	// step, so two concurrent starts for one id cannot both open a session.
-	startMu sync.Mutex
-
 	// now is the clock Sessions' last-event times are read from; a test sets it.
 	now func() time.Time
 }
@@ -225,6 +224,12 @@ type managed struct {
 	pending  string
 	lastStop string
 
+	// open is set while the session is registered but its engine session is not
+	// yet open (StartAsync): the worker runs it before anything else, so every
+	// request that arrives meanwhile queues behind it and keeps its order. It is
+	// nil once sess is set. Guarded by mu.
+	open func() (*engine.Session, error)
+
 	cond    *sync.Cond
 	queue   []job
 	cancel  context.CancelFunc // the running turn's cancel, or nil between turns
@@ -248,24 +253,77 @@ type job struct {
 	handoffDone func(HandoffResult, *Error)
 }
 
-// Start opens a session and queues its first turn. engine.Open runs inline — it
-// is a fast, local step — so the working-tree lock and its collision are decided
-// before any worker exists; only after Open succeeds is the session registered,
-// so a failed Open leaves nothing behind and its id stays free to retry.
+// Start opens a session and queues its first turn. engine.Open runs inline, on
+// the caller, so the working-tree lock and its collision are decided before Start
+// returns, and a failed Open leaves nothing behind: its id stays free to retry.
 //
 // events is the session's observer (nil announces nothing). turn's callbacks run
 // from the session's worker. A non-nil *Error means nothing was opened and
-// neither callback will be called.
+// neither callback will be called. A front end that must keep answering other
+// requests while sessions open uses [Manager.StartAsync].
 func (m *Manager) Start(p StartParams, events engine.Observer, turn Turn) *Error {
-	m.startMu.Lock()
-	defer m.startMu.Unlock()
-
-	m.mu.Lock()
-	_, exists := m.sessions[p.ID]
-	m.mu.Unlock()
-	if exists {
-		return errf(KindSessionExists, "session %q is already open in this process", p.ID)
+	ms, open, rerr := m.prepareStart(p, events)
+	if rerr != nil {
+		return rerr
 	}
+	sess, err := open()
+	if err != nil {
+		m.unreserve(ms)
+		return openError(err)
+	}
+	m.mu.Lock()
+	ms.sess, ms.dir, ms.busy = sess, sess.Dir(), false
+	ms.queue = []job{{prompt: p.Prompt, isStart: true, turn: turn}}
+	m.ended = slices.DeleteFunc(m.ended, func(i Info) bool { return i.ID == p.ID })
+	m.mu.Unlock()
+
+	m.wg.Add(1)
+	go m.worker(ms)
+	return nil
+}
+
+// StartAsync is [Manager.Start] without the wait. Everything cheap and decidable
+// from the request is still checked before it returns (a duplicate id, an
+// unusable selection, a refused consent mode), and a non-nil *Error means nothing
+// was registered. engine.Open itself, which is what costs tens of milliseconds (it
+// shells out to git and takes the tree lock), runs on the session's own worker, so
+// the caller's read loop is not held up and different sessions open concurrently.
+//
+// The session is registered, and reported by [Manager.Sessions] as running, before
+// it is open. A Submit, Handoff or Close for the id that arrives meanwhile queues
+// behind the open in order, which is the one ordering rule that matters: a submit
+// sent straight after a start finds its session. If Open fails (the working tree
+// is locked, say) the session is removed, its id is free again, and the Fail of
+// the start turn and of every turn queued behind it is called with the error.
+func (m *Manager) StartAsync(p StartParams, events engine.Observer, turn Turn) *Error {
+	ms, open, rerr := m.prepareStart(p, events)
+	if rerr != nil {
+		return rerr
+	}
+	m.mu.Lock()
+	ms.open, ms.dir = open, p.Dir
+	ms.queue = []job{{prompt: p.Prompt, isStart: true, turn: turn}}
+	m.mu.Unlock()
+
+	m.wg.Add(1)
+	go m.worker(ms)
+	return nil
+}
+
+// prepareStart is the part of starting that is the same either way: reserve the
+// id, resolve the selection and the consent options, and return the managed
+// session with the func that opens its engine session. The reservation is what
+// the old start lock protected: two starts for one id cannot both get past it.
+func (m *Manager) prepareStart(p StartParams, events engine.Observer) (*managed, func() (*engine.Session, error), *Error) {
+	ms := &managed{id: p.ID, busy: true} // a reserved session is not idle: it has a start to run
+	ms.cond = sync.NewCond(&m.mu)
+	m.mu.Lock()
+	if _, exists := m.sessions[p.ID]; exists {
+		m.mu.Unlock()
+		return nil, nil, errf(KindSessionExists, "session %q is already open in this process", p.ID)
+	}
+	m.sessions[p.ID] = ms
+	m.mu.Unlock()
 
 	selection, err := engine.ResolveSelection(p.Dir, engine.SelectionOverrides{
 		Model:         p.Model,
@@ -276,18 +334,18 @@ func (m *Manager) Start(p StartParams, events engine.Observer, turn Turn) *Error
 		TokenBudget:   p.TokenBudget,
 	})
 	if err != nil {
+		m.unreserve(ms)
 		kind := KindOpenFailed
 		if engine.IsSelectionUsageError(err) {
 			kind = KindUsage
 		}
-		return &Error{Kind: kind, Message: err.Error()}
+		return nil, nil, &Error{Kind: kind, Message: err.Error()}
 	}
 
 	opts := m.base
 	opts.Dir = p.Dir
 	opts.SessionID = p.ID
 	opts.Selection = selection
-	ms := &managed{id: p.ID}
 	opts.Events = func(ev engine.Event) {
 		if ev.Kind != engine.EventDelta {
 			ms.lastEvent.Store(m.now().UnixNano())
@@ -298,29 +356,67 @@ func (m *Manager) Start(p StartParams, events engine.Observer, turn Turn) *Error
 	}
 	opts.Handoff, opts.ParentSession = p.Handoff, p.ParentSession
 	if rerr := m.buildConsentOptions(p, &opts); rerr != nil {
-		return rerr
+		m.unreserve(ms)
+		return nil, nil, rerr
 	}
+	return ms, func() (*engine.Session, error) { return engine.Open(m.ctx, opts) }, nil
+}
 
-	sess, err := engine.Open(m.ctx, opts)
-	if err != nil {
-		kind := KindOpenFailed
-		if errors.Is(err, engine.ErrSessionLocked) {
-			kind = KindSessionLocked
-		}
-		return &Error{Kind: kind, Message: err.Error()}
-	}
-
-	ms.sess, ms.dir = sess, sess.Dir()
-	ms.cond = sync.NewCond(&m.mu)
-	ms.queue = []job{{prompt: p.Prompt, isStart: true, turn: turn}}
+// unreserve drops a session that never opened, freeing its id.
+func (m *Manager) unreserve(ms *managed) {
 	m.mu.Lock()
-	m.sessions[p.ID] = ms
-	m.ended = slices.DeleteFunc(m.ended, func(i Info) bool { return i.ID == p.ID })
+	if m.sessions[ms.id] == ms {
+		delete(m.sessions, ms.id)
+	}
+	m.mu.Unlock()
+}
+
+func openError(err error) *Error {
+	kind := KindOpenFailed
+	if errors.Is(err, engine.ErrSessionLocked) {
+		kind = KindSessionLocked
+	}
+	return &Error{Kind: kind, Message: err.Error()}
+}
+
+// openFirst runs a StartAsync session's deferred engine.Open on its worker. It
+// reports whether the session is now open. On failure the session leaves the map
+// (so its id is reusable and a later request is told it is unknown), and every job
+// queued behind the open is answered with the error rather than dropped.
+func (m *Manager) openFirst(ms *managed) bool {
+	m.mu.Lock()
+	open := ms.open
 	m.mu.Unlock()
 
-	m.wg.Add(1)
-	go m.worker(ms)
-	return nil
+	sess, err := open()
+
+	m.mu.Lock()
+	if err == nil {
+		ms.sess, ms.dir, ms.open, ms.busy = sess, sess.Dir(), nil, false
+		m.ended = slices.DeleteFunc(m.ended, func(i Info) bool { return i.ID == ms.id })
+		m.mu.Unlock()
+		return true
+	}
+	if m.sessions[ms.id] == ms {
+		delete(m.sessions, ms.id)
+	}
+	ms.closed, ms.open, ms.busy = true, nil, false
+	jobs := ms.queue
+	ms.queue = nil
+	m.mu.Unlock()
+
+	oe := openError(err)
+	for _, j := range jobs {
+		switch {
+		case j.isClose:
+			j.closeDone(errf(KindUnknownSession, "session %q failed to open: %s", ms.id, oe.Message))
+		case j.isHandoff:
+			j.handoffDone(HandoffResult{}, oe)
+		case j.turn.Fail != nil:
+			j.turn.Fail(oe)
+		}
+	}
+	return false
 }
 
 // Submit queues the next turn on an open session. It never runs the turn itself
@@ -387,11 +483,18 @@ func (m *Manager) Cancel(id string) *Error {
 func (m *Manager) Usage(id string) (engine.Usage, *Error) {
 	m.mu.Lock()
 	ms := m.sessions[id]
+	var sess *engine.Session
+	if ms != nil {
+		sess = ms.sess
+	}
 	m.mu.Unlock()
 	if ms == nil {
 		return engine.Usage{}, errf(KindUnknownSession, "no open session %q", id)
 	}
-	return ms.sess.Usage(), nil
+	if sess == nil { // StartAsync has not finished opening it: nothing spent yet
+		return engine.Usage{}, nil
+	}
+	return sess.Usage(), nil
 }
 
 // Close queues the end of a session behind the turns it has already accepted, so
@@ -436,6 +539,12 @@ func (m *Manager) finishClose(ms *managed, j job) {
 // running now.
 func (m *Manager) worker(ms *managed) {
 	defer m.wg.Done()
+	m.mu.Lock()
+	opening := ms.open != nil
+	m.mu.Unlock()
+	if opening && !m.openFirst(ms) {
+		return
+	}
 	for {
 		m.mu.Lock()
 		for len(ms.queue) == 0 && !ms.closed {
