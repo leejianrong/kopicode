@@ -52,6 +52,10 @@ type Overrides struct {
 	// means not given; a pointer to zero turns it off. Like the limits it changes
 	// the configuration and so the hash.
 	StallThreshold *int
+	// OutputCap overrides the tool-output cap in bytes (KOP-179, ADR-0033). Nil
+	// means not given; a pointer to zero shows the model every byte. Like the
+	// limits it changes the configuration and so the hash.
+	OutputCap *int
 	// UserConfig reads the user-level config.toml (ADR-0024) as the rung between
 	// the repository's file and the built-in default. Only the human-facing front
 	// ends set it: serve, mcp and kopibench resolve from flags, the repository
@@ -77,6 +81,11 @@ const InteractiveMaxTurns = 100
 // model checking its work, two is a model being careful.
 const DefaultStallThreshold = 3
 
+// DefaultOutputCap is how much of one run_shell or grep result a REPL session
+// shows the model (KOP-179, ADR-0033): about 8k tokens. A failing test log that
+// size is whole; it takes a build or a grep over a tree to pass it.
+const DefaultOutputCap = 32 * 1024
+
 // BindLimits registers --max-turns and --token-budget on fs, filling o.
 // Only the human-facing front ends call it; kopibench's arms are fixed.
 func BindLimits(fs *flag.FlagSet, o *Overrides) {
@@ -94,6 +103,14 @@ func BindLimits(fs *flag.FlagSet, o *Overrides) {
 			return fmt.Errorf("want a count of tokens, 0 or more")
 		}
 		o.TokenBudget = &n
+		return nil
+	})
+	fs.Func("output-cap", "bytes of a run_shell or grep result the model is shown before the middle is left out; the journal keeps it all (default 32768 in the REPL, 0 = show everything, the default elsewhere)", func(v string) error {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return fmt.Errorf("want a count of bytes, 0 (off) or more")
+		}
+		o.OutputCap = &n
 		return nil
 	})
 	fs.Func("stall-threshold", "tell the model it is stuck after this many identical calls with the same result, or failed edits to one file, in a row (default 3 in the REPL, 0 = off elsewhere)", func(v string) error {
@@ -356,6 +373,12 @@ func Resolve(dir string, o Overrides) (Selection, error) {
 	case o.Interactive && declaredPath == "":
 		cfg.StallThreshold = DefaultStallThreshold
 	}
+	switch {
+	case o.OutputCap != nil:
+		cfg.OutputCap = *o.OutputCap
+	case o.Interactive && declaredPath == "":
+		cfg.OutputCap = DefaultOutputCap
+	}
 
 	return Selection{
 		ModelID:           entry.ModelID,
@@ -423,6 +446,12 @@ func resolveCustom(dir string, o Overrides, file, user FileConfig, rawURL, model
 		cfg.StallThreshold = *o.StallThreshold
 	case o.Interactive && declaredPath == "":
 		cfg.StallThreshold = DefaultStallThreshold
+	}
+	switch {
+	case o.OutputCap != nil:
+		cfg.OutputCap = *o.OutputCap
+	case o.Interactive && declaredPath == "":
+		cfg.OutputCap = DefaultOutputCap
 	}
 	return Selection{
 		ModelID:           modelID,

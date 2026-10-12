@@ -97,6 +97,10 @@ func (c Config) hashWith(anchorVersion string) string {
 	if c.StallThreshold != 0 {
 		p.num("stall_threshold", c.StallThreshold)
 	}
+	// Likewise for the tool-output cap (KOP-179).
+	if c.OutputCap != 0 {
+		p.num("output_cap", c.OutputCap)
+	}
 
 	p.bool("verification_forced", c.Verification.Forced)
 	p.str("verification_source", string(c.Verification.Source))

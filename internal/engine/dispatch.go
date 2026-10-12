@@ -296,6 +296,13 @@ func (e *Engine) dispatch(ctx context.Context, turn int, ext parse.Extraction) (
 			}
 		}
 
+		// KOP-179, ADR-0033: past the cap, run_shell and grep show the model the
+		// start and the end of their output. After the stall note, which reads the
+		// whole output and is appended whole; the journal already holds it all.
+		if !denied {
+			wire = capOutput(call.Name, wire, e.cfg.Selection.Config.OutputCap)
+		}
+
 		if err := e.asm.AppendToolResult(call.ID, wire); err != nil {
 			return mutated, fmt.Errorf("engine: placing the result of %s (call %q): %w", call.Name, id, err)
 		}
