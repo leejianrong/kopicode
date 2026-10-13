@@ -80,6 +80,22 @@ func DiscoverSkills(dir string, extra []string) ([]Skill, []string) {
 	return found, out
 }
 
+// RepoSkills is the skills a non-interactive session (run --print, serve, mcp)
+// is told about at its start: only those inside the session's root, which is all
+// the catalogue lists anyway. It reads no user config, so one person's
+// skills_paths cannot change what an orchestrator's session is shown
+// (ADR-0024 decision 4).
+func RepoSkills(dir string) []Skill {
+	found, _ := DiscoverSkills(dir, nil)
+	var out []Skill
+	for _, s := range found {
+		if s.InRepo {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // FindSkill returns the skill called name.
 func FindSkill(all []Skill, name string) (Skill, bool) { return skills.Find(all, name) }
 

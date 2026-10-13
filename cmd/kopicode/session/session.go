@@ -349,6 +349,9 @@ func (m *Manager) prepareStart(p StartParams, events engine.Observer) (*managed,
 	opts.Dir = p.Dir
 	opts.SessionID = p.ID
 	opts.Selection = selection
+	// Told once to a new session, as the REPL's are (ADR-0025, KOP-159); the
+	// engine ignores it for a resumed or forked one.
+	opts.Skills = engine.RepoSkills(p.Dir)
 	opts.Events = func(ev engine.Event) {
 		if ev.Kind != engine.EventDelta {
 			ms.lastEvent.Store(m.now().UnixNano())

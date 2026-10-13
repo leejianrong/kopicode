@@ -41,6 +41,7 @@ var features = []string{
 	"session.limits",
 	"session.read_only",
 	"session.usage",
+	"skills.catalogue",
 	"usage.context",
 	"usage.context_window",
 	"usage.cost",

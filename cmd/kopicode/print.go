@@ -233,7 +233,9 @@ func runPrint(args []string, stdout, stderr io.Writer) int {
 		return exitHarness
 	}
 
-	opts := engine.Options{Dir: dir, Selection: selection}
+	// A new session is told which skills the repository ships, as the REPL's is
+	// (ADR-0025, KOP-159). The engine ignores it when resuming.
+	opts := engine.Options{Dir: dir, Selection: selection, Skills: engine.RepoSkills(dir)}
 	if *resume != "" {
 		opts.SessionID = *resume
 		opts.Resume = true
