@@ -195,6 +195,9 @@ say so, and are being replaced as tasks are recorded.
   methods, event schema, error codes, consent modes, and the policy and ask flags.
 - [`docs/PRD.md`](docs/PRD.md) (requirements, scope boundary) and
   [`docs/SLICE-1.md`](docs/SLICE-1.md) (the first slice's build plan).
+- [`docs/adr/0035-codex-subscription-provider.md`](docs/adr/0035-codex-subscription-provider.md) — the
+  second provider family (`--provider codex`, a ChatGPT/Codex subscription), what was verified live and
+  what is development-use only.
 - [`docs/provider-pin.md`](docs/provider-pin.md) — which provider and quantization every
   benchmark request pins, and why. [`docs/token-growth.md`](docs/token-growth.md) — real
   per-turn context growth, and what it does and doesn't say about compaction.
