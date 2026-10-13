@@ -105,12 +105,15 @@ type Delta struct {
 // mid-reply stops the stream at the next increment rather than after it has
 // finished — which is what Ctrl-C during a long reply has to do.
 type Stream struct {
-	ctx     context.Context
-	scan    *bufio.Scanner
-	closer  io.Closer
-	raw     json.RawMessage
-	wire    bytes.Buffer
-	acc     accumulator
+	ctx    context.Context
+	scan   *bufio.Scanner
+	closer io.Closer
+	raw    json.RawMessage
+	wire   bytes.Buffer
+	acc    accumulator
+	// rsp is set instead of acc for a Responses-API stream
+	// ([NewResponsesStream]); every other field is shared.
+	rsp     *responsesDecoder
 	pending []Delta
 	current Delta
 	sawDone bool
@@ -249,6 +252,11 @@ func (s *Stream) Next() bool {
 
 // frame folds one SSE line, returning any deltas it carried.
 func (s *Stream) frame(line string) ([]Delta, error) {
+	if s.rsp != nil {
+		deltas, sawData, err := s.rsp.line(line)
+		s.sawData = s.sawData || sawData
+		return deltas, err
+	}
 	switch {
 	case line == "":
 		// The blank separator between events.
@@ -288,6 +296,15 @@ func (s *Stream) frame(line string) ([]Delta, error) {
 // cut off.
 func (s *Stream) finish() {
 	s.done = true
+	if s.rsp != nil {
+		switch {
+		case !s.sawData:
+			s.err = fmt.Errorf("%w: it carried no events at all", ErrStreamIncomplete)
+		case !s.rsp.completed:
+			s.err = fmt.Errorf("%w: no response.completed event arrived", ErrStreamIncomplete)
+		}
+		return
+	}
 	switch {
 	case !s.sawData:
 		s.err = fmt.Errorf("%w: it carried no chunks at all", ErrStreamIncomplete)
@@ -321,6 +338,9 @@ func (s *Stream) Reply() (Reply, error) {
 	}
 	if !s.done {
 		return Reply{}, ErrStreamNotFinished
+	}
+	if s.rsp != nil {
+		return s.rsp.reply(), nil
 	}
 	return s.acc.reply(s.raw), nil
 }

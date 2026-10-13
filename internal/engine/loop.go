@@ -98,6 +98,7 @@ func (e *Engine) Run(ctx context.Context, prompt string) (Result, error) {
 
 		used++
 		e.turn++
+		e.turnSeen.Store(int64(e.turn))
 		at = e.turn
 		stop, err := e.runTurn(ctx, e.turn)
 		if stop != StopUnspecified {

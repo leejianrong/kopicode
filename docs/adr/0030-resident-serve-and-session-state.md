@@ -1,6 +1,6 @@
 # ADR-0030: `serve` outlives its client and says what each session is doing
 
-*Proposed.* Builds on [ADR-0013](0013-agent-controlled-resident-session-surface.md) (the resident surface), [ADR-0016](0016-live-remote-consent-for-agent-orchestrated-sessions.md) and [ADR-0021](0021-usage-reporting.md). Written after reading how cuttlefish-crew drives `serve` today.
+*Accepted.* Builds on [ADR-0013](0013-agent-controlled-resident-session-surface.md) (the resident surface), [ADR-0016](0016-live-remote-consent-for-agent-orchestrated-sessions.md) and [ADR-0021](0021-usage-reporting.md). Written after reading how cuttlefish-crew drives `serve` today.
 
 ## Context
 
@@ -28,5 +28,23 @@ Today a `serve` child ends its sessions when its client's stdin closes. A cuttle
 
 - cuttlefish can reconnect after a restart and carry on mid-round instead of re-running it. Whether it does is its own decision; stdio keeps working.
 - Orphan processes become possible, which is what the idle timeout and `server.shutdown` are for.
-- The scale cost of several sessions in one process is unmeasured. A load test with many concurrent mock-provider sessions is the first card of the epic.
+- The scale cost of several sessions in one process is measured in [`docs/serve-load.md`](../serve-load.md) (KOP-182): about 35 KiB and 4 goroutines per idle session, turns overlap fully, `server.sessions` stays under 2 ms with 200 sessions mid-turn. It changes nothing here. It found one cost, that `session.start` opens a session serially on the read loop (KOP-188).
 - The needs-attention states are what a fleet view cares about most at 100 projects.
+
+## Status of the build
+
+- **Decisions 3 and 4 are built** (KOP-185 `server.sessions`, KOP-186 `session.events`): the session table
+  with its five states, and a blob-aware replay with `after_seq`, `limit` and `more`. Notifications already
+  carried `seq`.
+- Two choices the text left open. An ended session stays in the table (the newest 256) and its events stay
+  readable, so a client that reconnects can see how it finished; and `session.events` pages by `limit` rather
+  than returning everything, because a replayed event holds its whole text.
+- **Decisions 1 and 2 are built** (KOP-184): `serve --listen`, one client at a time, pending requests re-sent.
+  Details the text left open: a response goes to the connection its request came from and is dropped if that
+  client was replaced (ids belong to their client); the path is claimed with a lock file rather than by
+  connecting to it, because a probe connection would itself replace the live client; and `SIGINT` or
+  `SIGTERM` closes the sessions and removes the socket. Unix only.
+- **Decision 5 is built** (KOP-187). Idle means no client connected *and* no open session; either keeps the
+  process alive, and an ended session does not count. `server.shutdown` answers after the sessions are closed,
+  then the process exits, over stdio as well as on a socket. `--idle-timeout` applies to `--listen` only.
+- The `mcp` front end shares the session manager but has no tool for either; the ADR names `serve` only.

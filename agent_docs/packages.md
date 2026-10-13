@@ -13,8 +13,8 @@ section, which drifts faster than the code does. `ls internal/`, `git log --onel
 
 **Slice 1 is complete** (verified 2026-08-17; all 18 build-plan steps landed,
 including the real-repo demo and the full corpus run — see
-[`docs/SLICE-1.md`](../docs/SLICE-1.md)). One engine, two front ends, one model
-registered and measured end to end.
+[`docs/SLICE-1.md`](../docs/SLICE-1.md)). The engine has since gained `serve` and
+`mcp` front ends and four registered models; the README has the current state.
 
 Module + toolchain: Go 1.26.9, two dependencies (`golang.org/x/term` for the line
 editor, `github.com/google/go-cmp` in tests only), no CGo. `make xbuild` cross-compiles
@@ -58,13 +58,28 @@ not this list:
   `unattributed` in the bench classifier. `run_shell` is the one tool with no
   containment claim — its working directory is resolved like any other path, but a
   shell goes where it likes, which is why the permission gate exists.
-- **`internal/handoff`** (ADR-0026, proposed) — the document a session leaves for its successor. A
+- **`internal/handoff`** (ADR-0026) — the document a session leaves for its successor. A
   leaf over `internal/journal` that calls no model and touches no disk. The model writes the
   narrative sections; the facts (files written and deleted, last verification, refused calls, usage)
   are derived from journal events, so a model that forgets a file does not lose it. The prompt, the
   parser and the renderer all walk one section list so they cannot drift. A passing verification is
-  always rendered as dated, with an instruction to run it again. Step 1 of 3: the engine call, the
-  REPL command and the wire method are not built yet.
+  always rendered as dated, with an instruction to run it again. The engine call, the REPL `/handoff`
+  command and the `session.handoff` wire method have landed; the bench measurement (KAN-1968) is the
+  remaining step.
+- **`internal/codexauth`** (ADR-0035) — reads the ChatGPT login Codex CLI already made
+  (`auth.json` under `CODEX_HOME`), read-only. Refuses a file that is not private to the user, a
+  non-ChatGPT login and an expired token, each by path and never by quoting the file. The access
+  token and account id are `Secret`s that render as `[redacted]` through fmt, JSON and slog; only
+  `Reveal()` returns them, for an Authorization header. The refresh and id tokens are not kept. No
+  refresh, no write, no network. `CodexClient` and `--provider codex` use it through
+  `engine`'s `loadCodexCredentials`.
+- **`internal/skills`** (ADR-0014, ADR-0025) — finds `SKILL.md` directories on disk and reads their
+  `name` and `description`. It never executes or writes anything; the REPL's `/skills` and
+  `/<name>` and the system prompt's catalogue are built on it.
+- **The stall detector** (`internal/engine/stall.go`, ADR-0028) — notes a repeated call with an
+  identical result, or edits to one file that keep failing, once `StallThreshold` is reached. Off (0)
+  for every registered arm, so it changes no benchmark number. It only adds text after the call's
+  result; the journal is untouched.
 - **`internal/syntax`** — the post-edit gate: a language-native check (`gofmt -e`,
   `node --check`, `py_compile`, …) run immediately after an edit. `NotRun` is the zero
   value of `Outcome` — a gate that didn't run must never read as one that passed — and
@@ -101,7 +116,13 @@ not this list:
   `internal/engine` where it's consumed. Replay drives the fixture's recorded SSE
   frames through the same reader the live client uses — no goroutines, no map
   iteration anywhere in the output path, which is what a byte-identical replayed
-  journal rests on.
+  journal rests on. `CodexClient` (ADR-0035, slice 1 of KOP-194) is the second
+  implementation, for a ChatGPT/Codex subscription: the Responses API through
+  `NewResponsesStream`, which reuses `Stream` and keeps the backend's bytes as the
+  transcript. Text, tool calls and results, full-history replay and reasoning summaries work (KOP-194, KOP-197),
+  and `--provider codex` (or `provider = "codex"` in the user config) selects it through `engine.Open`
+  (KOP-198); a 401, 403 or 429 comes back as a `CodexError` that says what to do, wrapping the `APIError` with the whole body (KOP-199; the bodies behind it are inferred, no real quota or expiry response has been recorded yet, so re-check the mapping when one is). Recordings are under
+  `testdata/codex/`.
 - **`internal/harness`** — ADR-0007 made mechanical: the model-id → (harness config,
   provider pin) registry, the config's hash, and `.kopicode/config.toml`'s precedence
   (`--model`/`--harness` > repo config > built-in default — **no environment variable
@@ -133,7 +154,7 @@ not this list:
   never a package constant, so two runs differing in a bound compare as different arms.
   Context assembly is naive full history, a decision made deliberately rather than a
   gap. In-place compaction was rejected (ADR-0012); the chosen direction is ending a
-  session and starting a fresh one from a handoff document (ADR-0026, proposed).
+  session and starting a fresh one from a handoff document (ADR-0026).
   `TurnCancelled` records what was *in flight* when a turn was cancelled
   (`provider_stream` / `tool_call` / `verification` / `between_steps`), so a cancelled
   session is distinguishable from a genuinely stuck one.
@@ -217,7 +238,7 @@ internal/
   build/             the binary's identity: version, commit, dirty bit
   engine/            the turn loop, context assembly, dispatch, Open, the event stream
   harness/           the registry, the harness config and its hash, the system prompt
-  provider/          the wire format, SSE streaming, and the OpenRouter client
+  provider/          the wire format, SSE streaming, and the OpenRouter and Codex clients
   provider/fixture/  recorded (today: hand-authored) provider traffic + its loader
   provider/mock/     the replay provider — the primary test seam
   parse/             tool-call extraction and repair
@@ -227,6 +248,8 @@ internal/
   verify/            forced verification: discovery and the run
   procgroup/         start a subprocess in its own group, end the whole group
   handoff/           the handoff document: narrative sections plus journal-derived facts
+  codexauth/         read-only reader for Codex CLI's auth.json (ADR-0035)
+  skills/            SKILL.md discovery (ADR-0025)
   journal/           Journal interface, FileJournal, blob spill, redaction, event types
   repo/              git shadow refs — write, restore, resume and fork
   lock/              the advisory lock at .kopicode/lock — one session per working tree

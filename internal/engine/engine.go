@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/leejianrong/kopicode/internal/harness"
 	"github.com/leejianrong/kopicode/internal/journal"
@@ -230,6 +231,11 @@ type Engine struct {
 	// was given, and that has to be true rather than decorative.
 	offered map[string]bool
 
+	// instructions is the AGENTS.md files this session's bootstrap found, in
+	// load order (ADR-0032). Empty for a resumed or forked session, which does
+	// not rediscover them; their events are in the journal.
+	instructions []InstructionFile
+
 	started bool
 	ended   bool
 
@@ -242,6 +248,10 @@ type Engine struct {
 	// so a resumed or forked session's first genuinely new turn continues the
 	// numbering already on the record rather than colliding with it.
 	turn int
+	// turnSeen mirrors turn for readers on other goroutines (a resident serve
+	// listing its sessions while one runs): the loop owns turn and stores here
+	// every time it moves it, so [Engine.Turns] never reads the plain field.
+	turnSeen atomic.Int64
 
 	// spent is the token usage the provider has reported so far, summed. It is
 	// the only token number the budget is allowed to be decided from.
@@ -429,13 +439,15 @@ func New(cfg Config) (*Engine, error) {
 		}
 	}
 
-	return &Engine{
+	e := &Engine{
 		cfg:        cfg,
 		asm:        asm,
 		offered:    offered,
 		parseOrder: parseOrder,
 		turn:       startTurn,
-	}, nil
+	}
+	e.turnSeen.Store(int64(startTurn))
+	return e, nil
 }
 
 // decodeParseRoutes turns a harness configuration's ParseRoutes — kept as
@@ -485,7 +497,10 @@ func (e *Engine) Selection() Selection { return e.cfg.Selection }
 func (e *Engine) Session() journal.Session { return e.cfg.Journal.Session() }
 
 // Turns reports how many turns the session has used across every exchange.
-func (e *Engine) Turns() int { return e.turn }
+//
+// It is safe to call while a turn is running; the count it returns is the one
+// the loop had reached.
+func (e *Engine) Turns() int { return int(e.turnSeen.Load()) }
 
 // Tokens reports the token usage the provider has reported so far, summed. It
 // is the figure the budget is decided from and the only one this package treats
@@ -508,7 +523,7 @@ func (e *Engine) Start(ctx context.Context) error {
 		Provider: journalPin(e.cfg.Selection.Pin),
 		// The host only, and only for a custom endpoint (ADR-0027): the run is
 		// unpinned, and the record says where it went.
-		ProviderHost: harness.ProviderHost(e.cfg.Selection.ProviderURL),
+		ProviderHost: providerHostOf(e.cfg.Selection),
 		// Copied, never recomputed: one session has one arm, and two events
 		// disagreeing about which would be worse than either.
 		HarnessConfigHash: e.cfg.Selection.HarnessConfigHash,
@@ -570,4 +585,14 @@ func (e *Engine) append(ctx context.Context, turn int, payload journal.Payload) 
 		return journal.Event{}, fmt.Errorf("engine: journaling %s: %w", payload.Type(), err)
 	}
 	return ev, nil
+}
+
+// providerHostOf is the host SessionStarted records for an unpinned route: a
+// custom endpoint's (ADR-0027) or the Codex backend's (ADR-0035), and "" for
+// OpenRouter.
+func providerHostOf(sel Selection) string {
+	if sel.Provider == harness.ProviderCodex {
+		return harness.CodexHost
+	}
+	return harness.ProviderHost(sel.ProviderURL)
 }

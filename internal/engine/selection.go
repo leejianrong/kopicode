@@ -57,6 +57,14 @@ func BindSelectionFlags(fs *flag.FlagSet) *SelectionOverrides { return harness.B
 // kopibench does not call it: a benchmark arm is always pinned.
 func BindProviderURLFlag(fs *flag.FlagSet, o *SelectionOverrides) { harness.BindProviderURL(fs, o) }
 
+// BindProviderFlag registers --provider on fs, filling o (ADR-0035). Only the
+// REPL and `run --print` call it; serve, mcp and kopibench do not.
+func BindProviderFlag(fs *flag.FlagSet, o *SelectionOverrides) { harness.BindProvider(fs, o) }
+
+// ProviderCodex is the Codex provider's name, as --provider and the user file
+// spell it.
+const ProviderCodex = harness.ProviderCodex
+
 // ValidateProviderURL checks a custom provider URL (ADR-0027) and returns it
 // normalised, or a usage error. A resident front end calls it at startup so a
 // bad --provider-url is refused before any session is asked for.

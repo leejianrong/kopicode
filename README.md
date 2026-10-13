@@ -17,11 +17,11 @@ flowchart LR
     agent["an agent<br/>(Claude Code, cuttlefish, …)"] --> mcp["kopicode mcp<br/>kopicode serve"]
     ci["the benchmark"] --> bench["kopibench"]
     repl & run & mcp & bench --> engine["one engine<br/>tool-call repair · anchored edits<br/>syntax gate · forced verification<br/>permission gate"]
-    engine --> model["any OpenRouter model<br/>(pinned provider)"]
+    engine --> model["any OpenRouter model<br/>(pinned provider),<br/>or a Codex subscription"]
     engine --> repo["your repo<br/>+ git shadow refs<br/>+ the session journal"]
 ```
 
-**Status:** v0.3, with recorded runs on real repositories in
+**Status:** v0.4 is the latest release and `main` is ahead of it, with recorded runs on real repositories in
 [`docs/dogfood-runs/`](docs/dogfood-runs/). Two models are measured on the corpus; four are
 registered. There is no sandbox: an approved shell command runs with your
 privileges ([why](docs/adr/0008-shell-isolation-accepted-risk.md)). Questions and bugs go in
@@ -92,6 +92,9 @@ skills_paths = ["~/work/shared-skills"]    # more places to look for skills
 `skills_paths` are refused there: a repository must not decide how much its visitors are asked.
 An `AGENTS.md` beside the user config is given to the model before the repository's own, and is
 recorded in the journal. [ADR-0024](docs/adr/0024-user-level-config.md).
+Every `AGENTS.md` from the repository root down to the directory you start in is loaded too, the nearest
+last, up to 32 KiB in all: a file over the cap is dropped whole, furthest first, never cut, and the
+session start lists each file and says which were dropped. [ADR-0032](docs/adr/0032-agents-md-hierarchy.md).
 
 **Against a local model or a proxy** (ADR-0027): `--provider-url` (or `provider_url` in the user config,
 never a repository's) sends requests to any OpenAI-compatible endpoint instead of OpenRouter, which is
@@ -106,6 +109,20 @@ Your OpenRouter key is never sent to that host. The key for it is `KOPICODE_PROV
 for a loopback address and required otherwise. `http` is accepted for loopback only. These runs are
 unpinned, are named `custom:` in the harness hash and so never pool with a measured arm, report no context
 window, and cannot anchor a benchmark number. `serve` and `mcp` take the same flag.
+
+**On a ChatGPT/Codex subscription** (ADR-0035): `--provider codex` (or `provider = "codex"` in the user config,
+never a repository's) uses the login Codex CLI already made, read from `~/.codex/auth.json` (or `CODEX_HOME`).
+Sign in with Codex CLI first; kopicode only reads the file, refuses one that other users can read, and does not
+refresh it, so an expired token tells you to run Codex CLI once. Name a model the backend serves.
+
+```bash
+kopicode --provider codex --model gpt-5.6-luna
+```
+
+This is for your own interactive and `run --print` use. `serve` and `mcp` refuse `--provider`, so a resident
+process never spends one person's subscription on other people's sessions. These runs are unpinned, are
+named `codex:` in the harness hash, report no cost (a subscription has no per-token price) and cannot anchor a
+benchmark number. The login's token is sent only to the Codex backend and is never written to the journal.
 
 **As a one-shot**, with the record as newline-delimited JSON on stdout:
 
@@ -128,13 +145,18 @@ does not pass yours through, give it the key with the client's own option (for C
 `-e OPENROUTER_API_KEY=...`, which stores the key in that client's config).
 
 `kopicode serve` is the same sessions over NDJSON JSON-RPC for an orchestrator that spawns
-kopicode as a child; `kopicode version --json` lists the protocol version and the features
+kopicode as a child (or, with `--listen <socket>`, a long-lived process whose sessions survive its client
+restarting); `kopicode version --json` lists the protocol version and the features
 your binary supports, so a client can require one. See [`docs/kopicode-mcp.md`](docs/kopicode-mcp.md) and
 [`docs/kopicode-serve-protocol.md`](docs/kopicode-serve-protocol.md).
 
 If the model goes in circles (the same call with the same result three times, or three failed edits to one
 file, with nothing written in between) the REPL tells it so and what to try instead
 ([ADR-0028](docs/adr/0028-stall-detector.md)). `--stall-threshold N` changes the count and `0` turns it off.
+
+A `run_shell` or `grep` result over 32 KiB is shown to the model as its start and its end with a note saying how much
+was left out; the journal keeps all of it ([ADR-0033](docs/adr/0033-tool-output-cap.md)). `--output-cap N` changes the
+limit and `0` shows everything.
 
 A session is bounded: each prompt gets at most **20 model calls** (the turn cap) and the
 session at most 2M tokens. A task that needs more ends with `stop: max_turns` rather than
@@ -198,6 +220,7 @@ mock provider with `make bench-smoke`.
 | --- | --- | --- |
 | `OPENROUTER_API_KEY` | environment | required; never written to the journal or logs |
 | `KOPICODE_PROVIDER_API_KEY`, `provider_url` | environment, and the user config or `--provider-url` | only with a custom endpoint (ADR-0027); the first is never sent to OpenRouter and the second never read from a repository |
+| `provider`, Codex CLI's `auth.json` | the user config or `--provider`; the login file | only with the Codex provider (ADR-0035); never read from a repository, never by `serve` or `mcp` |
 | `model`, `harness`, `harness_config` | `.kopicode/config.toml` or flags | flags win; `model` can also come from the user config |
 | `default_mode`, `auto_never_allow`, user `AGENTS.md` | `~/.config/kopicode/` | interactive `kopicode` only |
 | turn cap and other bounds | a declared harness config (`--harness-config`) | for example `max_turns = 40` when a session stops with `max_turns`; local-only, never anchors a published number. See [`docs/harness-tuning.md`](docs/harness-tuning.md) |

@@ -164,8 +164,9 @@ func (r *remoteConsenter) Ask(ctx context.Context, req engine.ConsentRequest) (e
 
 	id, waiter := r.srv.registerConsentWaiter()
 	defer r.srv.abandonConsentWaiter(id)
+	defer r.srv.mgr.Awaiting(r.session, sessioncore.StateAwaitingConsent, id)()
 
-	r.srv.write(rpcRequestOut{
+	r.srv.sendRequest(id, rpcRequestOut{
 		JSONRPC: jsonrpcVersion,
 		ID:      quoteConsentID(id),
 		Method:  methodConsentRequest,
@@ -256,6 +257,7 @@ func (s *server) abandonConsentWaiter(id string) {
 	s.consentMu.Lock()
 	delete(s.pending, id)
 	s.consentMu.Unlock()
+	s.forgetRequest(id)
 }
 
 // deliverConsentReply routes a method-less inbound line recognised as a reply
@@ -338,8 +340,9 @@ func (a *remoteAsker) Ask(ctx context.Context, req engine.AskRequest) (engine.As
 	}
 	id, waiter := a.srv.registerConsentWaiter()
 	defer a.srv.abandonConsentWaiter(id)
+	defer a.srv.mgr.Awaiting(a.session, sessioncore.StateAwaitingAnswer, id)()
 
-	a.srv.write(rpcRequestOut{
+	a.srv.sendRequest(id, rpcRequestOut{
 		JSONRPC: jsonrpcVersion,
 		ID:      quoteConsentID(id),
 		Method:  methodAskRequest,

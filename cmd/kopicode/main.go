@@ -192,6 +192,7 @@ func interactive(args []string, _, stderr io.Writer) int {
 	overrides := engine.BindSelectionFlags(fs)
 	engine.BindLimitFlags(fs, overrides)
 	engine.BindProviderURLFlag(fs, overrides)
+	engine.BindProviderFlag(fs, overrides)
 	overrides.Interactive = true
 	overrides.UserConfig = true
 	mode := fs.String("mode", "", "consent mode to start in: default (ask before shell and outside writes) or auto (see /mode); default_mode in the user config sets it when this is not given")
@@ -536,6 +537,10 @@ func openAndDriveSession(std streams, opts engine.Options, open func(context.Con
 		if errors.Is(err, engine.ErrNoCustomAPIKey) {
 			say(stderr, "kopicode: %s is not set; a custom provider url that is not loopback needs it, "+
 				"and %s is never sent to another host\n", engine.CustomAPIKeyEnv, engine.APIKeyEnv)
+			return exitHarness
+		}
+		if errors.Is(err, engine.ErrNoCodexLogin) {
+			say(stderr, "kopicode: %v\n", err)
 			return exitHarness
 		}
 		// A --resume naming a session this repository has no record of is a

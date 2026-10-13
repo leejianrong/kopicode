@@ -37,6 +37,37 @@ a parse-error response and the loop continues — one bad message does not end t
 <-- {"jsonrpc":"2.0","id":1,"result":{"session":"s1","record":"/repo/.kopicode/sessions/s1","stop":"completed","exit_code":0,"turns":1}}
 ```
 
+### Over a socket: `serve --listen <path>` (ADR-0030)
+
+`kopicode serve --listen /run/user/1000/kopicode.sock` serves the same wire, line for line, on a unix
+socket instead of stdio. The difference is who owns the process: over stdio, the sessions end when the
+client's stdin does; on a socket, **the process and its sessions outlive any client**, so a supervisor
+that restarts reconnects and finds them where it left them (`server.sessions` says what each is doing,
+`session.events` replays what it missed).
+
+- **Access.** The socket is created mode `0600`; the owner is the only client, as the child's own pipe is
+  for stdio. There is no TCP listener and nothing to authenticate.
+- **One client at a time.** A new connection closes the one before it, without a message. Notifications
+  sent while nobody is connected are dropped; the record is the journal.
+- **Pending questions are asked again.** A `consent.request` or `ask.request` still waiting for an answer
+  is sent to the new client under the same id, and the turn it holds up carries on when that client
+  answers. One nobody answers expires after its timeout, as it does over stdio.
+- **Responses stay with their connection.** A response goes to the connection its request arrived on. A
+  turn that finishes after its client was replaced answers to nobody: the new client cannot know what its
+  predecessor's id meant, and reads the outcome from `server.sessions` (`last_stop`) and `session.events`.
+- **Ending it.** `SIGINT` or `SIGTERM`, a [`server.shutdown`](#servershutdown) request, or the idle
+  timeout closes every session (each writes its `session_ended`), removes the socket and exits `0`.
+- **Idle timeout.** `--idle-timeout <duration>` (default `30m`; `0` never exits on idleness; negative is a
+  usage error) ends the process after that long with **no client connected and no open session**. Either
+  one keeps it alive: a connected client that has opened nothing, or a session nobody is attached to. An
+  ended session does not count. The reason is written to stderr. It applies to `--listen` only.
+- **One process per path.** The path is claimed with an advisory lock on `<path>.lock`, which dies with
+  its holder. A path a live `serve` holds is refused (exit `2`); a socket left behind by a crash is
+  replaced; anything at the path that is not a socket is refused and left alone. The `.lock` file stays.
+- Unix only: `--listen` on another platform is a usage error. Stdio, the default, is unchanged.
+
+Feature: `serve.listen`.
+
 ## Message shapes
 
 **Request** (client → server). `id` is echoed back verbatim on the response so the client
@@ -121,16 +152,27 @@ restart from the first new response: they count this process's requests.
 Features: `session.usage`, `usage.tokens_split`, `usage.context`, `usage.context_window`,
 `usage.cost`.
 
-## The five methods
+## The methods
 
-ADR-0013 decision 3 fixed three; `session.close` (KAN-1795) is the fourth and `session.handoff` (ADR-0026) the fifth. There is
-still no listing call and no credential in any params. A session lives until it is
-closed with `session.close` or the process shuts down.
+ADR-0013 decision 3 fixed three; `session.close` (KAN-1795) is the fourth and `session.handoff` (ADR-0026) the fifth.
+`server.sessions` and `session.events` (ADR-0030) are the two a client uses to find out what its sessions are doing, and
+`server.shutdown` ends the process; they are described after `session.close`. There is no credential in any params. A session lives until it is closed
+with `session.close` or the process shuts down.
 
 ### `session.start`
 
 Opens a session on a working tree, keyed by the caller-supplied `session` id, and runs
 its first turn.
+
+The id, the arm and the consent mode are checked before the next line is read, so those
+errors (`-32001`, `-32003`) arrive at once. Opening the session itself (the repository checks,
+the tree lock, the journal) happens off the read loop: other sessions open in parallel, and
+`session.cancel`, `server.sessions` and the rest are answered meanwhile. The session is listed
+by `server.sessions` as `running` from the moment it is accepted. A request for the same
+`session` sent right after (a `session.submit`, `session.handoff`, `session.close`) queues
+behind the open, in order. If the open fails (`-32002`, `-32005`), the `session.start` and
+every request already queued on that id each get that error as their response, and the id is
+free again.
 
 | param | type | required | meaning |
 |---|---|---|---|
@@ -162,6 +204,7 @@ is.
 | `exit_code` | number | the process exit code that stop maps to |
 | `turns` | number | how many turns this exchange used |
 | `usage` | object | the session's usage as the turn settled — see [Usage](#usage-adr-0021) |
+| `instructions` | array | **start only**, omitted when no `AGENTS.md` was found: each file the session read, the user's own first and the nearest last, as `{path, bytes, loaded}` (ADR-0032). `loaded` is `false` for a file the 32 KiB cap dropped whole; it is on the record but the model was not shown it. Feature `session.instructions` |
 
 ### `session.submit`
 
@@ -236,6 +279,84 @@ did not complete cleanly — the working-tree lock is released, and the id is fr
 
 **Result**: `{ "session": "...", "closed": true }`.
 
+### `server.sessions`
+
+Lists the session table (ADR-0030). No params. It is read from the live table, inline like
+`session.usage`, so it answers while every session is mid-turn, and nothing in it is rebuilt from the
+journal.
+
+```json
+--> { "jsonrpc": "2.0", "id": 7, "method": "server.sessions" }
+<-- { "jsonrpc": "2.0", "id": 7, "result": { "sessions": [
+      { "session": "s1", "dir": "/repo", "state": "awaiting_consent", "turn": 3,
+        "last_event_at": "2026-10-10T09:14:02.118Z", "usage": { ... }, "pending_request": "c-4" } ] } }
+```
+
+| field | meaning |
+|---|---|
+| `session`, `dir` | the id and the working tree it runs in |
+| `state` | `idle`: open with no turn in flight. `running`: a turn or a handoff draft is in flight. `awaiting_consent`: a turn is blocked on a `consent.request` the client has not answered. `awaiting_answer`: blocked on an `ask.request`. `ended`: closed |
+| `turn` | the session-wide turn count so far |
+| `last_event_at` | RFC 3339 UTC time of the last recorded event; **absent** when it has recorded none in this process |
+| `usage` | what `session.usage` returns for the session, as the session stood when it ended for an ended one |
+| `last_stop` | the stop of the last finished turn (see [Stops](#stops)); absent before one finishes |
+| `pending_request` | the id of the `consent.request` or `ask.request` the session waits on; present only in the two `awaiting_*` states |
+
+`sessions` is sorted by id and is `[]`, never `null`, when there are none. An ended session stays listed
+(the newest 256, a restarted id leaves it) so a client that reconnects can see how it finished; its `turn`
+and `usage` are those it ended with. The state is the process's own: a session a previous process ran is
+not listed, whatever is on disk.
+
+Feature: `server.sessions`.
+
+### `server.shutdown`
+
+Ends the process (ADR-0030). No params. Every open session is closed first, its turn in flight
+cancelled and its `session_ended` written, and **the answer is sent only once that is done**; the
+connection is then closed, the socket removed and the process exits `0`. Over stdio it ends the process
+too, though stdin is still open. A caller that only wants one session gone uses `session.close`.
+
+```json
+--> { "jsonrpc": "2.0", "id": 9, "method": "server.shutdown" }
+<-- { "jsonrpc": "2.0", "id": 9, "result": { "shutdown": true, "sessions_closed": 2 } }
+```
+
+`sessions_closed` is how many sessions were open. A `session.start` that arrives while the process is
+closing may open a session the process then closes without a reply; a caller that has asked for shutdown
+should not send more.
+
+Feature: `server.shutdown`.
+
+### `session.events`
+
+Replays a session's recorded events after a sequence number (ADR-0030), so a client that missed some, because
+it restarted or lagged, can catch up without reading `events.jsonl` from disk.
+
+**Params**: `{ "session": "s1", "after_seq": 41, "limit": 500 }`. `after_seq` is the last `seq` the client
+holds (omitted or `0` is everything). `limit` is optional: it defaults to 500 and is clamped to 5000.
+
+**Result**: `{ "session": "s1", "events": [ ... ], "last_seq": 57, "more": false }`.
+
+- `events` are the same per-event records `session.event` carries, in order, with the same `seq`; a client
+  that saw an event live and then replays it sees the same event. **Every `session.event` notification
+  carries its `seq`**, which is what to remember.
+- A replayed event holds its **whole text**. A value over 64 KiB spills to a blob in the journal, and a live
+  notification carries it as an empty `text` with its real `size`; the replay reads it back. Nothing is
+  truncated, so a page is as large as the events in it: ask for a smaller `limit` if that matters.
+- `last_seq` is the `seq` to send as `after_seq` next: the last event returned, or the `after_seq` you sent
+  when there were none. `more` is `true` when the record holds events past this page.
+- `problems`, when present, names each event whose blob could not be read back (missing, or not matching its
+  name). The event is still in `events`, with its `size` and without its `text`.
+- An event whose line the session is writing at that moment is not yet in the record; it comes with the next
+  call, and is not an error.
+- It serves an open session and an ended one still in `server.sessions`; any other id is `-32000`. A negative
+  `limit` is `-32602`.
+
+The replay reads the journal from its start, so it is not free on a long session and it does not block
+`session.cancel`: it runs beside the read loop.
+
+Feature: `session.events_since` (the method is `session.events`).
+
 ## `server.hello`
 
 Asks what this binary supports, so a client can require a minimum without scraping
@@ -253,9 +374,9 @@ dirty bit. `protocol` moves only for a change that breaks an existing client. `f
 list of stable lower-case dotted names, added in the change that ships a capability, never renamed,
 and removed only with a protocol bump. Current names: `allow_commands`, `ask.request`, `consent.note`, `consent_mode.auto`,
 `consent_mode.remote_interactive`, `consent_mode.unattended_policy`, `consent_request.command`,
-`consent_timeout.flag`, `consent_timeout.session`, `mcp`, `provider_url.flag`, `server.hello`, `session.close`,
-`session.handoff`, `session.limits`, `session.read_only`, `session.usage`, `usage.context`, `usage.context_window`, `usage.cost`,
-`usage.tokens_split`.
+`consent_timeout.flag`, `consent_timeout.session`, `mcp`, `provider_url.flag`, `serve.listen`, `server.hello`, `server.sessions`, `server.shutdown`,
+`session.close`, `session.events_since`, `session.handoff`, `session.limits`, `session.read_only`, `session.usage`,
+`usage.context`, `usage.context_window`, `usage.cost`, `usage.tokens_split`.
 `cmd/kopicode/capabilities_test.go` ties the list to the consent modes and methods in the code.
 
 `provider_url.flag` (ADR-0027) means `kopicode serve --provider-url URL` and `kopicode mcp --provider-url URL`
@@ -357,6 +478,8 @@ turn as it runs.
   event vocabulary — `session_started`, `assistant_message`, tool calls and results,
   verification, `session_ended`, and the rest — is `run --print`'s; a serve client and a
   `--print` consumer read one event language.
+- Every notification carries the event's `seq`, its journal sequence number. Remember the last one per
+  session: `session.events` with that `after_seq` replays what a client missed.
 - Streaming text deltas are dropped: they are not in the record, and this stream carries
   only what the record holds. The reconciled `assistant_message` is emitted when the turn
   settles.
@@ -391,13 +514,13 @@ The first four are JSON-RPC's reserved values; the server-defined ones sit in th
 |---|---|---|
 | -32700 | parse error | a line that is not valid JSON |
 | -32600 | invalid request | a message with no method |
-| -32601 | method not found | a method outside the five above |
+| -32601 | method not found | a method this page does not list |
 | -32602 | invalid params | a method's params are missing or malformed |
-| -32000 | unknown session | `session.submit`/`session.cancel`/`session.handoff`/`session.close` named an id with no open session, or `session.submit` named one whose close is already accepted |
+| -32000 | unknown session | `session.submit`/`session.cancel`/`session.handoff`/`session.close`/`session.events` named an id with no open session (`session.events` also accepts an ended one still listed), or `session.submit` named one whose close is already accepted |
 | -32001 | session exists | `session.start` named an id already open in this process |
 | -32002 | open failed | `engine.Open` refused: a bad model, a missing credential |
 | -32003 | usage error | the arm could not be resolved (an unknown model or harness); or `session.start`'s `consent_mode` is missing/unrecognised, or `"unattended_policy"` is requested without `containment_provided: true` (ADR-0016); or `never_allow` is sent without `consent_mode: "auto"`, or holds a malformed entry (ADR-0017); or `session.handoff` named a session that has run no turn |
-| -32603 | internal error | `session.close` could not write the session's `session_ended`; or `session.handoff`'s draft failed |
+| -32603 | internal error | `session.close` could not write the session's `session_ended`; or `session.handoff`'s draft failed; or `session.events` could not read the journal |
 | -32005 | session locked | `session.start`'s `dir` is already held by another live session |
 
 `-32004` is retired: it was `session busy`, a `session.submit` while a turn was in flight,

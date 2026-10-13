@@ -244,6 +244,14 @@ type Config struct {
 	// is set, so no existing arm's hash moves.
 	StallThreshold int
 
+	// OutputCap is how many bytes of a run_shell or grep result the model is shown
+	// before the middle is left out (KOP-179, ADR-0033). 0 shows everything, which
+	// is every registered arm and so every benchmark number; the REPL defaults it
+	// to [DefaultOutputCap]. The journal always holds the whole output. It changes
+	// what the model sees, so it is in the hash, and only when set, so no existing
+	// arm's hash moves.
+	OutputCap int
+
 	// Verification is the forced-verification policy.
 	Verification Verification
 

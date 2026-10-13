@@ -52,6 +52,10 @@ type Overrides struct {
 	// means not given; a pointer to zero turns it off. Like the limits it changes
 	// the configuration and so the hash.
 	StallThreshold *int
+	// OutputCap overrides the tool-output cap in bytes (KOP-179, ADR-0033). Nil
+	// means not given; a pointer to zero shows the model every byte. Like the
+	// limits it changes the configuration and so the hash.
+	OutputCap *int
 	// UserConfig reads the user-level config.toml (ADR-0024) as the rung between
 	// the repository's file and the built-in default. Only the human-facing front
 	// ends set it: serve, mcp and kopibench resolve from flags, the repository
@@ -61,6 +65,10 @@ type Overrides struct {
 	// ProviderURL is --provider-url (ADR-0027): a custom endpoint. The user
 	// file's `provider_url` is the next rung, read only when UserConfig is set.
 	ProviderURL string
+	// Provider is --provider (ADR-0035): a provider family other than OpenRouter,
+	// `codex`. The user file's `provider` is the next rung, read only when
+	// UserConfig is set. Naming it together with a provider URL is a usage error.
+	Provider string
 	// Interactive says a person is at the keyboard (the REPL). Unless MaxTurns
 	// is given or the harness is a declared config that chose its own, the turn
 	// cap is then [InteractiveMaxTurns] rather than the corpus's 20.
@@ -76,6 +84,11 @@ const InteractiveMaxTurns = 100
 // Three is the smallest count that is not an honest retry: one repeat is a
 // model checking its work, two is a model being careful.
 const DefaultStallThreshold = 3
+
+// DefaultOutputCap is how much of one run_shell or grep result a REPL session
+// shows the model (KOP-179, ADR-0033): about 8k tokens. A failing test log that
+// size is whole; it takes a build or a grep over a tree to pass it.
+const DefaultOutputCap = 32 * 1024
 
 // BindLimits registers --max-turns and --token-budget on fs, filling o.
 // Only the human-facing front ends call it; kopibench's arms are fixed.
@@ -96,6 +109,14 @@ func BindLimits(fs *flag.FlagSet, o *Overrides) {
 		o.TokenBudget = &n
 		return nil
 	})
+	fs.Func("output-cap", "bytes of a run_shell or grep result the model is shown before the middle is left out; the journal keeps it all (default 32768 in the REPL, 0 = show everything, the default elsewhere)", func(v string) error {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return fmt.Errorf("want a count of bytes, 0 (off) or more")
+		}
+		o.OutputCap = &n
+		return nil
+	})
 	fs.Func("stall-threshold", "tell the model it is stuck after this many identical calls with the same result, or failed edits to one file, in a row (default 3 in the REPL, 0 = off elsewhere)", func(v string) error {
 		n, err := strconv.Atoi(v)
 		if err != nil || n < 0 {
@@ -113,6 +134,15 @@ func BindProviderURL(fs *flag.FlagSet, o *Overrides) {
 	fs.StringVar(&o.ProviderURL, FlagProviderURL, "",
 		"send requests to this OpenAI-compatible endpoint instead of OpenRouter, for a local model or a proxy "+
 			"(unpinned, never a benchmark arm; the key is KOPICODE_PROVIDER_API_KEY, optional on loopback; needs --model)")
+}
+
+// BindProvider registers --provider on fs, filling o (ADR-0035). Only the REPL
+// and `run --print` call it: serve and mcp must not let one person's subscription
+// serve other people's sessions, and kopibench's arms are always pinned.
+func BindProvider(fs *flag.FlagSet, o *Overrides) {
+	fs.StringVar(&o.Provider, FlagProvider, "",
+		"use a provider family other than OpenRouter: codex is a ChatGPT/Codex subscription, read from Codex CLI's "+
+			"login (unpinned, never a benchmark arm; needs --model; for your own development use)")
 }
 
 // Bind registers --model, --harness and --harness-config on fs and returns
@@ -198,6 +228,10 @@ type Selection struct {
 	// OpenRouter. When set the Pin is empty, the context window is unknown and
 	// the configuration name starts with [CustomConfigNamePrefix].
 	ProviderURL string
+	// Provider is the provider family (ADR-0035), or "" for OpenRouter. When
+	// set the Pin is empty, the context window is unknown and the configuration
+	// name starts with [CodexConfigNamePrefix].
+	Provider string
 
 	// ModelSource and HarnessSource say which rung of the precedence chain
 	// supplied each value. Diagnostics only — see [Source].
@@ -304,8 +338,34 @@ func Resolve(dir string, o Overrides) (Selection, error) {
 	if providerURL == "" {
 		providerURL = user.ProviderURL
 	}
+	providerName := o.Provider
+	if providerName == "" {
+		providerName = user.Provider
+	}
+	if providerName != "" {
+		if err := ValidateProvider(providerName); err != nil {
+			return Selection{}, err
+		}
+		if providerURL != "" {
+			return Selection{}, usagef("both a provider (%q) and a provider url are set; they are two different "+
+				"routes, name one", providerName)
+		}
+		if modelSource == SourceDefault {
+			return Selection{}, usagef("the Codex provider needs a model: the id %q is OpenRouter's, "+
+				"pass --model with a model the Codex backend serves", DefaultModelID)
+		}
+		return resolveUnpinned(dir, o, file, user, CodexConfigNamePrefix, ProviderCodex, "", modelID, modelSource)
+	}
 	if providerURL != "" {
-		return resolveCustom(dir, o, file, user, providerURL, modelID, modelSource)
+		if modelSource == SourceDefault {
+			return Selection{}, usagef("a custom provider url needs a model: the id %q is OpenRouter's, "+
+				"pass --model with the name your endpoint serves", DefaultModelID)
+		}
+		validated, err := ValidateProviderURL(providerURL)
+		if err != nil {
+			return Selection{}, err
+		}
+		return resolveUnpinned(dir, o, file, user, CustomConfigNamePrefix, "", validated, modelID, modelSource)
 	}
 
 	entry, ok := Lookup(modelID)
@@ -356,6 +416,12 @@ func Resolve(dir string, o Overrides) (Selection, error) {
 	case o.Interactive && declaredPath == "":
 		cfg.StallThreshold = DefaultStallThreshold
 	}
+	switch {
+	case o.OutputCap != nil:
+		cfg.OutputCap = *o.OutputCap
+	case o.Interactive && declaredPath == "":
+		cfg.OutputCap = DefaultOutputCap
+	}
 
 	return Selection{
 		ModelID:           entry.ModelID,
@@ -377,29 +443,22 @@ func Resolve(dir string, o Overrides) (Selection, error) {
 	}, nil
 }
 
-// resolveCustom is [Resolve] for a custom provider URL (ADR-0027).
+// resolveUnpinned is [Resolve] for a route nobody pinned: a custom provider URL
+// (ADR-0027) or the Codex provider (ADR-0035). The caller has validated the URL
+// and checked that a model was named.
 //
-// The model id is whatever the endpoint calls it, so the registry is not
-// consulted, and the default id would mean nothing to a local server, so one has
-// to be named. The harness configuration is the one --harness picks, else the
-// default model's. It is renamed with [CustomConfigNamePrefix], which changes the
-// hash: this run is not an arm of anything registered. No pin is declared, and
-// the context window is unknown rather than guessed (ADR-0021).
-func resolveCustom(dir string, o Overrides, file, user FileConfig, rawURL, modelID string, modelSource Source) (Selection, error) {
-	if modelSource == SourceDefault {
-		return Selection{}, usagef("a custom provider url needs a model: the id %q is OpenRouter's, "+
-			"pass --model with the name your endpoint serves", DefaultModelID)
-	}
-	providerURL, err := ValidateProviderURL(rawURL)
-	if err != nil {
-		return Selection{}, err
-	}
+// The model id is whatever the route calls it, so the registry is not consulted.
+// The harness configuration is the one --harness picks, else the default model's.
+// It is renamed with namePrefix, which changes the hash: this run is not an arm
+// of anything registered. No pin is declared, and the context window is unknown
+// rather than guessed (ADR-0021).
+func resolveUnpinned(dir string, o Overrides, file, user FileConfig, namePrefix, providerName, providerURL, modelID string, modelSource Source) (Selection, error) {
 	base, _ := Lookup(DefaultModelID)
 	cfg, harnessSource, declaredPath, err := resolveHarness(dir, o, file, base)
 	if err != nil {
 		return Selection{}, err
 	}
-	cfg.Name = CustomConfigNamePrefix + cfg.Name
+	cfg.Name = namePrefix + cfg.Name
 	if len(file.Verify) > 0 {
 		cfg.Verification.Source = VerificationConfigured
 	}
@@ -424,6 +483,12 @@ func resolveCustom(dir string, o Overrides, file, user FileConfig, rawURL, model
 	case o.Interactive && declaredPath == "":
 		cfg.StallThreshold = DefaultStallThreshold
 	}
+	switch {
+	case o.OutputCap != nil:
+		cfg.OutputCap = *o.OutputCap
+	case o.Interactive && declaredPath == "":
+		cfg.OutputCap = DefaultOutputCap
+	}
 	return Selection{
 		ModelID:           modelID,
 		Config:            cfg,
@@ -438,6 +503,7 @@ func resolveCustom(dir string, o Overrides, file, user FileConfig, rawURL, model
 			UserConfigPath: user.Path,
 		},
 		ProviderURL:   providerURL,
+		Provider:      providerName,
 		ModelSource:   modelSource,
 		HarnessSource: harnessSource,
 	}, nil

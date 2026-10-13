@@ -727,6 +727,14 @@ type ProjectInstructionsLoaded struct {
 	// repository's own, so every journal written before this field existed
 	// still means what it said.
 	Scope string `json:"scope,omitempty"`
+	// Dropped is true for a file the byte cap excluded (ADR-0032 decision 6):
+	// the event has no Content, the model was not shown the file, and replay
+	// feeds nothing back for it. It is still written so the listing and a later
+	// audit agree on what was found.
+	Dropped bool `json:"dropped,omitempty"`
+	// Bytes is the size of a dropped file, which has no Content to measure.
+	// Zero, and omitted, for a file that loaded.
+	Bytes int64 `json:"bytes,omitempty"`
 }
 
 func (ProjectInstructionsLoaded) Type() Type { return TypeProjectInstructionsLoaded }
