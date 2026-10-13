@@ -414,6 +414,10 @@ func eventOf(ev journal.Event) Event {
 		base.Kind = EventProjectInstructionsLoaded
 		base.Path = p.Path
 		base.Text, base.Size = text(p.Content)
+		if p.Dropped {
+			base.Reason = "dropped"
+			base.Size = p.Bytes
+		}
 
 	case journal.HandoffWritten:
 		base.Kind = EventHandoffWritten

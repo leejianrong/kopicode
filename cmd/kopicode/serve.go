@@ -383,6 +383,26 @@ type turnResult struct {
 	// Usage is the session's usage as the turn settled (feature usage.context
 	// and its siblings); see usageSummary.
 	Usage *usageSummary `json:"usage,omitempty"`
+	// Instructions is the AGENTS.md files the session found, on start only
+	// (feature session.instructions, ADR-0032).
+	Instructions []instructionSummary `json:"instructions,omitempty"`
+}
+
+// instructionSummary is one AGENTS.md in a session.start result: where it was,
+// how big, and whether the model was shown it (false when the byte cap dropped
+// it). Shared by serve and mcp so the two report the same list.
+type instructionSummary struct {
+	Path   string `json:"path"`
+	Bytes  int    `json:"bytes"`
+	Loaded bool   `json:"loaded"`
+}
+
+func instructionSummariesOf(files []engine.InstructionFile) []instructionSummary {
+	var out []instructionSummary
+	for _, f := range files {
+		out = append(out, instructionSummary{Path: f.Path, Bytes: f.Bytes, Loaded: f.Loaded})
+	}
+	return out
 }
 
 // usageParams / usageResult are session.usage's shapes: a pull for a session's
@@ -728,7 +748,7 @@ func (s *server) writeSessionError(to rpcRequest, e *sessioncore.Error) {
 
 func turnResultOf(r sessioncore.TurnResult) turnResult {
 	return turnResult{Session: r.Session, Record: r.Record, Stop: r.Stop, ExitCode: r.ExitCode, Turns: r.Turns,
-		Usage: usageSummaryOf(r.Usage)}
+		Usage: usageSummaryOf(r.Usage), Instructions: instructionSummariesOf(r.Instructions)}
 }
 
 // dispatchStart opens a session and queues its first turn, on the read-loop

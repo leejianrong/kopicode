@@ -147,7 +147,12 @@ func (l *Loop) Render(e engine.Event) {
 		if label == "" {
 			label = "skills catalogue" // the one instructions event with no file behind it
 		}
-		l.tag("instructions", fmt.Sprintf("%s (%s)", label, humanBytes(e.Size)))
+		note := humanBytes(e.Size)
+		if e.Reason == "dropped" {
+			// ADR-0032: over the byte cap, so on the record but not shown to the model.
+			note += ", dropped: over the 32 KiB instructions cap"
+		}
+		l.tag("instructions", fmt.Sprintf("%s (%s)", label, note))
 
 	case engine.EventHandoffWritten:
 		// A handoff was written (ADR-0026). One line saying where it is; the

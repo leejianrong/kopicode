@@ -218,6 +218,8 @@ func fixtures() map[journal.Type]journal.Payload {
 			Path:    "/home/jian/projects/kopicode/AGENTS.md",
 			Content: text("Run `make test` before every commit."),
 			Scope:   "user",
+			Dropped: true,
+			Bytes:   40960,
 		},
 	}
 }

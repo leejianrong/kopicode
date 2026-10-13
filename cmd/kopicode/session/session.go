@@ -151,6 +151,9 @@ type TurnResult struct {
 	Turns    int
 	// Usage is the session's usage as the turn settled.
 	Usage engine.Usage
+	// Instructions is the AGENTS.md files the session found, set only on a
+	// session's opening turn (ADR-0032).
+	Instructions []engine.InstructionFile
 }
 
 // AskModeRemote is the one non-default StartParams.AskMode.
@@ -608,6 +611,7 @@ func (m *Manager) worker(ms *managed) {
 		}
 		if j.isStart {
 			out.Record = ms.sess.Path()
+			out.Instructions = ms.sess.Instructions()
 		}
 		j.turn.Done(out)
 	}

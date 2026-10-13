@@ -37,6 +37,7 @@ var features = []string{
 	"session.close",
 	"session.events_since",
 	"session.handoff",
+	"session.instructions",
 	"session.limits",
 	"session.read_only",
 	"session.usage",

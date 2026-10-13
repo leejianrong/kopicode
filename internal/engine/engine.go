@@ -231,6 +231,11 @@ type Engine struct {
 	// was given, and that has to be true rather than decorative.
 	offered map[string]bool
 
+	// instructions is the AGENTS.md files this session's bootstrap found, in
+	// load order (ADR-0032). Empty for a resumed or forked session, which does
+	// not rediscover them; their events are in the journal.
+	instructions []InstructionFile
+
 	started bool
 	ended   bool
 

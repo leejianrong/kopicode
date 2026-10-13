@@ -92,6 +92,9 @@ skills_paths = ["~/work/shared-skills"]    # more places to look for skills
 `skills_paths` are refused there: a repository must not decide how much its visitors are asked.
 An `AGENTS.md` beside the user config is given to the model before the repository's own, and is
 recorded in the journal. [ADR-0024](docs/adr/0024-user-level-config.md).
+Every `AGENTS.md` from the repository root down to the directory you start in is loaded too, the nearest
+last, up to 32 KiB in all: a file over the cap is dropped whole, furthest first, never cut, and the
+session start lists each file and says which were dropped. [ADR-0032](docs/adr/0032-agents-md-hierarchy.md).
 
 **Against a local model or a proxy** (ADR-0027): `--provider-url` (or `provider_url` in the user config,
 never a repository's) sends requests to any OpenAI-compatible endpoint instead of OpenRouter, which is
