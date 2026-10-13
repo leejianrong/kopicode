@@ -121,7 +121,7 @@ not this list:
   `NewResponsesStream`, which reuses `Stream` and keeps the backend's bytes as the
   transcript. Text, tool calls and results, full-history replay and reasoning summaries work (KOP-194, KOP-197),
   and `--provider codex` (or `provider = "codex"` in the user config) selects it through `engine.Open`
-  (KOP-198); failure shapes are still KOP-199. Recordings are under
+  (KOP-198); a 401, 403 or 429 comes back as a `CodexError` that says what to do, wrapping the `APIError` with the whole body (KOP-199; the bodies behind it are inferred, no real quota or expiry response has been recorded yet, so re-check the mapping when one is). Recordings are under
   `testdata/codex/`.
 - **`internal/harness`** — ADR-0007 made mechanical: the model-id → (harness config,
   provider pin) registry, the config's hash, and `.kopicode/config.toml`'s precedence
