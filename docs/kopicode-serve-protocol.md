@@ -206,6 +206,12 @@ is.
 | `usage` | object | the session's usage as the turn settled — see [Usage](#usage-adr-0021) |
 | `instructions` | array | **start only**, omitted when no `AGENTS.md` was found: each file the session read, the user's own first and the nearest last, as `{path, bytes, loaded}` (ADR-0032). `loaded` is `false` for a file the 32 KiB cap dropped whole; it is on the record but the model was not shown it. Feature `session.instructions` |
 
+A new session is also told, once, which skills the repository ships (`.agents/skills`,
+`.kopicode/skills` inside `dir`), as a `project_instructions_loaded` event with scope `skills`, so
+the model need not `list_dir` to find them. Only the repository's own: a personal skills directory
+never reaches a session opened over this wire (ADR-0024 decision 4). `kopicode mcp` and
+`run --print` do the same. Feature `skills.catalogue`.
+
 ### `session.submit`
 
 Runs the next turn on an already-open session. It **queues** rather than rejecting: if a

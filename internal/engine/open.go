@@ -285,8 +285,9 @@ type Options struct {
 	StartAuto bool
 
 	// Skills are the discovered skills (see [DiscoverSkills]). A new session is
-	// told, once, about those inside its root (ADR-0025). Nil tells it nothing:
-	// serve and mcp leave it unset, so their sessions are as they were.
+	// told, once, about those inside its root (ADR-0025). Nil tells it nothing.
+	// Every front end sets it (the REPL, run --print, serve and mcp; the last
+	// three through [RepoSkills]); kopibench does not.
 	Skills []Skill
 
 	// Handoff is the text of a handoff document (ADR-0026) a new session starts
