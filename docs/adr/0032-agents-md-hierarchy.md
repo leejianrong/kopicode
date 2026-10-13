@@ -1,6 +1,6 @@
 # ADR-0032: An AGENTS.md hierarchy, nearest last, with a byte cap and a visible listing
 
-*Proposed.* Amends [ADR-0024](0024-user-level-config.md) decision 5 and the repository loader from KAN-1024 if accepted. Whether to accept is the owner's call. The survey cited below is the evidence for the shape and also the reason to keep it small.
+*Accepted* (implemented in KOP-191, on the owner's instruction to build it). Amends [ADR-0024](0024-user-level-config.md) decision 5 and the repository loader from KAN-1024. One reading made while building it: "the total" in decision 4 counts the user-level file too, as the furthest file, so it is the first dropped. The survey cited below is the evidence for the shape and also the reason to keep it small.
 
 ## Context
 

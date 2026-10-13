@@ -204,6 +204,7 @@ is.
 | `exit_code` | number | the process exit code that stop maps to |
 | `turns` | number | how many turns this exchange used |
 | `usage` | object | the session's usage as the turn settled — see [Usage](#usage-adr-0021) |
+| `instructions` | array | **start only**, omitted when no `AGENTS.md` was found: each file the session read, the user's own first and the nearest last, as `{path, bytes, loaded}` (ADR-0032). `loaded` is `false` for a file the 32 KiB cap dropped whole; it is on the record but the model was not shown it. Feature `session.instructions` |
 
 ### `session.submit`
 

@@ -122,6 +122,71 @@ func LoadAgentsFile(dir string) (AgentsFile, bool, error) {
 	return AgentsFile{Path: path, Content: string(data)}, true, nil
 }
 
+// AgentsCapBytes is the most project-instruction text one session loads
+// (ADR-0032 decision 4). It matches Codex CLI's published figure, and is a
+// constant rather than a config key until someone needs another value.
+const AgentsCapBytes = 32 << 10
+
+// LoadAgentsChain reads every AGENTS.md from the repository root down to dir,
+// one per directory, and returns them root first, so the nearest, the most
+// specific, is last (ADR-0032 decisions 1 and 2).
+//
+// The root is the first directory holding a .git entry going upward, the same
+// boundary [LoadFileConfig] and [LoadAgentsFile] use, so nothing above the
+// repository is read. Outside a repository the walk runs to the filesystem root
+// as those two do. A repository with a single AGENTS.md yields exactly the file
+// [LoadAgentsFile] would have found.
+//
+// An AGENTS.md that exists and cannot be read is an error, never a skip.
+func LoadAgentsChain(dir string) ([]AgentsFile, error) {
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, fmt.Errorf("harness: resolving %s: %w", dir, err)
+	}
+	var chain []AgentsFile
+	for {
+		candidate := filepath.Join(dir, AgentsFileName)
+		data, readErr := os.ReadFile(candidate)
+		switch {
+		case readErr == nil:
+			chain = append(chain, AgentsFile{Path: candidate, Content: string(data)})
+		case !os.IsNotExist(readErr):
+			return nil, fmt.Errorf("harness: reading %s: %w", candidate, readErr)
+		}
+		if _, statErr := os.Lstat(filepath.Join(dir, ".git")); statErr == nil {
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	for i, j := 0, len(chain)-1; i < j; i, j = i+1, j-1 {
+		chain[i], chain[j] = chain[j], chain[i]
+	}
+	return chain, nil
+}
+
+// FitWithinCap says which of a load-ordered list of files (furthest first,
+// nearest last) a cap of capBytes keeps: the furthest are dropped whole until
+// the rest fit (ADR-0032 decision 4). A file is never cut in the middle, and the
+// last, the nearest, is always kept even when it alone exceeds the cap, since
+// the instruction is the person's own and clipping it would hide a rule.
+func FitWithinCap(sizes []int, capBytes int) []bool {
+	keep := make([]bool, len(sizes))
+	total := 0
+	for i, n := range sizes {
+		keep[i] = true
+		total += n
+	}
+	for i := 0; i < len(sizes)-1 && total > capBytes; i++ {
+		keep[i] = false
+		total -= sizes[i]
+	}
+	return keep
+}
+
 // findUpward looks for relPath in dir, then in each parent directory in turn,
 // stopping at the first directory holding a .git entry (that directory
 // included) or at the filesystem root — the boundary [LoadFileConfig] and
