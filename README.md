@@ -17,11 +17,11 @@ flowchart LR
     agent["an agent<br/>(Claude Code, cuttlefish, …)"] --> mcp["kopicode mcp<br/>kopicode serve"]
     ci["the benchmark"] --> bench["kopibench"]
     repl & run & mcp & bench --> engine["one engine<br/>tool-call repair · anchored edits<br/>syntax gate · forced verification<br/>permission gate"]
-    engine --> model["any OpenRouter model<br/>(pinned provider)"]
+    engine --> model["any OpenRouter model<br/>(pinned provider),<br/>or a Codex subscription"]
     engine --> repo["your repo<br/>+ git shadow refs<br/>+ the session journal"]
 ```
 
-**Status:** v0.3, with recorded runs on real repositories in
+**Status:** v0.4 is the latest release and `main` is ahead of it, with recorded runs on real repositories in
 [`docs/dogfood-runs/`](docs/dogfood-runs/). Two models are measured on the corpus; four are
 registered. There is no sandbox: an approved shell command runs with your
 privileges ([why](docs/adr/0008-shell-isolation-accepted-risk.md)). Questions and bugs go in
