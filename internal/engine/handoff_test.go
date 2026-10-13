@@ -57,8 +57,11 @@ func TestHandoffDraftsADocumentWithoutTouchingTheConversation(t *testing.T) {
 
 	// The handoff call is tool-less and asks for the narrative.
 	req := prov.requests[1]
-	if len(req.Tools) != 0 {
-		t.Errorf("the handoff request offered %d tools, want none", len(req.Tools))
+	if len(req.Tools) == 0 || len(req.Tools) != len(prov.requests[0].Tools) {
+		t.Errorf("the handoff request offered %d tools, want the same %d every request carries", len(req.Tools), len(prov.requests[0].Tools))
+	}
+	if last := req.Messages[len(req.Messages)-1]; !strings.Contains(last.Content, "do not call any tool") {
+		t.Errorf("the draft does not tell the model to reply in text: %q", last.Content)
 	}
 	if last := req.Messages[len(req.Messages)-1]; !strings.Contains(last.Content, "## Goal") || !strings.Contains(last.Content, "finish it") {
 		t.Errorf("the last message is not the handoff prompt: %q", last.Content)
@@ -131,5 +134,49 @@ func TestASessionWithoutAHandoffRecordsNoParent(t *testing.T) {
 	started := payloadsOf[journal.SessionStarted](t, readJournal(t, s.Path()))
 	if started[0].ParentSession != "" {
 		t.Errorf("parent_session = %q on a session with no handoff", started[0].ParentSession)
+	}
+}
+
+func TestAnEmptyOrSectionlessReplyIsAFailedDraftNotABlankDocument(t *testing.T) {
+	for name, reply := range map[string]string{"empty": "", "no sections": "Sure, I will continue with the parser next."} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			prov := &fakeReplyProvider{bodies: [][]byte{proseBody(t, "worked"), proseBody(t, reply), proseBody(t, reply), proseBody(t, reply)}}
+			s := openForHandoff(t, dir, "bad", prov, nil)
+			defer func() { _ = s.Close(context.Background()) }()
+			if _, err := s.Run(context.Background(), "do it"); err != nil {
+				t.Fatal(err)
+			}
+			_, err := s.Handoff(context.Background(), "")
+			if !errors.Is(err, engine.ErrEmptyHandoff) {
+				t.Fatalf("err = %v, want ErrEmptyHandoff", err)
+			}
+			if len(prov.requests) != 4 {
+				t.Errorf("%d requests, want the turn and three drafting attempts", len(prov.requests))
+			}
+			if _, statErr := os.Stat(engine.HandoffPath(dir, "bad")); statErr == nil {
+				t.Error("a failed draft left a handoff file behind")
+			}
+			if written := payloadsOf[journal.HandoffWritten](t, readJournal(t, s.Path())); len(written) != 0 {
+				t.Errorf("a failed draft was journaled as written: %+v", written)
+			}
+		})
+	}
+}
+
+func TestADraftRetriesWithoutToolsWhenTheFirstReplyHasNoSections(t *testing.T) {
+	prov := &fakeReplyProvider{bodies: [][]byte{proseBody(t, "worked"), proseBody(t, ""), proseBody(t, narrativeReply)}}
+	s := openForHandoff(t, t.TempDir(), "retry", prov, nil)
+	defer func() { _ = s.Close(context.Background()) }()
+	if _, err := s.Run(context.Background(), "do it"); err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.Handoff(context.Background(), "")
+	if err != nil || !strings.Contains(res.Document, "Ship the thing.") {
+		t.Fatalf("Handoff = %v, %v", res.Document, err)
+	}
+	if len(prov.requests) != 3 || len(prov.requests[1].Tools) == 0 || len(prov.requests[2].Tools) != 0 {
+		t.Errorf("want attempt 1 with tools and attempt 2 without; got %d requests, tools %d then %d",
+			len(prov.requests), len(prov.requests[1].Tools), len(prov.requests[len(prov.requests)-1].Tools))
 	}
 }

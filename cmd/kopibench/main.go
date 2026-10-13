@@ -109,6 +109,11 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("kopibench run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	overrides := engine.BindSelectionFlags(fs)
+	// --max-turns and --token-budget move the arm's hash, which is the point
+	// here: the handoff measurement (KAN-1968) runs one arm at two turn caps.
+	engine.BindLimitFlags(fs, overrides)
+	handoffAtCap := fs.Int("handoff-at-cap", 0,
+		"let a task that stops at the turn cap hand off and go on in a fresh session, up to this many times (ADR-0026); 0 is a plain run")
 	corpusDir := fs.String("corpus", "bench/tasks", "the frozen task corpus")
 	providerKind := fs.String("provider", string(bench.ProviderLive),
 		"where model traffic comes from: live (spends money) or mock (replays recorded traffic)")
@@ -127,6 +132,10 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 	setupLogging(*debug, stderr)
+	if *handoffAtCap < 0 {
+		printf(stderr, "kopibench: --handoff-at-cap must be 0 or more, got %d\n", *handoffAtCap)
+		return exitUsage
+	}
 
 	kind := bench.ProviderKind(*providerKind)
 	if kind != bench.ProviderLive && kind != bench.ProviderMock {
@@ -186,6 +195,7 @@ func runRun(args []string, stdout, stderr io.Writer) int {
 		Tasks:         splitList(*tasks),
 		RecordDir:     *recordDir,
 		RecordPrefix:  *recordPrefix,
+		HandoffAtCap:  *handoffAtCap,
 	})
 	if result != nil {
 		if werr := bench.WriteReport(stdout, result); werr != nil {

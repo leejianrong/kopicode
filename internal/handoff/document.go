@@ -46,7 +46,8 @@ var sections = []section{
 // is built from the same section list the parser and the renderer use.
 func Prompt(goal string) string {
 	var b strings.Builder
-	b.WriteString("Write a handoff for the next session, which will start with an empty context and nothing but your handoff.\n\n")
+	b.WriteString("Write a handoff for the next session, which will start with an empty context and nothing but your handoff. ")
+	b.WriteString("Reply with text only: do not call any tool.\n\n")
 	b.WriteString("Use exactly these headings, in this order, each as a line starting with ##:\n\n")
 	for _, s := range sections {
 		fmt.Fprintf(&b, "## %s\n%s\n\n", s.heading, s.hint)
