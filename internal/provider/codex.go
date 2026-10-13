@@ -24,9 +24,9 @@ const responsesPath = "/responses"
 // promise about credentials: the bearer token is read in one place, the HTTP
 // request builder, and nowhere else in this file.
 //
-// What it does not do yet, by slice: quota and expiry failure shapes (KOP-199),
-// retries, and any wiring into the engine (KOP-198). A failed request is returned
-// as an [APIError], whole, and not retried.
+// A failed request is not retried. A 401, 403 or 429 comes back as a
+// [CodexError] saying what to do (KOP-199), wrapping the [APIError] with the
+// whole body; any other status is the plain [APIError].
 //
 // Sampling is not sent: the backend answers a `temperature` with a 400
 // ("Unsupported parameter: temperature"), and a `previous_response_id` the same
@@ -89,7 +89,7 @@ func (c *CodexClient) Complete(ctx context.Context, req Request) (*Stream, error
 		return nil, &TransportError{Err: err}
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, drain(resp)
+		return nil, classifyCodexError(drain(resp), resp.Header)
 	}
 	// The 200 observed live carried no content type at all, so an absent one is
 	// not a refusal. A type that is present and is not an event stream (an HTML
