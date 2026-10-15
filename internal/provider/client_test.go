@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -756,10 +757,11 @@ func TestDoesNotRetryWhatCannotSucceed(t *testing.T) {
 func TestRetriesATransportFailure(t *testing.T) {
 	f := loadFixture(t)
 
-	var calls int
+	// atomic: the aborted first request ends with no response, so nothing
+	// orders the handler goroutine's write before the test reads it.
+	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		calls++
-		if calls == 1 {
+		if calls.Add(1) == 1 {
 			// Aborts the connection without a response and without a stack
 			// trace in the test log.
 			panic(http.ErrAbortHandler)
@@ -778,8 +780,8 @@ func TestRetriesATransportFailure(t *testing.T) {
 	drain(t, stream)
 	_ = stream.Close()
 
-	if calls != 2 {
-		t.Errorf("the provider was called %d time(s), want 2", calls)
+	if n := calls.Load(); n != 2 {
+		t.Errorf("the provider was called %d time(s), want 2", n)
 	}
 	if d := clock.delays(); len(d) != 1 {
 		t.Errorf("the client waited %v, want exactly one backoff", d)
