@@ -522,3 +522,40 @@ served elsewhere, which is the property the pin exists for.
 ### The quantization is reported
 
 `fp8` is the literal value in AtlasCloud's endpoint record, not assumed.
+
+## deepseek/deepseek-v4.1-flash
+
+- **Observed:** 2026-10-16 (unauthenticated OpenRouter API)
+- **Registered as:** cheap open-weight A/B candidate, the DeepSeek successor to
+  `deepseek/deepseek-v3.2`. Maps to `DefaultConfigName`: the pinned endpoint reports
+  `seed`, so the default's fixed seed is a claim it can honour. No recorded fixtures yet;
+  the pin is validated by a live request, not by replay.
+
+### What was observed
+
+```bash
+curl -sS https://openrouter.ai/api/v1/models/deepseek/deepseek-v4.1-flash/endpoints
+```
+
+Thirty-three endpoints served it. Those reporting a real quantization are below; the rest
+said `unknown` and are excluded on the same ground as every other pin here. All were
+`status: 0` (healthy) on the day.
+
+| Provider | `tag` | Quant | Prompt $/M | Completion $/M | `seed`? | `tools`? |
+| --- | --- | --- | --- | --- | --- | --- |
+| Morph | `morph/fp8` | `fp8` | 0.03 | 0.60 | yes | yes |
+| inference.net | `inference-net/fp8` | `fp8` | 0.10 | 0.66 | yes | yes |
+| **DeepInfra** | `deepinfra/fp8` | **`fp8`** | 0.14 | 0.42 | yes | yes |
+| StreamLake | `streamlake/fp8` | `fp8` | 0.147 | 0.588 | **no** | yes |
+| Baidu | `baidu/fp8` | `fp8` | 0.1497 | 0.5988 | **no** | yes |
+| CoreWeave | `coreweave/fp8` | `fp8` | 0.15 | 0.65 | yes | yes |
+| AtlasCloud | `atlas-cloud/fp8` | `fp8` | 0.192 | 0.768 | yes | yes |
+
+### Why DeepInfra, `fp8`
+
+`fp8` is preferred to `fp4` for fidelity, as for every other pin in this file. Among `fp8`
+rows, StreamLake, Baidu, SiliconFlow, Baseten and Venice report no `seed` (the default
+configuration sends a fixed one). Morph and inference.net are cheaper but narrow
+providers; DeepInfra is the cheapest established host with both `seed` and `tools`.
+`allow_fallbacks: false` makes a failure loud rather than silently served elsewhere. If
+DeepInfra fails a real session, fall to CoreWeave and record why, as v3.2 did with GMICloud.
