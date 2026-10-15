@@ -1,0 +1,480 @@
+{
+  "run_id": "run-20261015t172544z",
+  "arm": {
+    "model_id": "deepseek/deepseek-v4.1-flash",
+    "harness_config_hash": "c07aa5cf7faf98523d1578ce96af7ecd6b01c455fa05e5d21554696b480b7ef9",
+    "harness_config_name": "default",
+    "provider_pin": "order=[deepinfra/fp8] allow_fallbacks=false quantizations=[fp8]",
+    "build": {
+      "version": "unknown",
+      "commit": "unknown",
+      "tree_state": "unknown",
+      "source": "unknown"
+    }
+  },
+  "corpus_version": "2.1.0",
+  "corpus_digest": "sha256:58d11c635af4fc9ef01b77bd8db2f1bdcd15ddf9afcbecf913c5ca8d38b5f0a6",
+  "commit": "4dcde1c8147926f5a93ca9743c6331ea98446aab",
+  "tasks": [
+    {
+      "task_id": "go-unicode-reverse",
+      "passed": false,
+      "session_id": "run-20261015t172544z-go-unicode-reverse",
+      "journal_dir": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/runs/run-20261015t172544z/go-unicode-reverse/.kopicode/sessions/run-20261015t172544z-go-unicode-reverse",
+      "stop": "max_turns",
+      "turns": 3,
+      "tokens": {
+        "prompt": 13229,
+        "completion": 372,
+        "total": 13601,
+        "cache_read": 13056
+      },
+      "session_err": "",
+      "panicked": false,
+      "oracle": {
+        "argv": [
+          "go",
+          "test",
+          "./..."
+        ],
+        "passed": false,
+        "exit_code": 1,
+        "signal": "",
+        "timed_out": false,
+        "duration_ms": 225,
+        "output": "# example.com/strutil [example.com/strutil.test]\n./strutil.go:14:1: syntax error: non-declaration statement outside function body\nFAIL\texample.com/strutil [build failed]\nFAIL\n",
+        "err": ""
+      },
+      "bucket": "harness",
+      "worktree": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/worktrees/go-unicode-reverse",
+      "worktree_kept": false,
+      "duration_ms": 5189
+    },
+    {
+      "task_id": "go-interface-implementation-gap",
+      "passed": false,
+      "session_id": "run-20261015t172544z-go-interface-implementation-gap",
+      "journal_dir": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/runs/run-20261015t172544z/go-interface-implementation-gap/.kopicode/sessions/run-20261015t172544z-go-interface-implementation-gap",
+      "stop": "max_turns",
+      "turns": 3,
+      "tokens": {
+        "prompt": 12370,
+        "completion": 254,
+        "total": 12624,
+        "cache_read": 11392
+      },
+      "session_err": "",
+      "panicked": false,
+      "oracle": {
+        "argv": [
+          "go",
+          "test",
+          "./..."
+        ],
+        "passed": false,
+        "exit_code": 1,
+        "signal": "",
+        "timed_out": false,
+        "duration_ms": 274,
+        "output": "--- FAIL: TestGroundQuoteIncludesSurcharge (0.00s)\n    shipping_test.go:12: ground Quote = 120, want 124 (base 120 plus the 4% fuel surcharge)\n--- FAIL: TestAirQuoteIncludesSurchargeDomestic (0.00s)\n    shipping_test.go:24: air domestic Quote = 360, want 374 (base 360 plus the 4% fuel surcharge)\n--- FAIL: TestAirQuoteIncludesSurchargeInternational (0.00s)\n    shipping_test.go:36: air international Quote = 860, want 894 (base 860 plus the 4% fuel surcharge)\n--- FAIL: TestFreightQuoteIncludesSurchargeAboveMinimum (0.00s)\n    shipping_test.go:48: freight Quote = 1250, want 1300 (base 1250 plus the 4% fuel surcharge)\n--- FAIL: TestFreightQuoteIncludesSurchargeAtMinimum (0.00s)\n    shipping_test.go:60: freight Quote below the minimum = 800, want 832 (the $8.00 minimum plus the 4% fuel surcharge)\nFAIL\nFAIL\texample.com/shipping\t0.003s\nFAIL\n",
+        "err": ""
+      },
+      "bucket": "harness",
+      "worktree": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/worktrees/go-interface-implementation-gap",
+      "worktree_kept": false,
+      "duration_ms": 4618
+    },
+    {
+      "task_id": "go-error-wrapping",
+      "passed": true,
+      "session_id": "run-20261015t172544z-go-error-wrapping",
+      "journal_dir": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/runs/run-20261015t172544z/go-error-wrapping/.kopicode/sessions/run-20261015t172544z-go-error-wrapping",
+      "stop": "max_turns",
+      "turns": 3,
+      "tokens": {
+        "prompt": 13443,
+        "completion": 438,
+        "total": 13881,
+        "cache_read": 13184
+      },
+      "session_err": "",
+      "panicked": false,
+      "oracle": {
+        "argv": [
+          "go",
+          "test",
+          "./..."
+        ],
+        "passed": true,
+        "exit_code": 0,
+        "signal": "",
+        "timed_out": false,
+        "duration_ms": 124,
+        "output": "ok  \texample.com/store\t(cached)\n",
+        "err": ""
+      },
+      "bucket": "",
+      "worktree": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/worktrees/go-error-wrapping",
+      "worktree_kept": false,
+      "duration_ms": 6035
+    },
+    {
+      "task_id": "go-interval-merge",
+      "passed": true,
+      "session_id": "run-20261015t172544z-go-interval-merge",
+      "journal_dir": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/runs/run-20261015t172544z/go-interval-merge/.kopicode/sessions/run-20261015t172544z-go-interval-merge",
+      "stop": "max_turns",
+      "turns": 3,
+      "tokens": {
+        "prompt": 13709,
+        "completion": 359,
+        "total": 14068,
+        "cache_read": 13568
+      },
+      "session_err": "",
+      "panicked": false,
+      "oracle": {
+        "argv": [
+          "go",
+          "test",
+          "./..."
+        ],
+        "passed": true,
+        "exit_code": 0,
+        "signal": "",
+        "timed_out": false,
+        "duration_ms": 153,
+        "output": "ok  \texample.com/intervals\t(cached)\n",
+        "err": ""
+      },
+      "bucket": "",
+      "worktree": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/worktrees/go-interval-merge",
+      "worktree_kept": false,
+      "duration_ms": 6024
+    },
+    {
+      "task_id": "go-lru-cache",
+      "passed": true,
+      "session_id": "run-20261015t172544z-go-lru-cache",
+      "journal_dir": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/runs/run-20261015t172544z/go-lru-cache/.kopicode/sessions/run-20261015t172544z-go-lru-cache",
+      "stop": "max_turns",
+      "turns": 3,
+      "tokens": {
+        "prompt": 14047,
+        "completion": 356,
+        "total": 14403,
+        "cache_read": 13824
+      },
+      "session_err": "",
+      "panicked": false,
+      "oracle": {
+        "argv": [
+          "go",
+          "test",
+          "./..."
+        ],
+        "passed": true,
+        "exit_code": 0,
+        "signal": "",
+        "timed_out": false,
+        "duration_ms": 128,
+        "output": "ok  \texample.com/lru\t(cached)\n",
+        "err": ""
+      },
+      "bucket": "",
+      "worktree": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/worktrees/go-lru-cache",
+      "worktree_kept": false,
+      "duration_ms": 5645
+    },
+    {
+      "task_id": "go-wordwrap-width",
+      "passed": true,
+      "session_id": "run-20261015t172544z-go-wordwrap-width",
+      "journal_dir": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/runs/run-20261015t172544z/go-wordwrap-width/.kopicode/sessions/run-20261015t172544z-go-wordwrap-width",
+      "stop": "max_turns",
+      "turns": 3,
+      "tokens": {
+        "prompt": 13433,
+        "completion": 670,
+        "total": 14103,
+        "cache_read": 13184
+      },
+      "session_err": "",
+      "panicked": false,
+      "oracle": {
+        "argv": [
+          "go",
+          "test",
+          "./..."
+        ],
+        "passed": true,
+        "exit_code": 0,
+        "signal": "",
+        "timed_out": false,
+        "duration_ms": 163,
+        "output": "ok  \texample.com/wrap\t(cached)\n",
+        "err": ""
+      },
+      "bucket": "",
+      "worktree": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/worktrees/go-wordwrap-width",
+      "worktree_kept": false,
+      "duration_ms": 7881
+    },
+    {
+      "task_id": "py-multi-module-exploration",
+      "passed": false,
+      "session_id": "run-20261015t172544z-py-multi-module-exploration",
+      "journal_dir": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/runs/run-20261015t172544z/py-multi-module-exploration/.kopicode/sessions/run-20261015t172544z-py-multi-module-exploration",
+      "stop": "max_turns",
+      "turns": 3,
+      "tokens": {
+        "prompt": 14352,
+        "completion": 369,
+        "total": 14721,
+        "cache_read": 14208
+      },
+      "session_err": "",
+      "panicked": false,
+      "oracle": {
+        "argv": [
+          "python3",
+          "-m",
+          "unittest",
+          "discover",
+          "-q"
+        ],
+        "passed": false,
+        "exit_code": 1,
+        "signal": "",
+        "timed_out": false,
+        "duration_ms": 48,
+        "output": "======================================================================\nFAIL: test_dashboard_reflects_the_environments_asked_for (test_dashboard.TestDashboard.test_dashboard_reflects_the_environments_asked_for)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/worktrees/py-multi-module-exploration/bench/tasks/py-multi-module-exploration/repo/test_dashboard.py\", line 46, in test_dashboard_reflects_the_environments_asked_for\n    self.assertIn(\"workers=16\", second)\n    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 'workers=16' not found in 'staging: workers=4, timeout=30, log_level=DEBUG'\n\n======================================================================\nFAIL: test_a_second_environment_is_not_stuck_on_the_first (test_dashboard.TestResolve.test_a_second_environment_is_not_stuck_on_the_first)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/worktrees/py-multi-module-exploration/bench/tasks/py-multi-module-exploration/repo/test_dashboard.py\", line 26, in test_a_second_environment_is_not_stuck_on_the_first\n    self.assertEqual(resolve(\"production\")[\"workers\"], 16)\n    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 4 != 16\n\n======================================================================\nFAIL: test_status_line_reflects_its_own_environment (test_dashboard.TestStatusLine.test_status_line_reflects_its_own_environment)\n----------------------------------------------------------------------\nTraceback (most recent call last):\n  File \"/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/worktrees/py-multi-module-exploration/bench/tasks/py-multi-module-exploration/repo/test_dashboard.py\", line 35, in test_status_line_reflects_its_own_environment\n    self.assertIn(\"workers=16\", status_line(\"production\"))\n    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError: 'workers=16' not found in 'production: workers=4, timeout=30, log_level=DEBUG'\n\n----------------------------------------------------------------------\nRan 6 tests in 0.001s\n\nFAILED (failures=3)\n",
+        "err": ""
+      },
+      "bucket": "harness",
+      "worktree": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/worktrees/py-multi-module-exploration",
+      "worktree_kept": false,
+      "duration_ms": 5889
+    },
+    {
+      "task_id": "go-flag-equals-form",
+      "passed": true,
+      "session_id": "run-20261015t172544z-go-flag-equals-form",
+      "journal_dir": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/runs/run-20261015t172544z/go-flag-equals-form/.kopicode/sessions/run-20261015t172544z-go-flag-equals-form",
+      "stop": "max_turns",
+      "turns": 3,
+      "tokens": {
+        "prompt": 13782,
+        "completion": 1207,
+        "total": 14989,
+        "cache_read": 13568
+      },
+      "session_err": "",
+      "panicked": false,
+      "oracle": {
+        "argv": [
+          "go",
+          "test",
+          "./..."
+        ],
+        "passed": true,
+        "exit_code": 0,
+        "signal": "",
+        "timed_out": false,
+        "duration_ms": 142,
+        "output": "ok  \texample.com/flagset\t(cached)\n",
+        "err": ""
+      },
+      "bucket": "",
+      "worktree": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/worktrees/go-flag-equals-form",
+      "worktree_kept": false,
+      "duration_ms": 11120
+    },
+    {
+      "task_id": "go-config-retries",
+      "passed": false,
+      "session_id": "run-20261015t172544z-go-config-retries",
+      "journal_dir": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/runs/run-20261015t172544z/go-config-retries/.kopicode/sessions/run-20261015t172544z-go-config-retries",
+      "stop": "max_turns",
+      "turns": 3,
+      "tokens": {
+        "prompt": 14136,
+        "completion": 670,
+        "total": 14806,
+        "cache_read": 13952
+      },
+      "session_err": "",
+      "panicked": false,
+      "oracle": {
+        "argv": [
+          "go",
+          "test",
+          "./..."
+        ],
+        "passed": false,
+        "exit_code": 1,
+        "signal": "",
+        "timed_out": false,
+        "duration_ms": 218,
+        "output": "# example.com/config [example.com/config.test]\n./config.go:16:1: syntax error: non-declaration statement outside function body\nFAIL\texample.com/config [build failed]\nFAIL\n",
+        "err": ""
+      },
+      "bucket": "harness",
+      "worktree": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/worktrees/go-config-retries",
+      "worktree_kept": false,
+      "duration_ms": 8364
+    },
+    {
+      "task_id": "py-calc-modulo",
+      "passed": true,
+      "session_id": "run-20261015t172544z-py-calc-modulo",
+      "journal_dir": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/runs/run-20261015t172544z/py-calc-modulo/.kopicode/sessions/run-20261015t172544z-py-calc-modulo",
+      "stop": "max_turns",
+      "turns": 3,
+      "tokens": {
+        "prompt": 14627,
+        "completion": 968,
+        "total": 15595,
+        "cache_read": 14464
+      },
+      "session_err": "",
+      "panicked": false,
+      "oracle": {
+        "argv": [
+          "python3",
+          "-m",
+          "unittest",
+          "discover",
+          "-q"
+        ],
+        "passed": true,
+        "exit_code": 0,
+        "signal": "",
+        "timed_out": false,
+        "duration_ms": 45,
+        "output": "----------------------------------------------------------------------\nRan 7 tests in 0.000s\n\nOK\n",
+        "err": ""
+      },
+      "bucket": "",
+      "worktree": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/worktrees/py-calc-modulo",
+      "worktree_kept": false,
+      "duration_ms": 10334
+    },
+    {
+      "task_id": "go-multi-file-rename-contract",
+      "passed": false,
+      "session_id": "run-20261015t172544z-go-multi-file-rename-contract",
+      "journal_dir": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/runs/run-20261015t172544z/go-multi-file-rename-contract/.kopicode/sessions/run-20261015t172544z-go-multi-file-rename-contract",
+      "stop": "max_turns",
+      "turns": 3,
+      "tokens": {
+        "prompt": 15422,
+        "completion": 1019,
+        "total": 16441,
+        "cache_read": 11520
+      },
+      "session_err": "",
+      "panicked": false,
+      "oracle": {
+        "argv": [
+          "go",
+          "test",
+          "./..."
+        ],
+        "passed": false,
+        "exit_code": 1,
+        "signal": "",
+        "timed_out": false,
+        "duration_ms": 154,
+        "output": "# example.com/billing [example.com/billing.test]\n./cart.go:27:29: not enough arguments in call to c.Discount.Apply\n\thave (int)\n\twant (int, Tier)\n./invoice.go:22:24: not enough arguments in call to d.Apply\n\thave (int)\n\twant (int, Tier)\n./receipt.go:15:24: not enough arguments in call to d.Apply\n\thave (int)\n\twant (int, Tier)\nFAIL\texample.com/billing [build failed]\nFAIL\n",
+        "err": ""
+      },
+      "bucket": "harness",
+      "worktree": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/worktrees/go-multi-file-rename-contract",
+      "worktree_kept": false,
+      "duration_ms": 9972
+    },
+    {
+      "task_id": "go-event-dispatch-ordering",
+      "passed": false,
+      "session_id": "run-20261015t172544z-go-event-dispatch-ordering",
+      "journal_dir": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/runs/run-20261015t172544z/go-event-dispatch-ordering/.kopicode/sessions/run-20261015t172544z-go-event-dispatch-ordering",
+      "stop": "max_turns",
+      "turns": 3,
+      "tokens": {
+        "prompt": 13698,
+        "completion": 504,
+        "total": 14202,
+        "cache_read": 13440
+      },
+      "session_err": "",
+      "panicked": false,
+      "oracle": {
+        "argv": [
+          "go",
+          "test",
+          "./..."
+        ],
+        "passed": false,
+        "exit_code": 1,
+        "signal": "",
+        "timed_out": false,
+        "duration_ms": 236,
+        "output": "--- FAIL: TestPipelineProducesReportAndNotification (0.00s)\n    dispatch_test.go:16: orders[0].ReportLine = \"Order O-1: , $45.99\", want \"Order O-1: Amara Okafor, $45.99\"\n    dispatch_test.go:19: orders[1].Notification = \"Hi , your order O-2 has shipped!\", want \"Hi Priya Nandakumar, your order O-2 has shipped!\"\n--- FAIL: TestReplayPipelineRegeneratesTheSameText (0.00s)\n    dispatch_test.go:37: ReportLine = \"Order O-9: , $9.99\", want \"Order O-9: Ben Rosales, $9.99\"\n    dispatch_test.go:40: Notification = \"Hi , your order O-9 has shipped!\", want \"Hi Ben Rosales, your order O-9 has shipped!\"\nFAIL\nFAIL\texample.com/dispatch\t0.004s\nFAIL\n",
+        "err": ""
+      },
+      "bucket": "harness",
+      "worktree": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/worktrees/go-event-dispatch-ordering",
+      "worktree_kept": false,
+      "duration_ms": 5829
+    },
+    {
+      "task_id": "go-partial-fix-trap-validation",
+      "passed": false,
+      "session_id": "run-20261015t172544z-go-partial-fix-trap-validation",
+      "journal_dir": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/runs/run-20261015t172544z/go-partial-fix-trap-validation/.kopicode/sessions/run-20261015t172544z-go-partial-fix-trap-validation",
+      "stop": "max_turns",
+      "turns": 3,
+      "tokens": {
+        "prompt": 13513,
+        "completion": 548,
+        "total": 14061,
+        "cache_read": 11392
+      },
+      "session_err": "",
+      "panicked": false,
+      "oracle": {
+        "argv": [
+          "go",
+          "test",
+          "./..."
+        ],
+        "passed": false,
+        "exit_code": 1,
+        "signal": "",
+        "timed_out": false,
+        "duration_ms": 148,
+        "output": "# example.com/profile\nvalidate.go:5:1: missing import path\nFAIL\texample.com/profile [setup failed]\nFAIL\n",
+        "err": ""
+      },
+      "bucket": "harness",
+      "worktree": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/worktrees/go-partial-fix-trap-validation",
+      "worktree_kept": false,
+      "duration_ms": 6343
+    }
+  ],
+  "reclamation": {
+    "PrunedAdmin": 0,
+    "PrunedStale": 0,
+    "Created": 13,
+    "Removed": 13,
+    "Kept": 0,
+    "Failed": null,
+    "CreateFailed": null
+  },
+  "jobs": 4,
+  "started": "2026-10-16T01:25:44.400636762+08:00",
+  "duration_ms": 27765,
+  "out_dir": "/home/jianlee/.treehouse/kopicode-021e2a/1/kopicode/.kopicode/bench/runs/run-20261015t172544z",
+  "provider": "live"
+}
