@@ -109,3 +109,63 @@ python3 docs/bench-results/2026-10-10-handoff/analyze.py <dir of A*.json B*.json
 
 Also worth running: a corpus with tasks that need more than 24 turns, where the continue arm
 fails too, since that is where a handoff could win; and a cap other than 8.
+
+---
+
+# Second measurement: the narrative arm, on `deepseek/deepseek-v4.1-flash` (KOP-171)
+
+- **Observed:** 2026-10-16, live OpenRouter traffic, `deepseek/deepseek-v4.1-flash` pinned to
+  `deepinfra/fp8` ([`provider-pin.md`](provider-pin.md)), default harness config, corpus 2.1.0
+  (13 tasks), build tree state `unknown`.
+- **Why a different model:** `qwen/qwen3-coder-next` was blocked by an account guardrail
+  when this was run, and a pinned arm cannot change model mid-comparison, so all three arms
+  were rerun on v4.1-flash. Nothing below compares with the Qwen numbers above.
+- **Results:** [`bench-results/2026-10-16-handoff-v41-flash/`](bench-results/2026-10-16-handoff-v41-flash/)
+  (`cap8/`, `cap3/`, and `analyze.py <dir> <continue cap> <segment cap> <max handoffs>`).
+
+Unlike the first measurement, the handoff here is the real one: the drafting fixes above are
+in, so the next segment is told the model's own narrative as well as the facts block.
+
+## Protocol 1, cap 8: no handoff ever fired
+
+Same protocol as above (A 24 turns, B segments of 8 with up to 2 handoffs, C cap 8).
+
+| arm | passes per run | mean pass | mean turns | mean cost | handoffs / run |
+|---|---|---|---|---|---|
+| A continue (cap 24) | 13 / 13 / 13 | 13.00 | 69 | $0.013 | 0 |
+| B hand off at cap 8 | 13 / 13 / 13 | 13.00 | 66 | $0.013 | 0 |
+| C cap 8, no handoff | 13 / 13 / 12 | 12.67 | 72 | $0.013 | 0 |
+
+v4.1-flash solves every task in 4 to 9 turns, so almost nothing reaches a cap of 8 and B
+never handed off. **This measures nothing about handoff**; it only shows the corpus is too
+easy for this model at that cap, as the card predicted.
+
+## Protocol 2, cap 3: the same 12-turn ceiling, handoffs forced
+
+| arm | how | passes per run | mean pass | mean turns | mean tokens | mean cost | handoffs / run |
+|---|---|---|---|---|---|---|---|
+| A continue | one session, `--max-turns 12` | 13 / 13 / 13 | 13.00 | 68 | 0.42M | $0.012 | 0 |
+| B hand off | segments of 3, `--handoff-at-cap 3` | 11 / 12 / 13 | 12.00 | 142 | 0.99M | $0.026 | 34.3 |
+| C floor | `--max-turns 3` | 6 / 6 / 7 | 6.33 | 39 | 0.19M | $0.005 | 0 |
+
+## What the data supports, and what it does not
+
+- **A handoff recovers most of what a small cap loses.** B passed 12.0 of 13 against 6.3 for
+  C: about 5.7 of the 6.7 tasks the cap alone drops.
+- **It still gives something up against continuing in place.** A passed 13.0 in every run,
+  B 12.0, and B cost about 2.2 times as much (0.99M tokens against 0.42M), because a task
+  A finishes in 4 to 7 turns used all 12 in B on most tasks. The two tasks B lost most are
+  `go-event-dispatch-ordering` (1 of 3) and `go-interface-implementation-gap` (2 of 3).
+- **Why B spends all 12 turns on easy tasks is not explained.** Likely candidates are
+  re-reading and re-verifying in each fresh segment, but no segment-level analysis was done,
+  so this is a guess.
+- **n is 3 per arm, one model, one corpus, one cap.** The cap-3 protocol is artificial: it
+  forces handoffs on tasks the model solves in a handful of turns, so it shows the cost of
+  a handoff when one is forced, not how often a real long task would need one.
+- **The case a handoff could win is untested.** Both protocols give A enough turns to finish
+  every task. A corpus with tasks that defeat the continue arm, and a model weak enough to
+  need it, is still missing.
+- The runs report `tree state unknown`, so under ADR-0007 decision 7 they are not poolable.
+- Total spend for both protocols, 18 full runs plus a probe, was a few tens of cents.
+
+The ADR's claim moves from "unmeasured" to "measured once, with these limits".

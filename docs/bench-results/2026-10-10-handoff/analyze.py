@@ -18,7 +18,9 @@ def cost(run):
 
 arms = collections.defaultdict(list)
 for name, r in runs.items(): arms[name[0]].append((name, r, cost(r)))
-label = {'A': 'A continue (cap 24)', 'B': 'B hand off at cap 8 (<=2 handoffs)', 'C': 'C cap 8, no handoff', 'X': 'X (invalid first attempt: blank narrative)'}
+# Optional: analyze.py <dir> <continue cap> <segment cap> <max handoffs>, default the 2026-10-10 protocol.
+cont, seg, hmax = (sys.argv[2:5] + ['24', '8', '2'][len(sys.argv[2:5]):])[:3]
+label = {'A': f'A continue (cap {cont})', 'B': f'B hand off at cap {seg} (<={hmax} handoffs)', 'C': f'C cap {seg}, no handoff', 'X': 'X (invalid first attempt: blank narrative)'}
 print('| arm | runs | passes per run | mean pass | mean turns | mean tokens | mean cost | handoffs/run |')
 print('|---|---|---|---|---|---|---|---|')
 per_task = {a: collections.defaultdict(list) for a in arms}
