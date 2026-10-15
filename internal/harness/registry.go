@@ -165,6 +165,22 @@ var registry = []Entry{
 		},
 		Validated: "2026-10-06",
 	},
+	{
+		// A/B candidate, the cheap DeepSeek successor to v3.2. DeepInfra is the
+		// cheapest well-known fp8 endpoint that reports both `seed` and
+		// `tools` and was healthy (status 0). Morph and inference-net are
+		// cheaper but niche; baidu, siliconflow, streamlake and baseten do not
+		// report `seed`. Full argument and the endpoint table:
+		// docs/provider-pin.md §deepseek/deepseek-v4.1-flash.
+		ModelID:       "deepseek/deepseek-v4.1-flash",
+		HarnessConfig: DefaultConfigName,
+		Pin: provider.Pin{
+			Order:          []string{"deepinfra/fp8"},
+			AllowFallbacks: false,
+			Quantizations:  []string{"fp8"},
+		},
+		Validated: "2026-10-16",
+	},
 }
 
 // Lookup returns the registry row for a model id, and whether it exists.
