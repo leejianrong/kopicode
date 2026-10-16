@@ -36,9 +36,10 @@ runs each, interleaved (cap, no cap, cap, ...). Raw results: [`docs/bench-result
 | `--output-cap 32768` | 13 / 13 / 13 | 74 / 68 / 70 | 465k / 422k / 424k |
 | `--output-cap 0` | 13 / 13 / 13 | 67 / 72 / 64 | 419k / 453k / 385k |
 
-**The corpus cannot separate the arms, and here the reason is plain: the cap never fired.** No
-`run_shell` or `grep` result in any of the six runs reached 32 KiB, so no model saw a cut output
-(the journals hold no omission note). Both arms pass every task every time, and the differences in
+**The corpus cannot separate the arms, and here the reason is plain: the cap never fired.** The
+largest `ToolResult` in any of the six journals is about 4.5 KB, far under 32 KiB, so no model saw
+a cut output. (The omission note itself is wire-only, so its absence from a journal proves
+nothing; the result sizes do.) Both arms pass every task every time, and the differences in
 turns and tokens (mean 70.7 turns and 437k tokens against 67.7 and 419k) are smaller than the
 spread inside either arm. The two arms' harness-config hashes differ, as they should. Read it as
 a check that setting the cap does no harm on tasks that never trip it, and as nothing more: it
