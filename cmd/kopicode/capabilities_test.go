@@ -59,6 +59,12 @@ func TestSessionEventsHasItsFeatureName(t *testing.T) {
 	}
 }
 
+func TestSessionResumeHasItsFeatureName(t *testing.T) {
+	if !slices.Contains(features, "session.resume") {
+		t.Errorf("session.start's resume param has no feature name in %v", features)
+	}
+}
+
 func TestVersionJSONPrintsCapabilities(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"version", "--json"}, &stdout, &stderr); code != exitSuccess {

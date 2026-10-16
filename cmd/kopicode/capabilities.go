@@ -40,6 +40,7 @@ var features = []string{
 	"session.instructions",
 	"session.limits",
 	"session.read_only",
+	"session.resume",
 	"session.usage",
 	"skills.catalogue",
 	"usage.context",

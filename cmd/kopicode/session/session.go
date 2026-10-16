@@ -112,6 +112,13 @@ type StartParams struct {
 	Handoff       string
 	ParentSession string
 
+	// Resume is the id of an earlier session (as `kopicode sessions` lists it)
+	// whose history this one continues on the same working tree. It is the
+	// journal id, and may differ from ID, the caller's key for the open
+	// session. An id with no record is a [KindUsage] error, never a fresh
+	// session. Empty starts a new one; it cannot be combined with Handoff.
+	Resume string
+
 	// ConsentTimeout overrides the process-wide live-consent timeout for this
 	// session alone. Zero means "use the process default"; it is meaningful
 	// only under ConsentRemoteInteractive, and the caller has already checked
@@ -348,6 +355,14 @@ func (m *Manager) prepareStart(p StartParams, events engine.Observer) (*managed,
 	opts := m.base
 	opts.Dir = p.Dir
 	opts.SessionID = p.ID
+	if p.Resume != "" {
+		if p.Handoff != "" {
+			m.unreserve(ms)
+			return nil, nil, errf(KindUsage, "resume cannot be combined with handoff: a resumed session "+
+				"already has its history, and a handoff starts a new one")
+		}
+		opts.SessionID, opts.Resume = p.Resume, true
+	}
 	opts.Selection = selection
 	// Told once to a new session, as the REPL's are (ADR-0025, KOP-159); the
 	// engine ignores it for a resumed or forked one.
@@ -365,8 +380,22 @@ func (m *Manager) prepareStart(p StartParams, events engine.Observer) (*managed,
 		m.unreserve(ms)
 		return nil, nil, rerr
 	}
-	return ms, func() (*engine.Session, error) { return engine.Open(m.ctx, opts) }, nil
+	return ms, func() (*engine.Session, error) {
+		sess, err := engine.Open(m.ctx, opts)
+		if err != nil && opts.Resume && errors.Is(err, engine.ErrConfig) {
+			// engine.Open's own text names an internal option; the caller's mistake
+			// is an id that does not resolve (run --print says the same).
+			return nil, &usageOpenError{fmt.Sprintf("no session %q to resume in this repository; "+
+				"run `kopicode sessions` to see the ids you can resume from (%v)", p.Resume, err)}
+		}
+		return sess, err
+	}, nil
 }
+
+// usageOpenError marks an engine.Open failure that is the caller's own mistake.
+type usageOpenError struct{ msg string }
+
+func (e *usageOpenError) Error() string { return e.msg }
 
 // unreserve drops a session that never opened, freeing its id.
 func (m *Manager) unreserve(ms *managed) {
@@ -378,6 +407,10 @@ func (m *Manager) unreserve(ms *managed) {
 }
 
 func openError(err error) *Error {
+	var ue *usageOpenError
+	if errors.As(err, &ue) {
+		return &Error{Kind: KindUsage, Message: ue.Error()}
+	}
 	kind := KindOpenFailed
 	if errors.Is(err, engine.ErrSessionLocked) {
 		kind = KindSessionLocked

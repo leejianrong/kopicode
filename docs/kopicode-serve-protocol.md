@@ -191,6 +191,7 @@ free again.
 | `read_only` | boolean | no | refuse every file write for this session (ADR-0019): `write_file` and `edit_file` are denied by the gate itself, inside the root or outside it, in every mode, and the client is never asked. Shell is **not** made read-only — it stays governed by `consent_mode` — so this is not a sandbox. A usage error under `"auto"`, which runs shell unasked |
 | `handoff` | string | no | a handoff document (ADR-0026), as [`session.handoff`](#sessionhandoff) returned it, to start from. The session is told it once, as its first message, under a `<handoff>` tag; its journal records it (a `project_instructions_loaded` with scope `handoff`) and its verification starts as not run whatever the document says. Feature `session.handoff` |
 | `handoff_from` | string | no | with `handoff`: the id of the session the document came from, recorded as `parent_session` on this session's `session_started`. Ignored without `handoff` |
+| `resume` | string | no | the id of an earlier session to continue, as `kopicode sessions -json` lists it and `session_started` carries it. The session opens on the same journal: its history is replayed, so the first prompt sees the whole prior conversation, and its turn numbers carry on from it. The working tree is **not** restored to where that session left it. `session` stays the client's own key and may be the same string or a new one; `record` in the result names the journal directory either way. An id with no record in `dir` is `-32003`, never a fresh session. The tree lock still applies (`-32005`), and `resume` with `handoff` is `-32003`. Feature `session.resume` |
 | `never_allow` | array of strings | no | extra never-allow entries for `consent_mode: "auto"` (ADR-0017), each `"command [token ...]"`; see [`"auto"`](#auto-adr-0017). Adds to the built-in list, never removes from it. Sending it under any other mode is a usage error |
 
 **Result** (`turnResult`): the turn's outcome, projected the way `run --print`'s last line
@@ -381,7 +382,7 @@ list of stable lower-case dotted names, added in the change that ships a capabil
 and removed only with a protocol bump. Current names: `allow_commands`, `ask.request`, `consent.note`, `consent_mode.auto`,
 `consent_mode.remote_interactive`, `consent_mode.unattended_policy`, `consent_request.command`,
 `consent_timeout.flag`, `consent_timeout.session`, `mcp`, `provider_url.flag`, `serve.listen`, `server.hello`, `server.sessions`, `server.shutdown`,
-`session.close`, `session.events_since`, `session.handoff`, `session.limits`, `session.read_only`, `session.usage`,
+`session.close`, `session.events_since`, `session.handoff`, `session.limits`, `session.read_only`, `session.resume`, `session.usage`,
 `usage.context`, `usage.context_window`, `usage.cost`, `usage.tokens_split`.
 `cmd/kopicode/capabilities_test.go` ties the list to the consent modes and methods in the code.
 
@@ -525,7 +526,7 @@ The first four are JSON-RPC's reserved values; the server-defined ones sit in th
 | -32000 | unknown session | `session.submit`/`session.cancel`/`session.handoff`/`session.close`/`session.events` named an id with no open session (`session.events` also accepts an ended one still listed), or `session.submit` named one whose close is already accepted |
 | -32001 | session exists | `session.start` named an id already open in this process |
 | -32002 | open failed | `engine.Open` refused: a bad model, a missing credential |
-| -32003 | usage error | the arm could not be resolved (an unknown model or harness); or `session.start`'s `consent_mode` is missing/unrecognised, or `"unattended_policy"` is requested without `containment_provided: true` (ADR-0016); or `never_allow` is sent without `consent_mode: "auto"`, or holds a malformed entry (ADR-0017); or `session.handoff` named a session that has run no turn |
+| -32003 | usage error | the arm could not be resolved (an unknown model or harness); or `session.start`'s `consent_mode` is missing/unrecognised, or `"unattended_policy"` is requested without `containment_provided: true` (ADR-0016); or `never_allow` is sent without `consent_mode: "auto"`, or holds a malformed entry (ADR-0017); or `session.handoff` named a session that has run no turn; or `session.start`'s `resume` names a session with no record, or is sent with `handoff` |
 | -32603 | internal error | `session.close` could not write the session's `session_ended`; or `session.handoff`'s draft failed; or `session.events` could not read the journal |
 | -32005 | session locked | `session.start`'s `dir` is already held by another live session |
 
