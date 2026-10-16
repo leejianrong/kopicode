@@ -58,7 +58,8 @@ import (
 //     session on the given working tree with engine.Open, keyed by the
 //     caller-supplied `session` id, and runs the first turn with `prompt`. The
 //     id is the caller's so it can cancel a turn whose start has not yet
-//     returned.
+//     returned. An optional `resume` names an earlier session's journal id to
+//     continue instead of starting fresh (KOP-207).
 //   - session.submit — params {session, prompt}. Queues the next turn on an
 //     already-open session; it never fails because a turn is already running —
 //     the turn waits its place in the session's queue.
@@ -344,6 +345,11 @@ type startParams struct {
 	// from, for the record.
 	Handoff     string `json:"handoff"`
 	HandoffFrom string `json:"handoff_from"`
+
+	// Resume is the id of an earlier session to continue on the same working
+	// tree, as `kopicode sessions` and session_started carry it. Session stays
+	// the client's own key and may differ. An id with no record is a usage error.
+	Resume string `json:"resume"`
 }
 
 type submitParams struct {
@@ -795,7 +801,7 @@ func (s *server) dispatchStart(req rpcRequest) {
 		MaxTurns: p.MaxTurns, TokenBudget: p.TokenBudget,
 		ConsentMode: p.ConsentMode, ContainmentProvided: p.ContainmentProvided, NeverAllow: p.NeverAllow,
 		ConsentTimeout: timeout, ReadOnly: p.ReadOnly, AskMode: p.AskMode,
-		Handoff: p.Handoff, ParentSession: p.HandoffFrom,
+		Handoff: p.Handoff, ParentSession: p.HandoffFrom, Resume: p.Resume,
 	}, s.notifier(p.Session), sessioncore.Turn{Done: func(r sessioncore.TurnResult) {
 		s.writeResult(id, turnResultOf(r))
 	}, Fail: func(e *sessioncore.Error) {
