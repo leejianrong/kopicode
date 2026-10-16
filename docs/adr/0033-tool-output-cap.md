@@ -26,7 +26,29 @@ KOP-179 proposed "head and tail plus *N lines omitted, read blob X with offset/l
 
 ## Measurement
 
-No gain is claimed. The 13-task corpus rarely produces output near 32 KiB, so it cannot show an effect either way; `make bench-smoke` confirms nothing moved. The check that matters is on a task whose test log or search is large, which needs a long-output task set and live spend (OpenRouter credit is exhausted as of this writing). Until then this is a cost-control change for people at a keyboard.
+**Live arm, 2026-10-16 (KOP-179).** `deepseek/deepseek-v4.1-flash` pinned to `deepinfra/fp8`
+(`allow_fallbacks: false`, recorded per result), corpus 2.1.0 (13 tasks), `kopibench` at `6bb11ec`,
+default harness config, 20 turns per prompt. `--output-cap 32768` against `--output-cap 0`, three
+runs each, interleaved (cap, no cap, cap, ...). Raw results: [`docs/bench-results/2026-10-16-output-cap/`](../bench-results/2026-10-16-output-cap/).
+
+| arm | passes per run | turns per run | tokens per run |
+|---|---|---|---|
+| `--output-cap 32768` | 13 / 13 / 13 | 74 / 68 / 70 | 465k / 422k / 424k |
+| `--output-cap 0` | 13 / 13 / 13 | 67 / 72 / 64 | 419k / 453k / 385k |
+
+**The corpus cannot separate the arms, and here the reason is plain: the cap never fired.** The
+largest `ToolResult` in any of the six journals is about 4.5 KB, far under 32 KiB, so no model saw
+a cut output. (The omission note itself is wire-only, so its absence from a journal proves
+nothing; the result sizes do.) Both arms pass every task every time, and the differences in
+turns and tokens (mean 70.7 turns and 437k tokens against 67.7 and 419k) are smaller than the
+spread inside either arm. The two arms' harness-config hashes differ, as they should. Read it as
+a check that setting the cap does no harm on tasks that never trip it, and as nothing more: it
+says nothing about whether the cap helps on a task that does. That needs a task whose test log or
+search is large. The cost column of `kopibench` is `n/a` for this model, so spend is reported as
+tokens; it was well under a dollar for all 78 task runs.
+
+Earlier note, kept: until such a task set exists this is a cost-control change for people at a
+keyboard, and no gain is claimed.
 
 ## Consequences
 
