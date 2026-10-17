@@ -40,6 +40,10 @@ const (
 	// phaseVerification is the project's own verification command (SLICE-1 §5).
 	phaseVerification = "verification"
 
+	// phaseStopHook is the person's stop hook (ADR-0036) running when the turn was
+	// cancelled. Its process group was killed.
+	phaseStopHook = "stop_hook"
+
 	// phaseBetweenSteps is nothing in flight: the loop reached a checkpoint with
 	// the context already cancelled. A turn refused before it started reads this
 	// way, and so does a cancellation that landed in the gap between two

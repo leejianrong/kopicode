@@ -46,6 +46,7 @@ func (e *Engine) Run(ctx context.Context, prompt string) (Result, error) {
 	// to completion and cancels turn 5 must not record turn 5 as interrupted
 	// wherever turn 1 was.
 	e.cancelPhase = ""
+	e.stopRefusals = 0
 
 	// at is the turn events belong to, which is not e.turn: the loop increments
 	// that only once a turn actually starts, and the user's message — and a
@@ -64,6 +65,8 @@ func (e *Engine) Run(ctx context.Context, prompt string) (Result, error) {
 			// SessionEnded would record "verification_failed" and nothing about
 			// which command said so.
 			e.detail = e.unverified
+		case stop == StopGateFailed:
+			e.detail = e.stopGate
 		}
 		if stop == StopCancelled {
 			if err := e.journalCancellation(ctx, at, cause); err != nil {
@@ -165,7 +168,9 @@ func (e *Engine) runTurn(ctx context.Context, turn int) (Stop, error) {
 			if e.unverified != "" {
 				return StopVerificationFailed, nil
 			}
-			return StopCompleted, nil
+			// ADR-0036: the person's own gate, after forced verification and so
+			// only over a tree verification did not reject.
+			return e.stopGateStep(ctx, turn)
 
 		case parse.EventToolCallRepaired:
 			if err := e.journalUnparsed(ctx, turn, site, reply, out); err != nil {

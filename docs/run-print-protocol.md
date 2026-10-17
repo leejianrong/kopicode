@@ -88,6 +88,7 @@ source of truth if the two ever disagree):
 | `completed` | 0 | the model replied in prose, asking for no tool |
 | `cancelled` | 1 | the run's context was cancelled (Ctrl-C, a caller's timeout) |
 | `verification_failed` | 1 | the model declared the task done over a tree the project's own verification command rejects |
+| `stop_gate_failed` | 1 | the person's own stop hook (ADR-0036) refused the model's stop three times in a row. Only the interactive REPL runs hooks, so `run --print` never emits this; it is listed because this table mirrors `internal/engine/stop.go` |
 | `budget_exhausted` | 1 | the session's token budget ran out (`--token-budget`; 0 is unbounded) |
 | `max_turns` | 4 | the turn cap was reached (`--max-turns`; default 20 here, 100 in the REPL) |
 | `error` | 3 | a provider call that produced no usable reply, after the client's own retries |

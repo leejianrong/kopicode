@@ -267,6 +267,7 @@ func TestClassifyReadsTheStop(t *testing.T) {
 		"max turns":            {stop: engine.StopMaxTurns.Reason(), want: bench.BucketHarness},
 		"budget exhausted":     {stop: engine.StopBudgetExhausted.Reason(), want: bench.BucketModel},
 		"verification failed":  {stop: engine.StopVerificationFailed.Reason(), want: bench.BucketModel},
+		"stop gate failed":     {stop: engine.StopGateFailed.Reason(), want: bench.BucketModel},
 		"cancelled":            {stop: engine.StopCancelled.Reason(), want: bench.BucketUnclassified},
 		"provider error":       {stop: engine.StopProviderError.Reason(), want: bench.BucketHarness},
 		"harness error":        {stop: engine.StopHarnessError.Reason(), want: bench.BucketHarness},

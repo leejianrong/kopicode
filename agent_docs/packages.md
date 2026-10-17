@@ -87,7 +87,9 @@ not this list:
   Every run is a `HookRan` event, output whole. Only the REPL fills `Config.Hooks`, and replay and
   resume never run one. `post_tool` runs after a call that changed the tree and ran without error
   (`mutates` tools), cannot undo it, and its output or failure is a note after the result, capped on
-  its own; resume rebuilds the note from the `HookRan` event. `stop` lands in a later card.
+  its own; resume rebuilds the note from the `HookRan` event. `stop` runs when the model finishes
+  without a tool call, after forced verification: anything but a pass refuses the stop and feeds the
+  output back, and the third refusal in a row ends the session with `stop_gate_failed` (exit 1).
 - **`internal/syntax`** — the post-edit gate: a language-native check (`gofmt -e`,
   `node --check`, `py_compile`, …) run immediately after an edit. `NotRun` is the zero
   value of `Outcome` — a gate that didn't run must never read as one that passed — and

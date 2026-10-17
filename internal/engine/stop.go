@@ -21,6 +21,7 @@ import (
 //	StopMaxTurns             max_turns            4         harness — named outright
 //	StopBudgetExhausted      budget_exhausted     1         model; see the note below
 //	StopVerificationFailed   verification_failed  1         model
+//	StopGateFailed           stop_gate_failed     1         model
 //	StopCancelled            cancelled            1         neither
 //	StopProviderError        error                3         harness — "a provider error surviving retries"
 //	StopHarnessError         error                4         harness
@@ -69,6 +70,13 @@ const (
 	// package doc gives.
 	StopVerificationFailed
 
+	// StopGateFailed is the person's own stop hook (ADR-0036) refusing the model's
+	// stop three times in a row. Each refusal fed the hook's output back and the
+	// model tried to finish again anyway, so it is exit 1, charged to the model like
+	// [StopVerificationFailed], and never a success report. Only the REPL runs hooks,
+	// so it is never emitted by run --print, serve, mcp or kopibench.
+	StopGateFailed
+
 	// StopCancelled is a cancelled context — Ctrl-C, or a bench runner
 	// abandoning a task. Neither bucket.
 	StopCancelled
@@ -91,6 +99,7 @@ var stopReason = map[Stop]string{
 	StopMaxTurns:           "max_turns",
 	StopBudgetExhausted:    "budget_exhausted",
 	StopVerificationFailed: "verification_failed",
+	StopGateFailed:         "stop_gate_failed",
 	StopCancelled:          "cancelled",
 	StopProviderError:      "error",
 	StopHarnessError:       "error",
@@ -106,6 +115,7 @@ var stopExit = map[Stop]int{
 	StopMaxTurns:           4,
 	StopBudgetExhausted:    1,
 	StopVerificationFailed: 1,
+	StopGateFailed:         1,
 	StopCancelled:          1,
 	StopProviderError:      3,
 	StopHarnessError:       4,
