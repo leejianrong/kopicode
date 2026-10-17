@@ -188,6 +188,11 @@ func (e *Engine) runHook(ctx context.Context, turn int, point, callID, tool stri
 	clock := e.hookClock()
 	start := clock.Now()
 	res := e.execHook(ctx, clock, argv, stdin)
+	if point == hookPostTool && res.outcome == hookDenied {
+		// Exit 2 is a refusal, and a post_tool hook has nothing to refuse: the
+		// call already ran. It is recorded as the failure it is.
+		res.outcome = hookFailed
+	}
 	return res, e.journalHook(ctx, turn, point, callID, tool, argv, res, clock.Now().Sub(start))
 }
 
@@ -311,4 +316,43 @@ func (e *Engine) hookRefusal(point string, res hookResult) string {
 		}
 	}
 	return capText(msg, e.cfg.Selection.Config.OutputCap, "")
+}
+
+// postToolNote runs the post_tool hook for a call that ran and may have changed
+// the tree, and returns the note to show the model after the call's result, or ""
+// when there is nothing to say.
+//
+// The hook cannot undo the call, so its failure is not a block. It is the
+// opposite of quiet: a hook that exits non-zero, times out or cannot start
+// produces a note that says so, because a check that fails unseen is the gate
+// that is open when it is broken (ADR-0036 decision 5). A hook that passes with
+// no output adds nothing.
+func (e *Engine) postToolNote(ctx context.Context, turn int, callID, tool string, args json.RawMessage) (string, error) {
+	h := e.hooks()
+	if !hookAppliesTo(h, h.PostTool, tool) {
+		return "", nil
+	}
+	res, err := e.runHook(ctx, turn, hookPostTool, callID, tool, h.PostTool, args)
+	if err != nil {
+		return "", err
+	}
+	return capText(postToolNote(res.outcome, res.detail, res.stdout, res.stderr), e.cfg.Selection.Config.OutputCap, ""), nil
+}
+
+// postToolNote is the text the model is shown for one post_tool run. It is a pure
+// function of what HookRan records, so resume can rebuild exactly what the model
+// saw from the journal without running the hook again.
+func postToolNote(outcome, detail, stdout, stderr string) string {
+	out := strings.TrimSpace(stdout + stderr)
+	if outcome == hookPassed {
+		if out == "" {
+			return ""
+		}
+		return "Note from the post_tool hook:\n" + out
+	}
+	note := fmt.Sprintf("The post_tool hook failed (%s). The call above already ran and was not undone.", detail)
+	if out != "" {
+		note += " Its output:\n" + out
+	}
+	return note
 }

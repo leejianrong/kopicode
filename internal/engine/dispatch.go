@@ -266,7 +266,7 @@ func (e *Engine) dispatch(ctx context.Context, turn int, ext parse.Extraction) (
 			return mutated, err
 		}
 
-		output, mut, denied, failed, err := e.runTool(ctx, turn, id, call)
+		output, hookNote, mut, denied, failed, err := e.runTool(ctx, turn, id, call)
 		if err != nil {
 			return mutated, err
 		}
@@ -303,6 +303,12 @@ func (e *Engine) dispatch(ctx context.Context, turn int, ext parse.Extraction) (
 			wire = capOutput(call.Name, wire, e.cfg.Selection.Config.OutputCap)
 		}
 
+		// ADR-0036: the post_tool hook's note goes last, after the cap, so a long
+		// result cannot cut it out of the middle. It is already capped on its own.
+		if hookNote != "" {
+			wire += "\n\n" + hookNote
+		}
+
 		if err := e.asm.AppendToolResult(call.ID, wire); err != nil {
 			return mutated, fmt.Errorf("engine: placing the result of %s (call %q): %w", call.Name, id, err)
 		}
@@ -326,9 +332,11 @@ func (e *Engine) dispatch(ctx context.Context, turn int, ext parse.Extraction) (
 // says the permission gate itself ran and refused the call — the "denied" this
 // package's repeat-collapse cares about, as opposed to a tool failing for any
 // other reason (an unknown tool, arguments that didn't decode, the tool's own
-// error). The error is fatal and only ever the harness's own: a tool that
-// failed is an observation, not an exception.
-func (e *Engine) runTool(ctx context.Context, turn int, callID string, call parse.ToolCall) (string, bool, bool, bool, error) {
+// error). The second string is the post_tool hook's note, "" when it had
+// nothing to say, which dispatch adds after the result and the cap. The error is
+// fatal and only ever the harness's own: a tool that failed is an observation,
+// not an exception.
+func (e *Engine) runTool(ctx context.Context, turn int, callID string, call parse.ToolCall) (string, string, bool, bool, bool, error) {
 	entry, ok := toolByName[call.Name]
 	if !ok || !e.offered[call.Name] {
 		// Two ways in, and both are refusals rather than surprises. The name
@@ -346,34 +354,34 @@ func (e *Engine) runTool(ctx context.Context, turn int, callID string, call pars
 			Reason: parse.KindUnknownTool.String(),
 			Detail: journal.InlineText(detail),
 		}); err != nil {
-			return "", false, false, false, err
+			return "", "", false, false, false, err
 		}
-		return detail, false, false, true, nil
+		return detail, "", false, false, true, nil
 	}
 
 	args := entry.newArgs()
 	if err := json.Unmarshal(call.Arguments, args); err != nil {
 		detail := fmt.Sprintf("the arguments for %s did not decode: %v", call.Name, err)
 		if jerr := e.journalToolResult(ctx, turn, callID, call.Name, detail, nil, tools.FaultTask); jerr != nil {
-			return "", false, false, false, jerr
+			return "", "", false, false, false, jerr
 		}
-		return detail, false, false, true, nil
+		return detail, "", false, false, true, nil
 	}
 
 	// ADR-0036: a pre_tool hook can only tighten. It runs before the consent gate
 	// so a person is not asked to approve a call a hook has already refused, and
 	// a pass here is not an allow: the gate below still decides.
 	if refusal, blocked, herr := e.preToolBlock(ctx, turn, callID, call.Name, call.Arguments); herr != nil {
-		return "", false, false, false, herr
+		return "", "", false, false, false, herr
 	} else if blocked {
 		fault := tools.FaultTask
 		if ctx.Err() != nil {
 			fault = tools.FaultCancelled
 		}
 		if jerr := e.journalToolResult(ctx, turn, callID, call.Name, refusal, nil, fault); jerr != nil {
-			return "", false, false, false, jerr
+			return "", "", false, false, false, jerr
 		}
-		return refusal, false, true, true, nil
+		return refusal, "", false, true, true, nil
 	}
 
 	act := permission.Action{ID: callID, Tool: call.Name, Operation: entry.op}
@@ -385,25 +393,37 @@ func (e *Engine) runTool(ctx context.Context, turn int, callID string, call pars
 	outcome, perr := e.cfg.Permissions.Check(ctx, act)
 	if outcome.Required {
 		if err := e.journalPermission(ctx, turn, outcome); err != nil {
-			return "", false, false, false, err
+			return "", "", false, false, false, err
 		}
 	}
 	if perr != nil {
 		detail := perr.Error()
 		if jerr := e.journalToolResult(ctx, turn, callID, call.Name, detail, nil, faultOf(perr)); jerr != nil {
-			return "", false, false, false, jerr
+			return "", "", false, false, false, jerr
 		}
-		return detail, false, true, true, nil
+		return detail, "", false, true, true, nil
 	}
 
 	res, err := entry.run(ctx, e, turn, callID, args)
 	if err != nil {
-		return "", false, false, false, err
+		return "", "", false, false, false, err
 	}
 	if jerr := e.journalToolResult(ctx, turn, callID, call.Name, res.output, res.exitCode, faultOf(res.err)); jerr != nil {
-		return "", false, false, false, jerr
+		return "", "", false, false, false, jerr
 	}
-	return res.output, entry.mutates, false, res.err != nil, nil
+
+	// ADR-0036: a post_tool hook after a call that changed the tree. It cannot undo
+	// the call; what it says is a note after the result, for the model to see. A
+	// call that failed changed nothing the hook could look at, and one that never
+	// ran (denied above) is not here at all.
+	var note string
+	if entry.mutates && res.err == nil {
+		var herr error
+		if note, herr = e.postToolNote(ctx, turn, callID, call.Name, call.Arguments); herr != nil {
+			return "", "", false, false, false, herr
+		}
+	}
+	return res.output, note, entry.mutates, false, res.err != nil, nil
 }
 
 // journalToolResult writes the outcome of one call. Output goes in whole:
