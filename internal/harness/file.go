@@ -58,6 +58,15 @@ type FileConfig struct {
 	// SkillsPaths is the `skills_paths` key: extra directories to read skills
 	// from. User file only, for the same reason.
 	SkillsPaths []string
+	// PreToolHook, PostToolHook and StopHook are the hook commands (ADR-0036),
+	// each an argv and never a shell string, for the reason Verify is one. User
+	// file only: a checked-in command would run on every contributor's machine.
+	PreToolHook  []string
+	PostToolHook []string
+	StopHook     []string
+	// HookTools is the `hook_tools` key: the tool names the two tool hooks apply
+	// to. Nil means every tool. User file only, with the hooks.
+	HookTools []string
 	// ProviderURL is the `provider_url` key: a custom provider endpoint
 	// (ADR-0027). User file only: a repository must not choose where its
 	// visitors' source code and prompts are sent.
@@ -323,6 +332,43 @@ func parseFileConfig(path, content string, user bool) (FileConfig, error) {
 			continue
 		}
 
+		if key == "pre_tool_hook" || key == "post_tool_hook" || key == "stop_hook" {
+			argv, err := parseStringArray(strings.TrimSpace(rest))
+			if err != nil {
+				return FileConfig{}, usagef("%s:%d: %s = %s", path, lineNo, key, err)
+			}
+			if strings.TrimSpace(argv[0]) == "" {
+				return FileConfig{}, usagef("%s:%d: %s names no program; the first element is the command to run", path, lineNo, key)
+			}
+			switch key {
+			case "pre_tool_hook":
+				cfg.PreToolHook = argv
+			case "post_tool_hook":
+				cfg.PostToolHook = argv
+			default:
+				cfg.StopHook = argv
+			}
+			continue
+		}
+
+		if key == "hook_tools" {
+			names, err := parseStringList(strings.TrimSpace(rest))
+			if err != nil {
+				return FileConfig{}, usagef("%s:%d: %s = %s", path, lineNo, key, err)
+			}
+			if len(names) == 0 {
+				return FileConfig{}, usagef("%s:%d: hook_tools is empty; leave the key out to apply the hooks to every tool", path, lineNo)
+			}
+			for _, n := range names {
+				if !knownToolName(n) {
+					return FileConfig{}, usagef("%s:%d: hook_tools names %q, which is not a tool; a misspelt name would leave that tool ungated (the tools are %s)",
+						path, lineNo, n, strings.Join(allToolNames(), ", "))
+				}
+			}
+			cfg.HookTools = names
+			continue
+		}
+
 		target := map[string]*string{
 			"model":          &cfg.Model,
 			"harness":        &cfg.Harness,
@@ -539,6 +585,11 @@ func checkScope(key string, user bool) error {
 			return fmt.Errorf("provider belongs in the user config, not the repository's: a repository must not " +
 				"choose whose account its visitors' prompts are billed to (ADR-0035)")
 		}
+	case "pre_tool_hook", "post_tool_hook", "stop_hook", "hook_tools":
+		if !user {
+			return fmt.Errorf("%s belongs in the user config, not the repository's: a repository must not "+
+				"declare a command that runs on its visitors' machines (ADR-0036)", key)
+		}
 	case "harness", "harness_config", "verify":
 		if user {
 			return fmt.Errorf("%s is a per-repository key and is not read from the user config (ADR-0024)", key)
@@ -575,7 +626,8 @@ func parseStringList(v string) ([]string, error) {
 }
 
 // knownKeys are the keys this reader owns.
-var knownKeys = []string{"model", "harness", "harness_config", "verify", "default_mode", "auto_never_allow", "skills_paths", "provider_url", "provider"}
+var knownKeys = []string{"model", "harness", "harness_config", "verify", "default_mode", "auto_never_allow", "skills_paths", "provider_url", "provider",
+	"pre_tool_hook", "post_tool_hook", "stop_hook", "hook_tools"}
 
 // nearestKey names the key a misspelling was probably meant to be, or "" when
 // key is one we own or is nothing like one. A config file is shared and other
@@ -595,4 +647,20 @@ func nearestKey(key string) string {
 		}
 	}
 	return best
+}
+
+// allToolNames are the tools a hook_tools entry may name: every tool of the
+// default configuration, which is the full set.
+func allToolNames() []string {
+	cfg, _ := ConfigByName(DefaultConfigName)
+	return cfg.ToolSet
+}
+
+func knownToolName(n string) bool {
+	for _, t := range allToolNames() {
+		if t == n {
+			return true
+		}
+	}
+	return false
 }

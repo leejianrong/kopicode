@@ -102,6 +102,24 @@ func (c Config) hashWith(anchorVersion string) string {
 		p.num("output_cap", c.OutputCap)
 	}
 
+	// Likewise for hooks (ADR-0036 decision 9): a session with none keeps the
+	// hash it had, and one with any is never pooled with one with a different
+	// gate. Each key is written only when it is set.
+	if len(c.Hooks.PreTool) > 0 {
+		p.strs("hook_pre_tool", c.Hooks.PreTool)
+	}
+	if len(c.Hooks.PostTool) > 0 {
+		p.strs("hook_post_tool", c.Hooks.PostTool)
+	}
+	if len(c.Hooks.Stop) > 0 {
+		p.strs("hook_stop", c.Hooks.Stop)
+	}
+	// Resolve leaves Tools empty when no command is set, so a session with no
+	// hooks never reaches this.
+	if len(c.Hooks.Tools) > 0 {
+		p.strs("hook_tools", c.Hooks.Tools)
+	}
+
 	p.bool("verification_forced", c.Verification.Forced)
 	p.str("verification_source", string(c.Verification.Source))
 
