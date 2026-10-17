@@ -356,3 +356,60 @@ func postToolNote(outcome, detail, stdout, stderr string) string {
 	}
 	return note
 }
+
+// maxStopRefusals is how many times in a row the stop hook may refuse before the
+// session ends with [StopGateFailed] (ADR-0036 decision 5). A refused stop is
+// bounded so a gate that can never pass, or a model that cannot satisfy it, ends
+// the session instead of looping to the turn cap.
+const maxStopRefusals = 3
+
+// stopGateStep runs the stop hook when the model has finished without a tool
+// call. It returns [StopCompleted] when there is no hook or it passed,
+// [StopUnspecified] when the stop was refused and the loop should go round again,
+// and [StopGateFailed] on the third refusal in a row.
+//
+// Fail closed: anything but a clean pass refuses, a timeout and a command that
+// cannot start included, because a gate that is open when it is broken is not a
+// gate. The refusal is fed back as a user turn, so the model sees what the hook
+// said and gets to fix it.
+func (e *Engine) stopGateStep(ctx context.Context, turn int) (Stop, error) {
+	argv := e.hooks().Stop
+	if len(argv) == 0 {
+		return StopCompleted, nil
+	}
+	res, err := e.runHook(ctx, turn, hookStop, "", "", argv, nil)
+	if err != nil {
+		return StopHarnessError, err
+	}
+	if res.cancelled {
+		e.noteCancelled(phaseStopHook)
+		return StopCancelled, fmt.Errorf("engine: stop hook on turn %d: %w", turn, ctx.Err())
+	}
+	if res.outcome == hookPassed {
+		e.stopRefusals = 0
+		return StopCompleted, nil
+	}
+
+	e.stopRefusals++
+	// Fed back whether or not this is the last refusal, so the conversation holds
+	// what the journal holds and a later prompt in the same session sees it.
+	if err := e.observe(capText(stopRefusalText(res.detail, res.stdout, res.stderr), e.cfg.Selection.Config.OutputCap, "")); err != nil {
+		return StopHarnessError, err
+	}
+	if e.stopRefusals >= maxStopRefusals {
+		e.stopGate = fmt.Sprintf("`%s` refused the stop %d times in a row (%s)",
+			strings.Join(argv, " "), e.stopRefusals, res.detail)
+		return StopGateFailed, nil
+	}
+	return StopUnspecified, nil
+}
+
+// stopRefusalText is what the model is told when the stop hook refused its stop.
+// A pure function of what HookRan records, so resume rebuilds it from the journal.
+func stopRefusalText(detail, stdout, stderr string) string {
+	msg := fmt.Sprintf("The stop hook refused to let you finish (%s).", detail)
+	if out := strings.TrimSpace(stdout + stderr); out != "" {
+		msg += " Its output:\n" + out
+	}
+	return msg + "\nFix what it reports, then finish again."
+}

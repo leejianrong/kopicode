@@ -289,6 +289,12 @@ type Engine struct {
 	stop   Stop
 	detail string
 
+	// stopRefusals is how many times in a row the stop hook has refused this
+	// exchange's stop (ADR-0036 decision 5), and stopGate what the last refusal
+	// said, for SessionEnded.Detail. Reset by every [Engine.Run] and by a pass.
+	stopRefusals int
+	stopGate     string
+
 	// cancelPhase is what was in flight when this exchange first observed a
 	// cancelled context, and "" until one is. It is reset by every [Engine.Run],
 	// because a session that cancels one turn and completes the next must not

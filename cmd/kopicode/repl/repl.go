@@ -474,7 +474,7 @@ func (l *Loop) renderOutcome(res engine.Result, err error) {
 		// interruption on screen twice.
 		return
 	case engine.StopUnspecified, engine.StopMaxTurns, engine.StopBudgetExhausted,
-		engine.StopVerificationFailed, engine.StopProviderError, engine.StopHarnessError:
+		engine.StopVerificationFailed, engine.StopGateFailed, engine.StopProviderError, engine.StopHarnessError:
 	}
 
 	detail := ""

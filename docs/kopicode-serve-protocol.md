@@ -507,6 +507,7 @@ here is derived from journal events the engine already appended.
 | `completed` | 0 | the model replied in prose, asking for no tool |
 | `cancelled` | 1 | the turn's context was cancelled (`session.cancel`, shutdown) |
 | `verification_failed` | 1 | the model stopped over a tree its verification command rejects |
+| `stop_gate_failed` | 1 | the person's own stop hook (ADR-0036) refused the stop three times in a row. Only the interactive REPL runs hooks, so `serve` never emits this; it is listed because this table mirrors `internal/engine/stop.go` |
 | `budget_exhausted` | 1 | the session's cumulative token budget ran out; every later prompt stops the same way, so start a new session (resume it, or pass a larger `token_budget`) |
 | `max_turns` | 4 | the turn cap was hit; the session is intact, so send another prompt to continue (the count restarts) |
 | `error` | 3 | a provider error that survived the client's retries |

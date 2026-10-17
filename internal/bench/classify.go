@@ -174,6 +174,8 @@ func (Attribution) Classify(ctx context.Context, r TaskResult) (Bucket, error) {
 //	                     be wrong; changing it is a card, not a line here
 //	verification_failed  not harness — the suite ran, the model was shown the
 //	                     failure, and it stopped anyway (KAN-787)
+//	stop_gate_failed     not harness — the person's own stop hook refused the
+//	                     stop three times and the model stopped anyway (ADR-0036)
 //	cancelled            handled above: neither bucket
 //	max_turns            harness — named outright in SLICE-1 §9
 //	error                harness — internal/engine renders both a provider error
@@ -185,6 +187,7 @@ func stopIsHarness(stop string) bool {
 	case engine.StopCompleted.Reason(),
 		engine.StopBudgetExhausted.Reason(),
 		engine.StopVerificationFailed.Reason(),
+		engine.StopGateFailed.Reason(),
 		engine.StopCancelled.Reason():
 		return false
 	default:

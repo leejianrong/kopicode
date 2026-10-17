@@ -600,6 +600,7 @@ type TurnCancelled struct {
 	//	"provider_stream"  the model's reply was still arriving
 	//	"tool_call"        a tool was running; a shell's process group was killed
 	//	"verification"     the project's own verification command was running
+	//	"stop_hook"        the person's stop hook was running
 	//	"between_steps"    nothing was in flight — the loop reached a checkpoint
 	//	                   with the context already cancelled
 	//
@@ -628,7 +629,7 @@ func (TurnCancelled) Type() Type { return TypeTurnCancelled }
 // SessionEnded closes the record.
 type SessionEnded struct {
 	// Reason is "completed", "cancelled", "max_turns", "budget_exhausted",
-	// "verification_failed" or "error".
+	// "verification_failed", "stop_gate_failed" or "error".
 	Reason string `json:"reason"`
 	// ExitCode is the process exit code the surface reported.
 	ExitCode int  `json:"exit_code"`

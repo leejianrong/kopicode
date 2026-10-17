@@ -43,6 +43,8 @@ import (
 //   - A [journal.HookRan] for the post_tool point -> the note the model was shown
 //     after that call's result, appended to the result by the same function that
 //     built it live. The hook is never run again.
+//   - A refused [journal.HookRan] for the stop point -> the refusal text the model
+//     was given, as feedback, built by the same function. A pass adds nothing.
 //   - The feedback text of a [journal.ToolCallRepaired], a
 //     [journal.ToolCallFailed], or a blocking [journal.VerificationRun]
 //     (Skip == "" and ExitCode > 0) -> [Assembler.AppendUser], or
@@ -53,7 +55,7 @@ import (
 //     own contract: reasoning is never fed back.
 //   - Every other payload type — [journal.SessionStarted], [journal.ProviderRequest],
 //     [journal.ToolCallRequested], [journal.EditApplied], [journal.EditRejected],
-//     [journal.SyntaxGateRun], a pre_tool or stop [journal.HookRan], [journal.PermissionRequested],
+//     [journal.SyntaxGateRun], a pre_tool [journal.HookRan], [journal.PermissionRequested],
 //     [journal.PermissionDecided], [journal.TurnSnapshot], [journal.ProviderRetried],
 //     [journal.TurnCancelled], [journal.SessionEnded], and anything this build
 //     does not recognise — carries nothing the assembler needs and is skipped.
@@ -163,6 +165,10 @@ func replayHistory(asm *Assembler, events []journal.Event) error {
 			// A post_tool note was shown after its call's result. Rebuilt from the
 			// record by the same function that built it, and never by running the
 			// hook again (ADR-0036 decision 8).
+			if buf != nil && p.Point == hookStop && p.Outcome != hookPassed {
+				// A refused stop was fed back as a user turn.
+				buf.feedback = append(buf.feedback, stopRefusalText(p.Detail, p.Stdout.Inline, p.Stderr.Inline))
+			}
 			if buf != nil && p.Point == hookPostTool {
 				if note := postToolNote(p.Outcome, p.Detail, p.Stdout.Inline, p.Stderr.Inline); note != "" {
 					if buf.notes == nil {
