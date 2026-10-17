@@ -112,3 +112,9 @@ stop.
   `containment_provided: true`. Journalled `source: "policy"`.
 
 The `ask` tool is untouched: process-level, identical under every mode.
+
+## Hooks
+
+The user-config hooks of [ADR-0036](adr/0036-minimal-hooks.md) are not run by `kopicode mcp`: it reads
+no user config, so one person's habits cannot change what a calling agent gets. Consent is the
+modes above.

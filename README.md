@@ -96,6 +96,34 @@ Every `AGENTS.md` from the repository root down to the directory you start in is
 last, up to 32 KiB in all: a file over the cap is dropped whole, furthest first, never cut, and the
 session start lists each file and says which were dropped. [ADR-0032](docs/adr/0032-agents-md-hierarchy.md).
 
+**Hooks** (ADR-0036) are commands of yours that kopicode runs at three points, set in the same user
+config. Each is an argv array, never a shell string, and runs in the project root:
+
+```toml
+pre_tool_hook  = ["scripts/guard"]         # before a tool call: can only refuse it
+post_tool_hook = ["gofmt", "-l", "."]      # after a call that changed the tree: its output is shown to the model
+stop_hook      = ["make", "lint"]          # when the model tries to finish: a failure sends it back to work
+hook_tools     = ["write_file", "run_shell"]   # optional: the tools the first two apply to (default: all)
+```
+
+The command gets the event as JSON on stdin (the hook point, the tool, its arguments, the session id
+and the turn). Exit `0` passes. Anything else is a failure: a non-zero exit, a timeout (30 seconds)
+or a command that cannot start. A failed gate is never read as a pass. For `pre_tool`, exit `2` is the
+deliberate no, and what it printed to stderr is the reason the model and you both see:
+
+- `pre_tool` refusing a call stops it before you are asked about it. A pass is not an allow: the
+  usual consent prompt still comes after, so a hook can tighten what runs and never loosen it.
+- `post_tool` cannot undo the call. What it prints, or how it failed, is added after the result.
+- `stop` runs after the project's own verification. A refusal goes back to the model as feedback; the
+  third refusal in a row ends the session as `stop_gate_failed` (exit code 1), never as a success.
+
+A repository's `.kopicode/config.toml` cannot declare a hook (it is refused, as `default_mode` is):
+a checked-in command would run on every contributor's machine. The hook environment carries your
+`PATH`, home and locale and no more: never the provider key, and not `GIT_DIR` or other overrides. Set
+anything else in the command itself, for example `["env", "FOO=1", "make", "lint"]`. Every run is
+a `HookRan` event in the journal with its full output, and a resumed session never runs a hook again.
+Only the interactive `kopicode` runs hooks.
+
 **Against a local model or a proxy** (ADR-0027): `--provider-url` (or `provider_url` in the user config,
 never a repository's) sends requests to any OpenAI-compatible endpoint instead of OpenRouter, which is
 the cheap way to try the harness or test an integration.
@@ -223,6 +251,7 @@ mock provider with `make bench-smoke`.
 | `provider`, Codex CLI's `auth.json` | the user config or `--provider`; the login file | only with the Codex provider (ADR-0035); never read from a repository, never by `serve` or `mcp` |
 | `model`, `harness`, `harness_config` | `.kopicode/config.toml` or flags | flags win; `model` can also come from the user config |
 | `default_mode`, `auto_never_allow`, user `AGENTS.md` | `~/.config/kopicode/` | interactive `kopicode` only |
+| `pre_tool_hook`, `post_tool_hook`, `stop_hook`, `hook_tools` | `~/.config/kopicode/config.toml` only | interactive `kopicode` only; refused in a repository's file ([ADR-0036](docs/adr/0036-minimal-hooks.md)) |
 | turn cap and other bounds | a declared harness config (`--harness-config`) | for example `max_turns = 40` when a session stops with `max_turns`; local-only, never anchors a published number. See [`docs/harness-tuning.md`](docs/harness-tuning.md) |
 | per-language examples | [`docs/examples/`](docs/examples/) | Go, JavaScript/TypeScript, Python, multi-language |
 | skills: reusable task instructions | `<name>/SKILL.md` under `.agents/skills`, `.kopicode/skills`, `~/.config/kopicode/skills`, or `skills_paths` in the user config; `~/.claude/skills` and `~/.agents/skills` are read as fallbacks | the convention Claude Code, Codex and Cursor read. `/skills` lists them, `/<name> [task]` runs one, Tab completes the name. A repository's skill beats a personal one of the same name. The model is also shown the ones inside the project once per session, in `run --print`, `serve` and `mcp` as well (feature `skills.catalogue`; only the repository's own, never your personal ones). `/skills` and `/<name>` are interactive `kopicode` only ([ADR-0014](docs/adr/0014-skills-mechanism.md), [ADR-0025](docs/adr/0025-skills-discovery-and-commands.md)) |

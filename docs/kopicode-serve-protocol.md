@@ -695,3 +695,11 @@ a second command are all outside what it can see. It is a guard against the obvi
 catastrophes and against smuggling one in behind an innocuous first word, not a sandbox;
 real containment is the caller's job (ADR-0011 decision 4). `--policy-file` does not apply to
 an `"auto"` session.
+
+## Hooks are not run here
+
+The user-config hooks of [ADR-0036](adr/0036-minimal-hooks.md) (`pre_tool_hook`, `post_tool_hook`,
+`stop_hook`) belong to the person at the keyboard. `serve` reads no user config, so it runs none: no
+session has a `hook_ran` event or ends `stop_gate_failed`, and a client has nothing to enable or to
+detect, which is why `features` has no entry for them. Policy for a served session is the consent mode.
+A later decision may let a caller supply hooks on `session.start`; this wire does not.
