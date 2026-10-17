@@ -70,7 +70,7 @@ func TestMalformedHookKeysAreUsageErrors(t *testing.T) {
 
 func TestARepositoryCannotDeclareAHook(t *testing.T) {
 	for _, key := range []string{
-		`pre_tool_hook = ["x"]`, `post_tool_hook = ["x"]`, `stop_hook = ["x"]`, `hook_tools = ["run_shell"]`,
+		`pre_tool_hook = ["x"]`, `post_tool_hook = ["x"]`, `stop_hook = ["x"]`, `hook_tools = ["run_shell"]`, `hook_timeout_seconds = 60`,
 	} {
 		userHome(t, "")
 		repo := repoWith(t, key+"\n")
@@ -163,5 +163,95 @@ func TestASessionWithNoHooksHashesAsBefore(t *testing.T) {
 	}
 	if hooked.HarnessConfigHash == plain.HarnessConfigHash {
 		t.Error("a hooked session shares the hash of an unhooked one")
+	}
+}
+
+func TestHookTimeoutSecondsIsReadFromTheUserFile(t *testing.T) {
+	for _, tc := range []struct {
+		line string
+		want int
+	}{
+		{"hook_timeout_seconds = 60", 60},
+		{"hook_timeout_seconds = 1", 1},
+		{"hook_timeout_seconds = 300  # five minutes, the ceiling", 300},
+	} {
+		userHome(t, "stop_hook = [\"make\", \"lint\"]\n"+tc.line+"\n")
+		sel, err := harness.Resolve(repoWith(t, ""), harness.Overrides{UserConfig: true})
+		if err != nil {
+			t.Fatalf("%s: %v", tc.line, err)
+		}
+		if got := sel.Config.Hooks.TimeoutSeconds; got != tc.want {
+			t.Errorf("%s: TimeoutSeconds = %d, want %d", tc.line, got, tc.want)
+		}
+	}
+}
+
+func TestMalformedHookTimeoutsAreUsageErrors(t *testing.T) {
+	for name, tc := range map[string]struct{ line, want string }{
+		"zero":              {`hook_timeout_seconds = 0`, "out of range"},
+		"one over the cap":  {`hook_timeout_seconds = 301`, "out of range"},
+		"negative":          {`hook_timeout_seconds = -5`, "out of range"},
+		"a quoted number":   {`hook_timeout_seconds = "30"`, "not an integer"},
+		"a float":           {`hook_timeout_seconds = 1.5`, "not an integer"},
+		"a word":            {`hook_timeout_seconds = soon`, "not an integer"},
+		"text after number": {`hook_timeout_seconds = 30 seconds`, "not an integer"},
+		"no value":          {`hook_timeout_seconds =`, "has no value"},
+	} {
+		userHome(t, tc.line+"\n")
+		_, err := harness.Resolve(repoWith(t, ""), harness.Overrides{UserConfig: true})
+		if err == nil || !harness.IsUsageError(err) || !strings.Contains(err.Error(), tc.want) ||
+			!strings.Contains(err.Error(), "config.toml:1") {
+			t.Errorf("%s: err = %v, want a usage error naming the file and line, containing %q", name, err, tc.want)
+		}
+	}
+}
+
+func TestAMisspeltHookTimeoutKeyIsNotIgnored(t *testing.T) {
+	userHome(t, "hook_timeout_second = 60\n")
+	_, err := harness.Resolve(repoWith(t, ""), harness.Overrides{UserConfig: true})
+	if err == nil || !strings.Contains(err.Error(), `did you mean "hook_timeout_seconds"`) {
+		t.Errorf("err = %v", err)
+	}
+}
+
+func TestOnlyTheUserReadingFrontEndGetsAHookTimeout(t *testing.T) {
+	userHome(t, "stop_hook = [\"make\"]\nhook_timeout_seconds = 90\n")
+	sel, err := harness.Resolve(repoWith(t, ""), harness.Overrides{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sel.Config.Hooks.TimeoutSeconds != 0 {
+		t.Errorf("run --print, serve, mcp and kopibench resolved a hook timeout: %+v", sel.Config.Hooks)
+	}
+}
+
+func TestAHookTimeoutMovesTheHashOnlyWhenSet(t *testing.T) {
+	cfg, _ := harness.ConfigByName(harness.DefaultConfigName)
+	cfg.Hooks = harness.Hooks{Stop: []string{"make", "lint"}}
+	unset := cfg.Hash()
+	cfg.Hooks.TimeoutSeconds = 60
+	sixty := cfg.Hash()
+	cfg.Hooks.TimeoutSeconds = 61
+	sixtyOne := cfg.Hash()
+	if unset == sixty || sixty == sixtyOne || unset == sixtyOne {
+		t.Errorf("a hook timeout did not move the hash: %s %s %s", unset, sixty, sixtyOne)
+	}
+	cfg.Hooks.TimeoutSeconds = 0
+	if cfg.Hash() != unset {
+		t.Error("clearing the timeout did not restore the hash a hooked session had without one")
+	}
+}
+
+// A timeout with no command does nothing, and Resolve must not let it move the
+// hash or appear in the session's hooks.
+func TestAHookTimeoutWithNoCommandLeavesTheHashAlone(t *testing.T) {
+	userHome(t, "hook_timeout_seconds = 90\n")
+	sel, err := harness.Resolve(repoWith(t, ""), harness.Overrides{UserConfig: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, _ := harness.ConfigByName(sel.Config.Name)
+	if sel.HarnessConfigHash != base.Hash() || sel.Config.Hooks.TimeoutSeconds != 0 {
+		t.Errorf("hook_timeout_seconds alone moved the hash or set hooks: %+v", sel.Config.Hooks)
 	}
 }

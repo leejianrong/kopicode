@@ -119,6 +119,11 @@ func (c Config) hashWith(anchorVersion string) string {
 	if len(c.Hooks.Tools) > 0 {
 		p.strs("hook_tools", c.Hooks.Tools)
 	}
+	// A timeout changes what a hook can do, so it is in the hash, and only when
+	// set. Like Tools it is zero when no command is set.
+	if c.Hooks.TimeoutSeconds != 0 {
+		p.num("hook_timeout_seconds", c.Hooks.TimeoutSeconds)
+	}
 
 	p.bool("verification_forced", c.Verification.Forced)
 	p.str("verification_source", string(c.Verification.Source))

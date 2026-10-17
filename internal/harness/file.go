@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -67,6 +68,10 @@ type FileConfig struct {
 	// HookTools is the `hook_tools` key: the tool names the two tool hooks apply
 	// to. Nil means every tool. User file only, with the hooks.
 	HookTools []string
+	// HookTimeoutSeconds is the `hook_timeout_seconds` key: how long a hook
+	// command may run, 1 to [MaxHookTimeoutSeconds]. Zero means unset, which is
+	// the engine's default. User file only, with the hooks.
+	HookTimeoutSeconds int
 	// ProviderURL is the `provider_url` key: a custom provider endpoint
 	// (ADR-0027). User file only: a repository must not choose where its
 	// visitors' source code and prompts are sent.
@@ -369,6 +374,15 @@ func parseFileConfig(path, content string, user bool) (FileConfig, error) {
 			continue
 		}
 
+		if key == "hook_timeout_seconds" {
+			n, err := parseHookTimeout(strings.TrimSpace(rest))
+			if err != nil {
+				return FileConfig{}, usagef("%s:%d: %s = %s", path, lineNo, key, err)
+			}
+			cfg.HookTimeoutSeconds = n
+			continue
+		}
+
 		target := map[string]*string{
 			"model":          &cfg.Model,
 			"harness":        &cfg.Harness,
@@ -585,7 +599,7 @@ func checkScope(key string, user bool) error {
 			return fmt.Errorf("provider belongs in the user config, not the repository's: a repository must not " +
 				"choose whose account its visitors' prompts are billed to (ADR-0035)")
 		}
-	case "pre_tool_hook", "post_tool_hook", "stop_hook", "hook_tools":
+	case "pre_tool_hook", "post_tool_hook", "stop_hook", "hook_tools", "hook_timeout_seconds":
 		if !user {
 			return fmt.Errorf("%s belongs in the user config, not the repository's: a repository must not "+
 				"declare a command that runs on its visitors' machines (ADR-0036)", key)
@@ -596,6 +610,32 @@ func checkScope(key string, user bool) error {
 		}
 	}
 	return nil
+}
+
+// MaxHookTimeoutSeconds is the longest a hook may be allowed to run, as
+// ADR-0036 decision 6 puts it: five minutes. internal/engine's MaxHookTimeout is
+// the same bound in a Duration, and a test holds the two together.
+const MaxHookTimeoutSeconds = 300
+
+// parseHookTimeout reads the hook_timeout_seconds value: a bare TOML integer,
+// with an optional trailing comment, from 1 to [MaxHookTimeoutSeconds]. A quoted
+// number, a float and an out-of-range value are refused rather than rounded or
+// clamped, because a timeout the person did not write is a gate that behaves
+// differently from the one they thought they had.
+func parseHookTimeout(v string) (int, error) {
+	if v == "" {
+		return 0, fmt.Errorf("has no value")
+	}
+	num, _, _ := strings.Cut(v, "#")
+	num = strings.TrimSpace(num)
+	n, err := strconv.Atoi(num)
+	if err != nil {
+		return 0, fmt.Errorf("%s is not an integer; write the seconds as a bare number, such as 60", v)
+	}
+	if n < 1 || n > MaxHookTimeoutSeconds {
+		return 0, fmt.Errorf("%d is out of range; a hook may run from 1 to %d seconds (leave the key out for the default of 30)", n, MaxHookTimeoutSeconds)
+	}
+	return n, nil
 }
 
 // parseStringList reads a single-line array of strings. Unlike
@@ -627,7 +667,7 @@ func parseStringList(v string) ([]string, error) {
 
 // knownKeys are the keys this reader owns.
 var knownKeys = []string{"model", "harness", "harness_config", "verify", "default_mode", "auto_never_allow", "skills_paths", "provider_url", "provider",
-	"pre_tool_hook", "post_tool_hook", "stop_hook", "hook_tools"}
+	"pre_tool_hook", "post_tool_hook", "stop_hook", "hook_tools", "hook_timeout_seconds"}
 
 // nearestKey names the key a misspelling was probably meant to be, or "" when
 // key is one we own or is nothing like one. A config file is shared and other

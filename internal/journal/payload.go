@@ -157,6 +157,9 @@ type HookConfig struct {
 	// Tools are the tool names the two tool hooks applied to. Absent means every
 	// tool.
 	Tools []string `json:"tools,omitempty"`
+	// TimeoutSeconds is the user's hook_timeout_seconds. Absent means the
+	// engine's default.
+	TimeoutSeconds int `json:"timeout_seconds,omitempty"`
 }
 
 // UserMessage is what the human asked for.

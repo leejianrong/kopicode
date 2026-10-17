@@ -667,6 +667,7 @@ func (f FileConfig) hooks() Hooks {
 	h := Hooks{PreTool: f.PreToolHook, PostTool: f.PostToolHook, Stop: f.StopHook}
 	if h.Any() {
 		h.Tools = f.HookTools
+		h.TimeoutSeconds = f.HookTimeoutSeconds
 	}
 	return h
 }

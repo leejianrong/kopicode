@@ -137,10 +137,15 @@ func (e *Engine) hookClock() HookClock {
 	return e.cfg.HookClock
 }
 
-// hookTimeout is the bound a hook runs under: the default when unset, never more
-// than [MaxHookTimeout].
+// hookTimeout is the bound a hook runs under: Config.HookTimeout when set (the
+// test seam), else the user's hook_timeout_seconds, else the default, and never
+// more than [MaxHookTimeout].
 func (e *Engine) hookTimeout() time.Duration {
-	switch d := e.cfg.HookTimeout; {
+	d := e.cfg.HookTimeout
+	if d <= 0 {
+		d = time.Duration(e.cfg.Selection.Config.Hooks.TimeoutSeconds) * time.Second
+	}
+	switch {
 	case d <= 0:
 		return DefaultHookTimeout
 	case d > MaxHookTimeout:

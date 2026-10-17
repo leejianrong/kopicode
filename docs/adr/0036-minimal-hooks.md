@@ -35,7 +35,7 @@ Settled while building it, none of which changes a decision above:
 - **`hook_tools` is validated** against the dispatch table: a name that is not a tool is a usage error, since a misspelling would leave that tool ungated.
 - **The record.** `HookRan` carries stdout and stderr separately, both whole. `SessionStarted.hooks` is present only for a hooked session. Resume rebuilds a `post_tool` note and a refused stop from `HookRan` with the same functions that built them live, and never runs a hook.
 - **Not on any wire.** No feature name and no wire rows were added: `features` describes the `serve` wire, and hooks are not on it (decision 3). The serve, `run --print` and mcp documents say so.
-- **The timeout** (decision 6, "configurable up to five minutes") is a field on the engine's `Config` and not a user-config key, because the decision names four keys. Making it one is a further decision.
+- **The timeout** (decision 6, "configurable up to five minutes") is a fifth user-file key, `hook_timeout_seconds`, an integer from 1 to 300 (KOP-208, approved by the owner): user file only and refused in a repository's, like the other four; a value outside the range is a usage error, never clamped. It is in the harness hash and in `SessionStarted.hooks` only when set, and does nothing without a hook command. `Config.HookTimeout` stays as the engine's test seam and wins over the key when set.
 
 ## Rejected
 

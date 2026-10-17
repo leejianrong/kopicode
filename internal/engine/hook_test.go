@@ -241,6 +241,61 @@ func TestTheHookTimeoutIsBounded(t *testing.T) {
 	}
 }
 
+// timedOutBound runs a pre_tool hook that never returns under hooks, with
+// the clock firing the timeout at once, and returns the bound the journal says it
+// timed out after.
+func timedOutBound(t *testing.T, hooks kh.Hooks, opts ...harnessOption) string {
+	t.Helper()
+	clock := &stepHookClock{fireTimer: true}
+	hooks.PreTool = hookScript(t, `sleep 300 & wait`)
+	h, _ := runHooked(t, hooks, []scriptedReply{writeCall("c1", "a.txt")},
+		append(opts, func(c *engine.Config) { c.HookClock = clock })...)
+	ran := sole[journal.HookRan](t, h.events())
+	_, bound, ok := strings.Cut(ran.Detail, "timed out after ")
+	if ran.Outcome != "timed_out" || !ok {
+		t.Fatalf("HookRan = %+v, want a timeout", ran)
+	}
+	bound, _, _ = strings.Cut(bound, " ")
+	return strings.TrimRight(bound, ";,.")
+}
+
+// ADR-0036 decision 6, KOP-208: hook_timeout_seconds is honoured, 300 seconds is
+// the ceiling, and Config.HookTimeout stays the seam a test overrides it with.
+func TestAConfiguredHookTimeoutIsHonoured(t *testing.T) {
+	for _, tc := range []struct {
+		seconds int
+		want    string
+	}{{1, "1s"}, {45, "45s"}, {300, "5m0s"}, {3600, "5m0s"}} {
+		if got := timedOutBound(t, kh.Hooks{TimeoutSeconds: tc.seconds}); got != tc.want {
+			t.Errorf("hook_timeout_seconds = %d: bound = %s, want %s", tc.seconds, got, tc.want)
+		}
+	}
+	if got := timedOutBound(t, kh.Hooks{}); got != "30s" {
+		t.Errorf("unset: bound = %s, want the 30s default", got)
+	}
+	if got := timedOutBound(t, kh.Hooks{TimeoutSeconds: 45}, withHookTimeout(7*time.Second)); got != "7s" {
+		t.Errorf("Config.HookTimeout set as well: bound = %s, want the seam's 7s", got)
+	}
+}
+
+func TestTheHookTimeoutCeilingIsTheConfigKeysCeiling(t *testing.T) {
+	if got := time.Duration(kh.MaxHookTimeoutSeconds) * time.Second; got != engine.MaxHookTimeout {
+		t.Errorf("harness allows %v and the engine caps at %v; they are one bound", got, engine.MaxHookTimeout)
+	}
+}
+
+func TestAHookedSessionRecordsItsTimeoutOnSessionStarted(t *testing.T) {
+	p := script(t, []scriptedReply{{text: "Done."}}, oneAttemptPerTurn(1))
+	h := newHarness(t, p, nil, withHooks(kh.Hooks{Stop: []string{"guard"}, TimeoutSeconds: 90}))
+	if got := sole[journal.SessionStarted](t, h.events()).Hooks; got == nil || got.TimeoutSeconds != 90 {
+		t.Errorf("SessionStarted.Hooks = %+v, want a 90 second timeout", got)
+	}
+	h = newHarness(t, p, nil, withHooks(kh.Hooks{Stop: []string{"guard"}}))
+	if got := sole[journal.SessionStarted](t, h.events()).Hooks; got == nil || got.TimeoutSeconds != 0 {
+		t.Errorf("SessionStarted.Hooks = %+v, want no timeout recorded when unset", got)
+	}
+}
+
 // stepHookClock is a clock a test drives: every Now is 250ms after the last, and
 // NewTimer either never fires or fires at once for the first timer (the timeout).
 type stepHookClock struct {
