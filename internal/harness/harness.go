@@ -252,6 +252,13 @@ type Config struct {
 	// arm's hash moves.
 	OutputCap int
 
+	// Hooks are the commands a person has asked to run around tool calls and
+	// at a stop (ADR-0036). The zero value is no hooks, which is every
+	// registered arm and so every benchmark number. They change what the
+	// session does, so they are in the hash, and only when set, so no existing
+	// arm's hash moves. Only the REPL fills them, from the user config.
+	Hooks Hooks
+
 	// Verification is the forced-verification policy.
 	Verification Verification
 
@@ -702,4 +709,24 @@ var configs = map[string]Config{
 	NaiveV1ConfigName:      naiveV1Config(defaultHarnessConfig),
 	NaiveV2ConfigName:      naiveV2Config(defaultHarnessConfig),
 	NaiveToolsetConfigName: naiveToolsetConfig(defaultHarnessConfig),
+}
+
+// Hooks are the user's hook commands (ADR-0036 decisions 1 and 2). Each command
+// is an argv, never a shell string, and nil means that hook point is not used.
+type Hooks struct {
+	// PreTool runs before a tool call and can only deny it.
+	PreTool []string
+	// PostTool runs after a call that changed the tree.
+	PostTool []string
+	// Stop runs when the model finishes without a tool call, after forced
+	// verification, and a failure refuses the stop.
+	Stop []string
+	// Tools are the tool names PreTool and PostTool apply to. Empty means every
+	// tool.
+	Tools []string
+}
+
+// Any reports whether a hook command is set. Tools alone does nothing.
+func (h Hooks) Any() bool {
+	return len(h.PreTool) > 0 || len(h.PostTool) > 0 || len(h.Stop) > 0
 }

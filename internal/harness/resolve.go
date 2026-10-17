@@ -423,6 +423,8 @@ func Resolve(dir string, o Overrides) (Selection, error) {
 		cfg.OutputCap = DefaultOutputCap
 	}
 
+	cfg.Hooks = user.hooks()
+
 	return Selection{
 		ModelID:           entry.ModelID,
 		Pin:               entry.Pin,
@@ -489,6 +491,7 @@ func resolveUnpinned(dir string, o Overrides, file, user FileConfig, namePrefix,
 	case o.Interactive && declaredPath == "":
 		cfg.OutputCap = DefaultOutputCap
 	}
+	cfg.Hooks = user.hooks()
 	return Selection{
 		ModelID:           modelID,
 		Config:            cfg,
@@ -656,4 +659,14 @@ func sourceDescription(source Source, flagName, configPath string) string {
 	default:
 		return string(source)
 	}
+}
+
+// hooks is the user file's hook declarations as the configuration holds them.
+// Zero when the user file was not read or set none.
+func (f FileConfig) hooks() Hooks {
+	h := Hooks{PreTool: f.PreToolHook, PostTool: f.PostToolHook, Stop: f.StopHook}
+	if h.Any() {
+		h.Tools = f.HookTools
+	}
+	return h
 }
