@@ -158,4 +158,9 @@ type Result struct {
 	Turns int
 	// Tokens is the session's cumulative reported usage, not this exchange's.
 	Tokens journal.TokenCounts
+	// Detail is what the exchange says about why it stopped: the same string
+	// Close journals as SessionEnded.Detail. It is how a surface learns which
+	// command rejected the tree or refused the stop, because those two stops
+	// return a nil error. Empty for a clean stop.
+	Detail string
 }

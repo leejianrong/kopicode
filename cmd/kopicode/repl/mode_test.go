@@ -105,3 +105,47 @@ func TestAVerificationThatNeverRanIsNotShownAsAFailure(t *testing.T) {
 		t.Errorf("output:\n%s", out.String())
 	}
 }
+
+// KOP-209: the two stops that return a nil error carry their reason in the
+// result, and the stopped line shows it.
+func runStopped(t *testing.T, res engine.Result) string {
+	t.Helper()
+	var out strings.Builder
+	loop, err := repl.New(repl.Config{
+		In: strings.NewReader("go on\n"), Out: &out,
+		Turn: func(context.Context, string, repl.Surface) (engine.Result, error) { return res, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loop.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	return out.String()
+}
+
+func TestAStoppedLineSaysWhyForVerificationAndTheStopGate(t *testing.T) {
+	for _, tc := range []struct {
+		stop engine.Stop
+		want string
+	}{
+		{engine.StopVerificationFailed, "[stopped] verification_failed: `go test ./...` exited 1"},
+		{engine.StopGateFailed, "[stopped] stop_gate_failed: `make lint` refused the stop 3 times in a row"},
+	} {
+		detail := tc.want[strings.Index(tc.want, ": ")+2:]
+		out := runStopped(t, engine.Result{Stop: tc.stop, Detail: detail})
+		if !strings.Contains(out, tc.want) {
+			t.Errorf("%s: output lacks %q:\n%s", tc.stop, tc.want, out)
+		}
+	}
+}
+
+func TestAStopWithNoDetailKeepsItsBareLine(t *testing.T) {
+	out := runStopped(t, engine.Result{Stop: engine.StopGateFailed})
+	if !strings.Contains(out, "[stopped] stop_gate_failed") || strings.Contains(out, "stop_gate_failed:") {
+		t.Errorf("output = %q", out)
+	}
+	if out := runStopped(t, engine.Result{Stop: engine.StopCompleted, Detail: "x"}); strings.Contains(out, "[stopped]") {
+		t.Errorf("a completed stop printed a stopped line: %q", out)
+	}
+}

@@ -79,7 +79,7 @@ func (e *Engine) Run(ctx context.Context, prompt string) (Result, error) {
 				e.stop, e.detail = stop, cause.Error()
 			}
 		}
-		return Result{Stop: stop, Turns: used, Tokens: e.spent}, cause
+		return Result{Stop: stop, Turns: used, Tokens: e.spent, Detail: e.detail}, cause
 	}
 
 	e.asm.AppendUser(prompt)

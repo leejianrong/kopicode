@@ -128,6 +128,20 @@ func TestStopRefusalsAreBoundedAtThreeAndNeverReportSuccess(t *testing.T) {
 		!strings.Contains(ended.Detail.Inline, "3 times in a row") || !strings.Contains(ended.Detail.Inline, "hook.sh") {
 		t.Errorf("SessionEnded = %+v", ended)
 	}
+	if res.Detail != ended.Detail.Inline {
+		t.Errorf("Result.Detail = %q, SessionEnded.Detail = %q", res.Detail, ended.Detail.Inline)
+	}
+}
+
+func TestACleanStopHasNoResultDetail(t *testing.T) {
+	h, _ := stopHarness(t, stopHook(t, 0), proseReplies(1))
+	res, err := h.eng.Run(t.Context(), "go")
+	if err != nil || res.Stop != engine.StopCompleted {
+		t.Fatalf("Run = %+v, %v", res, err)
+	}
+	if res.Detail != "" {
+		t.Errorf("Result.Detail = %q for a completed stop", res.Detail)
+	}
 }
 
 func TestTheRefusalCountIsPerExchangeAndAPassResetsIt(t *testing.T) {

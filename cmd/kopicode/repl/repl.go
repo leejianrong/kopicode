@@ -478,8 +478,14 @@ func (l *Loop) renderOutcome(res engine.Result, err error) {
 	}
 
 	detail := ""
-	if err != nil {
+	switch {
+	case err != nil:
 		detail = err.Error()
+	case res.Detail != "" && (res.Stop == engine.StopVerificationFailed || res.Stop == engine.StopGateFailed):
+		// These two stops return a nil error, so the reason (which command, how
+		// many refusals) is only in the result. Keep the stop's name in front: the
+		// detail alone does not say which of the two it was.
+		detail = res.Stop.Reason() + ": " + res.Detail
 	}
 	l.Stopped(res.Stop, detail)
 
