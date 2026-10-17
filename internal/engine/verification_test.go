@@ -270,6 +270,9 @@ func TestAFailedVerificationRefusesToReportSuccess(t *testing.T) {
 	if ended.Detail.Inline == "" {
 		t.Error("SessionEnded says verification failed and not which command said so")
 	}
+	if res.Detail != ended.Detail.Inline {
+		t.Errorf("Result.Detail = %q, SessionEnded.Detail = %q; a surface must be told what the record says", res.Detail, ended.Detail.Inline)
+	}
 }
 
 // TestAFailedVerificationBecomesTheNextTurnsObservation is the other half of
