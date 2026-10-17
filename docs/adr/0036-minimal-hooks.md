@@ -1,6 +1,6 @@
 # ADR-0036: Minimal hooks: a pre-tool deny, a post-tool command and a stop gate
 
-*Accepted* on the owner's instruction to settle the design (KOP-180); no code is written. The decisions are small and security-sensitive, so the implementation cards below each get their own review. Builds on [ADR-0024](0024-user-level-config.md) (what a repository may and may not set), [ADR-0017](0017-auto-consent-mode.md) (a list that can only be lengthened), [ADR-0033](0033-tool-output-cap.md) and the forced verification in `internal/verify`.
+*Accepted* on the owner's instruction to settle the design (KOP-180). *Implemented* in KOP-202 to KOP-206 (PRs #239 to #243), one card each; what the implementation settled that the decisions below left open is under [Implementation notes](#implementation-notes). Builds on [ADR-0024](0024-user-level-config.md) (what a repository may and may not set), [ADR-0017](0017-auto-consent-mode.md) (a list that can only be lengthened), [ADR-0033](0033-tool-output-cap.md) and the forced verification in `internal/verify`.
 
 ## Context
 
@@ -24,6 +24,19 @@ The risks are the reason to keep it small. A hook is a command run on the person
 9. **In the harness hash only when set.** A session with no hooks has the hash it has today, so no recorded fixture or benchmark number moves. A session with hooks records them in `SessionStarted`, so a run is never compared against one with a different gate.
 10. **Out of scope here, each its own decision:** hooks that rewrite a tool's input or output, a prompt-submit or session-start hook, regex or glob matchers beyond the tool name, hooks shipped by a skill or a repository, and `serve` taking hooks from its caller.
 
+## Implementation notes
+
+Settled while building it, none of which changes a decision above:
+
+- **Order against consent.** `pre_tool` runs *before* the consent gate, so a person is never asked to approve a call a hook has already refused. A pass is still not an allow: the gate runs next, and the stricter of the two stands (decision 4).
+- **`post_tool` covers every tool that changes the tree**, the engine's own `mutates` set (`write_file`, `edit_file`, `edit_file_fuzzy`, `delete_file`, `run_shell`), which is decision 1's rule ("a call that changed the tree"). Decision 1's parenthetical named three of them. It is skipped for a call that never ran (consent or `pre_tool` denial) and for one that failed. Exit `2` has nothing to deny there and is recorded as `failed`. The note goes after the result and after the output cap, and is capped on its own.
+- **`stop` runs at the clean prose stop, after the verification check.** A tree verification rejected still ends as `verification_failed` and the hook is not consulted. The refusal count is per exchange, and a pass resets it. `stop_gate_failed` is exit 1, charged to the model like `verification_failed`. Any non-pass refuses, exit `2` included.
+- **The environment allowlist** (`hookPassEnv` in `internal/engine/hook.go`) is `PATH`, the home and user variables, locale, temp directories, the Go toolchain variables, XDG directories, TLS certificate paths and what Windows needs to start a process. A hook that needs another variable sets it in its own command.
+- **`hook_tools` is validated** against the dispatch table: a name that is not a tool is a usage error, since a misspelling would leave that tool ungated.
+- **The record.** `HookRan` carries stdout and stderr separately, both whole. `SessionStarted.hooks` is present only for a hooked session. Resume rebuilds a `post_tool` note and a refused stop from `HookRan` with the same functions that built them live, and never runs a hook.
+- **Not on any wire.** No feature name and no wire rows were added: `features` describes the `serve` wire, and hooks are not on it (decision 3). The serve, `run --print` and mcp documents say so.
+- **The timeout** (decision 6, "configurable up to five minutes") is a field on the engine's `Config` and not a user-config key, because the decision names four keys. Making it one is a further decision.
+
 ## Rejected
 
 - **Hooks in the repository's file, as Claude Code allows in a project's settings.** A checked-in command run on every contributor's machine is the supply-chain shape ADR-0024 refused for `default_mode`. A repository states its test command already.
@@ -39,6 +52,6 @@ No gain is claimed. The check is a regression one, for the implementation cards:
 
 ## Consequences
 
-- Implementation splits into cards after this: the config keys and their repository refusal; the `pre_tool` hook with its stricter-of combination and the `HookRan` event; `post_tool`; the `stop` gate and `stop_gate_failed`; the README and the wire documents.
+- Implementation split into five cards: the config keys and their repository refusal; the `pre_tool` hook with its stricter-of combination and the `HookRan` event; `post_tool`; the `stop` gate and `stop_gate_failed`; the README and the wire documents.
 - `internal/engine` gains one small package-level runner for hook commands, so the three points share one subprocess path and one test of the rule in decision 7.
-- The README gets a short section when the first hook ships, not before.
+- The README has its section as of KOP-206.
