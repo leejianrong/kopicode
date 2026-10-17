@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	"github.com/leejianrong/kopicode/internal/harness"
 	"github.com/leejianrong/kopicode/internal/journal"
@@ -197,6 +198,16 @@ type Config struct {
 	// assembler starts knowing but which turn number the session's own next
 	// turn gets.
 	ResumeHistory []journal.Event
+
+	// HookTimeout bounds each user hook command (ADR-0036 decision 6). Zero means
+	// [DefaultHookTimeout], and nothing longer than [MaxHookTimeout] is honoured.
+	// There is no user-config key for it: the ADR names four keys, so a person
+	// cannot lengthen a hook's bound, and a test can shorten it.
+	HookTimeout time.Duration
+
+	// HookClock is where a hook's duration and timeout come from. Nil means the
+	// real clock. A test injects one so the journal's durations are fixed.
+	HookClock HookClock
 }
 
 // Errors a caller can branch on.
@@ -529,6 +540,7 @@ func (e *Engine) Start(ctx context.Context) error {
 		HarnessConfigHash: e.cfg.Selection.HarnessConfigHash,
 		Build:             e.cfg.Build,
 		ParentSession:     e.cfg.ParentSession,
+		Hooks:             journalHooks(e.cfg.Selection.Config.Hooks),
 	})
 	if err != nil {
 		return err
@@ -595,4 +607,13 @@ func providerHostOf(sel Selection) string {
 		return harness.CodexHost
 	}
 	return harness.ProviderHost(sel.ProviderURL)
+}
+
+// journalHooks is the hook declaration SessionStarted records, nil when the
+// session has none, so an unhooked session's record is what it always was.
+func journalHooks(h harness.Hooks) *journal.HookConfig {
+	if !h.Any() {
+		return nil
+	}
+	return &journal.HookConfig{PreTool: h.PreTool, PostTool: h.PostTool, Stop: h.Stop, Tools: h.Tools}
 }

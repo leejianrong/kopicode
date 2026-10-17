@@ -89,6 +89,10 @@ func samplePayloads() []journal.Payload {
 		journal.HandoffWritten{
 			Goal: "finish the backoff", Document: journal.InlineText("## Goal\nx"), Path: "/repo/.kopicode/handoff/s.md",
 		},
+		journal.HookRan{
+			Point: "pre_tool", CallID: "t1c1", Tool: "run_shell", Command: []string{"guard"}, ExitCode: 2,
+			Outcome: "denied", Stdout: journal.InlineText("ok"), Stderr: journal.InlineText("read only"),
+		},
 		journal.UnknownPayload{EventType: "SomethingNewer", Raw: json.RawMessage(`{"a":1}`)},
 	}
 }

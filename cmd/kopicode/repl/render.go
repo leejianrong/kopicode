@@ -164,6 +164,23 @@ func (l *Loop) Render(e engine.Event) {
 		}
 		l.tag("handoff", fmt.Sprintf("written, %s (%s)", label, humanBytes(e.Size)))
 
+	case engine.EventHookRan:
+		// A user hook ran (ADR-0036). One line: which hook, for which tool, how it
+		// ended, and the reason it gave when it said no. The full output is in the
+		// record.
+		what := e.Mode
+		if e.Tool != "" {
+			what += " " + e.Tool
+		}
+		line := fmt.Sprintf("%s: %s", what, e.Reason)
+		if e.Detail != "" {
+			line += " (" + e.Detail + ")"
+		}
+		if reason := strings.TrimSpace(e.Text); reason != "" && e.Reason != "passed" {
+			line += ": " + reason
+		}
+		l.tag("hook", line)
+
 	case engine.EventAskAnswered:
 		if e.Reason == "refused" {
 			l.tag("ask", fmt.Sprintf("unanswered (%s): %s", e.Source, e.Text))

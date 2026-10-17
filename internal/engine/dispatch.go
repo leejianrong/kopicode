@@ -360,6 +360,22 @@ func (e *Engine) runTool(ctx context.Context, turn int, callID string, call pars
 		return detail, false, false, true, nil
 	}
 
+	// ADR-0036: a pre_tool hook can only tighten. It runs before the consent gate
+	// so a person is not asked to approve a call a hook has already refused, and
+	// a pass here is not an allow: the gate below still decides.
+	if refusal, blocked, herr := e.preToolBlock(ctx, turn, callID, call.Name, call.Arguments); herr != nil {
+		return "", false, false, false, herr
+	} else if blocked {
+		fault := tools.FaultTask
+		if ctx.Err() != nil {
+			fault = tools.FaultCancelled
+		}
+		if jerr := e.journalToolResult(ctx, turn, callID, call.Name, refusal, nil, fault); jerr != nil {
+			return "", false, false, false, jerr
+		}
+		return refusal, false, true, true, nil
+	}
+
 	act := permission.Action{ID: callID, Tool: call.Name, Operation: entry.op}
 	entry.action(args, e.cfg.Tools.Root.Path(), &act)
 

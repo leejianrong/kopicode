@@ -139,9 +139,25 @@ type SessionStarted struct {
 	// (ADR-0026). Absent for every other session. The handoff text itself is in
 	// this journal as a ProjectInstructionsLoaded with scope "handoff".
 	ParentSession string `json:"parent_session,omitempty"`
+	// Hooks are the user's hook commands this session ran under (ADR-0036
+	// decision 9). Absent when there were none, so an unhooked session's record
+	// is byte-identical to what it was before hooks existed, and a run is never
+	// compared against one with a different gate.
+	Hooks *HookConfig `json:"hooks,omitempty"`
 }
 
 func (SessionStarted) Type() Type { return TypeSessionStarted }
+
+// HookConfig is the hook declaration a session started with. Each command is
+// argv, the form it ran in; an unset hook point is absent.
+type HookConfig struct {
+	PreTool  []string `json:"pre_tool,omitempty"`
+	PostTool []string `json:"post_tool,omitempty"`
+	Stop     []string `json:"stop,omitempty"`
+	// Tools are the tool names the two tool hooks applied to. Absent means every
+	// tool.
+	Tools []string `json:"tools,omitempty"`
+}
 
 // UserMessage is what the human asked for.
 type UserMessage struct {
@@ -767,6 +783,40 @@ type HandoffWritten struct {
 }
 
 func (HandoffWritten) Type() Type { return TypeHandoffWritten }
+
+// HookRan records one run of a user hook command (ADR-0036 decision 8).
+//
+// It is written whether the hook passed or not, and the output goes in whole:
+// Stdout and Stderr spill to blobs past the journal's threshold like any other
+// Text, so nothing here is clipped. What the model was shown of it is a separate
+// matter, capped by ADR-0033's rule, and the ToolResult beside it holds that.
+//
+// Replay and resume read this event and never run the command again.
+type HookRan struct {
+	// Point is "pre_tool", "post_tool" or "stop".
+	Point string `json:"point"`
+	// CallID and Tool name the call a tool hook ran for. Absent for "stop".
+	CallID string `json:"call_id,omitempty"`
+	Tool   string `json:"tool,omitempty"`
+	// Command is argv, never a shell string.
+	Command []string `json:"command"`
+	// ExitCode is the process's exit code, and -1 when it did not exit on its
+	// own: it could not start, it timed out, it was killed by a signal or the
+	// turn was cancelled. Detail says which.
+	ExitCode int `json:"exit_code"`
+	// DurationMS is how long the command ran, in milliseconds.
+	DurationMS int64 `json:"duration_ms"`
+	// Outcome is "passed" (exit 0), "denied" (exit 2, a deliberate refusal),
+	// "failed" (any other way of not passing) or "timed_out".
+	Outcome string `json:"outcome"`
+	// Detail says why a run did not conclude: the start error, the signal, the
+	// timeout, the cancellation. Absent when it exited normally.
+	Detail string `json:"detail,omitempty"`
+	Stdout Text   `json:"stdout"`
+	Stderr Text   `json:"stderr"`
+}
+
+func (HookRan) Type() Type { return TypeHookRan }
 
 // AskRequested records that the model paused the turn to ask the human a
 // question (docs/adr/0009-ask-tool-contract.md decision 3).

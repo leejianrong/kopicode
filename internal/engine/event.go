@@ -51,6 +51,8 @@ const (
 	EventAskAnswered
 	EventProjectInstructionsLoaded
 	EventHandoffWritten
+	// EventHookRan is one run of a user hook command (ADR-0036).
+	EventHookRan
 
 	// EventUnknown is an event this build has no typed payload for, preserved
 	// by the journal's compatibility promise and passed through here rather
@@ -99,6 +101,7 @@ var eventKindText = map[EventKind]string{
 	EventAskAnswered:               "ask_answered",
 	EventProjectInstructionsLoaded: "project_instructions_loaded",
 	EventHandoffWritten:            "handoff_written",
+	EventHookRan:                   "hook_ran",
 	EventUnknown:                   "unknown",
 	EventDelta:                     "delta",
 }
@@ -424,6 +427,20 @@ func eventOf(ev journal.Event) Event {
 		base.Path = p.Path
 		base.Reason = p.Goal
 		base.Text, base.Size = text(p.Document)
+
+	case journal.HookRan:
+		// Mode is the hook point, Reason the outcome and Detail why a run did not
+		// conclude. Text is what the command wrote to stderr, which is the reason
+		// a denial gives; Size is both streams, whole, in the record.
+		base.Kind = EventHookRan
+		base.Mode = p.Point
+		base.Tool = p.Tool
+		base.Command = p.Command
+		base.ExitCode, base.HasExitCode = p.ExitCode, true
+		base.Reason = p.Outcome
+		base.Detail = p.Detail
+		base.Text = p.Stderr.Inline
+		base.Size = p.Stdout.Size + p.Stderr.Size
 
 	case journal.UnknownPayload:
 		// The journal's compatibility promise, carried one layer further out. A
