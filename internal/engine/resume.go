@@ -40,6 +40,9 @@ import (
 //     XML), matching [Engine.observe]'s own choice of route for the reason
 //     given on [Assembler.AppendToolResult]: a text-route call carries no
 //     provider-issued id to echo.
+//   - A [journal.HookRan] for the post_tool point -> the note the model was shown
+//     after that call's result, appended to the result by the same function that
+//     built it live. The hook is never run again.
 //   - The feedback text of a [journal.ToolCallRepaired], a
 //     [journal.ToolCallFailed], or a blocking [journal.VerificationRun]
 //     (Skip == "" and ExitCode > 0) -> [Assembler.AppendUser], or
@@ -50,7 +53,7 @@ import (
 //     own contract: reasoning is never fed back.
 //   - Every other payload type — [journal.SessionStarted], [journal.ProviderRequest],
 //     [journal.ToolCallRequested], [journal.EditApplied], [journal.EditRejected],
-//     [journal.SyntaxGateRun], [journal.PermissionRequested],
+//     [journal.SyntaxGateRun], a pre_tool or stop [journal.HookRan], [journal.PermissionRequested],
 //     [journal.PermissionDecided], [journal.TurnSnapshot], [journal.ProviderRetried],
 //     [journal.TurnCancelled], [journal.SessionEnded], and anything this build
 //     does not recognise — carries nothing the assembler needs and is skipped.
@@ -156,6 +159,19 @@ func replayHistory(asm *Assembler, events []journal.Event) error {
 				buf.results = append(buf.results, p)
 			}
 
+		case journal.HookRan:
+			// A post_tool note was shown after its call's result. Rebuilt from the
+			// record by the same function that built it, and never by running the
+			// hook again (ADR-0036 decision 8).
+			if buf != nil && p.Point == hookPostTool {
+				if note := postToolNote(p.Outcome, p.Detail, p.Stdout.Inline, p.Stderr.Inline); note != "" {
+					if buf.notes == nil {
+						buf.notes = map[string]string{}
+					}
+					buf.notes[p.CallID] = note
+				}
+			}
+
 		case journal.ToolCallRepaired:
 			if buf != nil {
 				buf.feedback = append(buf.feedback, p.Error.Inline)
@@ -212,6 +228,8 @@ type attemptBuffer struct {
 	// results is every journal.ToolResult this attempt's dispatch produced, in
 	// order.
 	results []journal.ToolResult
+	// notes are the post_tool notes shown after a call's result, by call id.
+	notes map[string]string
 	// feedback is the repair/failure/verification text this attempt's outcome
 	// fed back to the model, in order. Ordinarily at most one of these fires
 	// per attempt, but the slice makes no such assumption.
@@ -242,13 +260,17 @@ func (b *attemptBuffer) commit(asm *Assembler) error {
 	asm.AppendAssistant(provider.Reply{Content: b.content, ToolCalls: calls})
 
 	for _, r := range b.results {
+		out := r.Output.Inline
+		if note := b.notes[r.CallID]; note != "" {
+			out += "\n\n" + note
+		}
 		if b.isNative(r.CallID) {
-			if err := asm.AppendToolResult(r.CallID, r.Output.Inline); err != nil {
+			if err := asm.AppendToolResult(r.CallID, out); err != nil {
 				return fmt.Errorf("engine: resume replay: placing the result of call %q: %w", r.CallID, err)
 			}
 			continue
 		}
-		asm.AppendUser(r.Output.Inline)
+		asm.AppendUser(out)
 	}
 
 	for _, text := range b.feedback {

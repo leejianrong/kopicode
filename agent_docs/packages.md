@@ -85,7 +85,9 @@ not this list:
   allowlist (`hookPassEnv`), its own process group, a 30 s default timeout capped at 5 minutes. The
   `pre_tool` hook runs before the consent gate and can only deny; anything but exit 0 is a deny.
   Every run is a `HookRan` event, output whole. Only the REPL fills `Config.Hooks`, and replay and
-  resume never run one. `post_tool` and `stop` land in later cards.
+  resume never run one. `post_tool` runs after a call that changed the tree and ran without error
+  (`mutates` tools), cannot undo it, and its output or failure is a note after the result, capped on
+  its own; resume rebuilds the note from the `HookRan` event. `stop` lands in a later card.
 - **`internal/syntax`** — the post-edit gate: a language-native check (`gofmt -e`,
   `node --check`, `py_compile`, …) run immediately after an edit. `NotRun` is the zero
   value of `Outcome` — a gate that didn't run must never read as one that passed — and
