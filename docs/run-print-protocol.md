@@ -124,6 +124,13 @@ A `verification_failed` stop's `text` is a one-line summary (`` `go test ./...` 
 ``); the full command output is on the earlier `verification` event in the same stream,
 not repeated here.
 
+## Hooks are not run here
+
+The user-config hooks of [ADR-0036](adr/0036-minimal-hooks.md) (`pre_tool_hook`, `post_tool_hook`,
+`stop_hook`) belong to the person at the keyboard, so `run --print` runs none: the stream never has a
+`hook_ran` event and never ends `stop_gate_failed`, and one person's habits cannot change what a
+script does. There is no flag to turn them on.
+
 ## Compatibility
 
 The schema is versioned from its first commit because a headless surface is a
