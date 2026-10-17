@@ -621,5 +621,5 @@ func journalHooks(h harness.Hooks) *journal.HookConfig {
 	if !h.Any() {
 		return nil
 	}
-	return &journal.HookConfig{PreTool: h.PreTool, PostTool: h.PostTool, Stop: h.Stop, Tools: h.Tools}
+	return &journal.HookConfig{PreTool: h.PreTool, PostTool: h.PostTool, Stop: h.Stop, Tools: h.Tools, TimeoutSeconds: h.TimeoutSeconds}
 }

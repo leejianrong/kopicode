@@ -104,10 +104,11 @@ pre_tool_hook  = ["scripts/guard"]         # before a tool call: can only refuse
 post_tool_hook = ["gofmt", "-l", "."]      # after a call that changed the tree: its output is shown to the model
 stop_hook      = ["make", "lint"]          # when the model tries to finish: a failure sends it back to work
 hook_tools     = ["write_file", "run_shell"]   # optional: the tools the first two apply to (default: all)
+hook_timeout_seconds = 60                      # optional: how long a hook may run, 1 to 300 (default 30)
 ```
 
 The command gets the event as JSON on stdin (the hook point, the tool, its arguments, the session id
-and the turn). Exit `0` passes. Anything else is a failure: a non-zero exit, a timeout (30 seconds)
+and the turn). Exit `0` passes. Anything else is a failure: a non-zero exit, a timeout (30 seconds, or `hook_timeout_seconds`)
 or a command that cannot start. A failed gate is never read as a pass. For `pre_tool`, exit `2` is the
 deliberate no, and what it printed to stderr is the reason the model and you both see:
 
@@ -251,7 +252,7 @@ mock provider with `make bench-smoke`.
 | `provider`, Codex CLI's `auth.json` | the user config or `--provider`; the login file | only with the Codex provider (ADR-0035); never read from a repository, never by `serve` or `mcp` |
 | `model`, `harness`, `harness_config` | `.kopicode/config.toml` or flags | flags win; `model` can also come from the user config |
 | `default_mode`, `auto_never_allow`, user `AGENTS.md` | `~/.config/kopicode/` | interactive `kopicode` only |
-| `pre_tool_hook`, `post_tool_hook`, `stop_hook`, `hook_tools` | `~/.config/kopicode/config.toml` only | interactive `kopicode` only; refused in a repository's file ([ADR-0036](docs/adr/0036-minimal-hooks.md)) |
+| `pre_tool_hook`, `post_tool_hook`, `stop_hook`, `hook_tools`, `hook_timeout_seconds` | `~/.config/kopicode/config.toml` only | interactive `kopicode` only; refused in a repository's file ([ADR-0036](docs/adr/0036-minimal-hooks.md)) |
 | turn cap and other bounds | a declared harness config (`--harness-config`) | for example `max_turns = 40` when a session stops with `max_turns`; local-only, never anchors a published number. See [`docs/harness-tuning.md`](docs/harness-tuning.md) |
 | per-language examples | [`docs/examples/`](docs/examples/) | Go, JavaScript/TypeScript, Python, multi-language |
 | skills: reusable task instructions | `<name>/SKILL.md` under `.agents/skills`, `.kopicode/skills`, `~/.config/kopicode/skills`, or `skills_paths` in the user config; `~/.claude/skills` and `~/.agents/skills` are read as fallbacks | the convention Claude Code, Codex and Cursor read. `/skills` lists them, `/<name> [task]` runs one, Tab completes the name. A repository's skill beats a personal one of the same name. The model is also shown the ones inside the project once per session, in `run --print`, `serve` and `mcp` as well (feature `skills.catalogue`; only the repository's own, never your personal ones). `/skills` and `/<name>` are interactive `kopicode` only ([ADR-0014](docs/adr/0014-skills-mechanism.md), [ADR-0025](docs/adr/0025-skills-discovery-and-commands.md)) |

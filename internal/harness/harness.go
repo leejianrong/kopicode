@@ -724,6 +724,9 @@ type Hooks struct {
 	// Tools are the tool names PreTool and PostTool apply to. Empty means every
 	// tool.
 	Tools []string
+	// TimeoutSeconds bounds each hook command, 1 to [MaxHookTimeoutSeconds].
+	// Zero means unset, which is the engine's default of 30 seconds.
+	TimeoutSeconds int
 }
 
 // Any reports whether a hook command is set. Tools alone does nothing.
