@@ -83,6 +83,9 @@ const (
 
 	// TypeHandoffWritten is ADR-0026's addition: a session's handoff document.
 	TypeHandoffWritten Type = "HandoffWritten"
+
+	// TypeHookRan is ADR-0036's addition: one run of a user hook command.
+	TypeHookRan Type = "HookRan"
 )
 
 // Payload is one event's typed body.
@@ -259,6 +262,8 @@ var registry = map[Type]func([]byte) (Payload, error){
 	TypeProjectInstructionsLoaded: decodeInto[ProjectInstructionsLoaded],
 
 	TypeHandoffWritten: decodeInto[HandoffWritten],
+
+	TypeHookRan: decodeInto[HookRan],
 }
 
 // KnownTypes lists every discriminator this build can decode into a typed

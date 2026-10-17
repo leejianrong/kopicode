@@ -66,3 +66,12 @@ func ReplayHistoryForTest(asm *Assembler, events []journal.Event) error {
 func WrapProjectInstructionsForTest(content string) string {
 	return wrapProjectInstructions(content)
 }
+
+// ToolNamesForTest is every tool the dispatch table can run.
+func ToolNamesForTest() []string {
+	names := make([]string, 0, len(toolEntries))
+	for _, e := range toolEntries {
+		names = append(names, e.name)
+	}
+	return names
+}

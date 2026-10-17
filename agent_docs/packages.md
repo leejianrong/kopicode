@@ -80,6 +80,12 @@ not this list:
   identical result, or edits to one file that keep failing, once `StallThreshold` is reached. Off (0)
   for every registered arm, so it changes no benchmark number. It only adds text after the call's
   result; the journal is untouched.
+- **User hooks** (`internal/engine/hook.go`, ADR-0036) — the one place a hook command is started:
+  argv from the user's config (never a repository's), `Dir` the tree root, `Env` built from an
+  allowlist (`hookPassEnv`), its own process group, a 30 s default timeout capped at 5 minutes. The
+  `pre_tool` hook runs before the consent gate and can only deny; anything but exit 0 is a deny.
+  Every run is a `HookRan` event, output whole. Only the REPL fills `Config.Hooks`, and replay and
+  resume never run one. `post_tool` and `stop` land in later cards.
 - **`internal/syntax`** — the post-edit gate: a language-native check (`gofmt -e`,
   `node --check`, `py_compile`, …) run immediately after an edit. `NotRun` is the zero
   value of `Outcome` — a gate that didn't run must never read as one that passed — and

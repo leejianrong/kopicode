@@ -37,7 +37,21 @@ func cappedTool(tool string) bool {
 // from the start and the rest from the end, each cut on a line boundary where one
 // exists and never inside a UTF-8 sequence, and names what was left out.
 func capOutput(tool, output string, limit int) string {
-	if limit <= 0 || !cappedTool(tool) || len(output) <= limit {
+	if !cappedTool(tool) {
+		return output
+	}
+	how := "Re-run with a narrower command (pipe to grep, head or tail, or run one test) to see another part."
+	if tool == tools.ToolGrep {
+		how = "Narrow the search (a more specific pattern or a path) to see another part."
+	}
+	return capText(output, limit, how)
+}
+
+// capText is the cap itself, for any text the model is shown that the record
+// holds whole: a tool's output, or a hook's. how is the sentence telling the
+// model how to see another part, and may be empty when there is no such way.
+func capText(output string, limit int, how string) string {
+	if limit <= 0 || len(output) <= limit {
 		return output
 	}
 	headBudget := limit / 4
@@ -52,14 +66,7 @@ func capOutput(tool, output string, limit int) string {
 		omittedLines++
 	}
 
-	var how string
-	if tool == tools.ToolGrep {
-		how = "Narrow the search (a more specific pattern or a path) to see another part."
-	} else {
-		how = "Re-run with a narrower command (pipe to grep, head or tail, or run one test) to see another part."
-	}
-	note := fmt.Sprintf("[%d lines (%d bytes) omitted from the middle of this output. %s]",
-		omittedLines, len(omitted), how)
+	note := strings.TrimSuffix(fmt.Sprintf("[%d lines (%d bytes) omitted from the middle of this output. %s", omittedLines, len(omitted), how), " ") + "]"
 	return head + note + "\n" + tail
 }
 
