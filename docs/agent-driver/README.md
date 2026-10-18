@@ -46,8 +46,18 @@ Codex CLI (a custom prompt is not needed; give it the text under "Codex prompt" 
 codex mcp add kopicode -- kopicode mcp
 ```
 
-Both are the same `command: kopicode, args: [mcp]`. Whether each client really drives kopicode end to end is checked
-by KOP-212; until that card is done, treat both lines as untested here.
+Both are the same `command: kopicode, args: [mcp]`. Both were checked end to end on 2026-10-18 (KOP-212, [`docs/research/2026-10-driven-runs-claude-code-and-codex.md`](../research/2026-10-driven-runs-claude-code-and-codex.md)).
+
+Two things a headless run needs, found in that check:
+
+- **Codex `exec` refuses MCP tool calls by default** ("MCP tool call requires approval, but approval policy is never"). Add
+  `default_tools_approval_mode = "approve"` to the `[mcp_servers.kopicode]` table, or `-c 'mcp_servers.kopicode.default_tools_approval_mode="approve"'`
+  on the command line. It lets Codex call kopicode's five tools and nothing else.
+- **Claude Code `-p` needs the tools allowed up front**, for example `--allowedTools "Task" "mcp__kopicode" "Read" "Bash(git -C:*)"`; a tool that needs
+  approval is refused with no one to ask.
+
+Tell the driver only the `dir` and the `task`. A parent session that adds its own instructions ("report the final summary and the test result")
+asks for things the driver is told not to produce; the parent should read the journal itself if it wants more.
 
 ## Codex prompt
 
