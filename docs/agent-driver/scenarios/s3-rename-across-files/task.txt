@@ -1,0 +1,1 @@
+Rename the function fetch_user to get_user everywhere it appears in this repository: the code, the tests, the docstrings and the README. Behaviour must not change.

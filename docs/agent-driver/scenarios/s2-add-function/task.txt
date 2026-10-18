@@ -1,0 +1,3 @@
+Add a function chunk(items, size) to textutil/lists.py. It splits a list into consecutive lists of at most size items, in order:
+chunk([1, 2, 3, 4, 5], 2) is [[1, 2], [3, 4], [5]]. An empty list gives []. A size of zero or less raises ValueError. It must not
+change the list it is given. Add tests for it to tests/test_lists.py.
