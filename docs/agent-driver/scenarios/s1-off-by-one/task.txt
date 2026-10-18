@@ -1,0 +1,1 @@
+The test in tests/test_pagination.py fails. Find the cause and fix it in the code under shop/. Do not change the tests.
