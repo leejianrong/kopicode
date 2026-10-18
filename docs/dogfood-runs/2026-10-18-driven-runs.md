@@ -27,5 +27,5 @@ subscription, so no price. About $0.08 in all, on the OpenRouter key and the Cla
 | KOP-218 | On an ambiguous task it did not call `ask` and dropped its stated assumption from the final message | s4, seq 53, 63 |
 | KOP-219 | The driver report has no verification line (carried from the KOP-211 trial) | trial score, seq 18 |
 
-**What this does not show.** One run per scenario and driver, one model, and an easy set: four of the six passed their tree check first time. The scenarios that bit were the two built to (s4, s5)
+**What this does not show.** One run per scenario and driver, one model, and an easy set: five of the six passed their tree check. The scenarios that bit were the two built to (s4, s5)
 and the one that stresses edits (s3). Provider 429 retries happened in four sessions (one to three each, under a second apart) and cost nothing visible.
