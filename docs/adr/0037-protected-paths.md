@@ -1,6 +1,6 @@
 # ADR-0037: Protected paths: refuse a write the task said not to make
 
-*Proposed* (KOP-217). Not built. Builds on [ADR-0019](0019-read-only-sessions.md) (a refusal enforced in the gate, in every mode that accepts it), [ADR-0017](0017-auto-consent-mode.md) (a list a person can add to and never shorten) and [ADR-0036](0036-minimal-hooks.md) (a `pre_tool` deny, REPL only). It touches the consent model, so it waits for the owner's decision.
+*Accepted* 2026-10-23 on the owner's answers: build protected paths as decided below, and cover the shell where the tokenizer can see the write target (not file tools only, and not a refusal under `auto`). KOP-217. Builds on [ADR-0019](0019-read-only-sessions.md) (a refusal enforced in the gate, in every mode that accepts it), [ADR-0017](0017-auto-consent-mode.md) (a list a person can add to and never shorten) and [ADR-0036](0036-minimal-hooks.md) (a `pre_tool` deny, REPL only). It touches the consent model, which is why it was put to the owner first.
 
 ## Context
 
@@ -16,7 +16,7 @@ So the failure is not one move. A model that cannot satisfy the goal and the rul
 
 Nothing in kopicode knows which paths a task protects. The rule is in natural language inside the prompt, and parsing "do not change anything in tests/" out of free text is a guess the harness should not make. A person in the REPL can already write a `pre_tool_hook` that denies `tests/` (ADR-0036), but hooks run only in the REPL, and the drivers that hit this (`serve`, `mcp`, `run --print`) run none, by that ADR's decision 3.
 
-## Decision (proposed)
+## Decision
 
 1. **A caller names the protected paths; kopicode does not infer them.** `protected_paths`, an array of paths relative to the root, on `session.start` (serve) and `kopicode_start` (mcp), and a repeatable `--protect <path>` flag on the REPL and `run --print`. Not in a repository's config file (a checkout does not get to decide what a person's session may touch), and not parsed from the task text.
 2. **The gate refuses a file write under a protected path**: `write_file`, `edit_file`, `edit_file_fuzzy`, `delete_file`. The path is resolved the way the tool resolves it, so `./tests/../tests/x.py`, an absolute path and a symlink into the tree all match; a path protects itself and everything below it, compared by whole components, so `tests` does not protect `tests_old`. The refusal is not routed to a consenter or a policy, holds in every consent mode, and is journalled as a denial with its own reason.
