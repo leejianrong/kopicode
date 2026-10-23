@@ -53,7 +53,7 @@ Two things a headless run needs, found in that check:
 - **Codex `exec` refuses MCP tool calls by default** ("MCP tool call requires approval, but approval policy is never"). Add
   `default_tools_approval_mode = "approve"` to the `[mcp_servers.kopicode]` table, or `-c 'mcp_servers.kopicode.default_tools_approval_mode="approve"'`
   on the command line. It lets Codex call kopicode's five tools and nothing else.
-- **Claude Code `-p` needs the tools allowed up front**, for example `--allowedTools "Task" "mcp__kopicode" "Read" "Bash(git -C:*)"`; a tool that needs
+- **Claude Code `-p` needs the tools allowed up front**, for example `--allowedTools "Task" "mcp__kopicode" "Read" "Grep" "Bash(git -C:*)"`; a tool that needs
   approval is refused with no one to ask.
 
 Tell the driver only the `dir` and the `task`. A parent session that adds its own instructions ("report the final summary and the test result")
@@ -65,7 +65,11 @@ asks for things the driver is told not to produce; the parent should read the jo
 You are driving kopicode through its MCP server. Do not write code yourself.
 Call kopicode_start once with dir=<DIR>, consent_mode="auto" and prompt set to the TASK below, character for character.
 When it settles, read stop, exit_code, turns, usage and record from the result, run `git status` and
-`git log --oneline` in <DIR>, call kopicode_close, and report those and nothing else.
+`git log --oneline` in <DIR>, and find the last verification with
+`grep '"type":"VerificationRun"' <record>/events.jsonl | tail -1` (a non-empty `skip` means nothing was checked,
+whatever stop and exit_code say; otherwise exit_code 0 is a pass). Call kopicode_close, then report those and nothing else,
+including a line `verification: ran, last exit_code <n> | skipped: <skip> | none in the journal`.
+The last run only: a count is easy to get wrong, and the last one is what the session ended on.
 You may call kopicode_cancel if the session runs without bound. You must not rewrite the task, add hints, retry with a
 different prompt, edit files in <DIR>, run its tests, or answer on kopicode's behalf. If something outside kopicode blocks the
 run, say so and stop.

@@ -177,6 +177,32 @@ func TestAZeroExitPasses(t *testing.T) {
 	}
 }
 
+// TestAPassAsksForTheAssumptionsInTheClosingSummary is KOP-218. A model that
+// picks an interpretation of an unclear task and says so only in passing, mid-run,
+// reports the work as if the task had been clear. The pass line is the last thing
+// it reads before that summary, so it is where the reminder goes — and only on a
+// pass, because a failure or a skip is not the moment anyone is summarising.
+func TestAPassAsksForTheAssumptionsInTheClosingSummary(t *testing.T) {
+	const reminder = "In your closing summary, state any assumption you made"
+	res, err := helperVerifier(t, "pass").Run(t.Context())
+	if err != nil {
+		t.Fatalf("Run() = %v", err)
+	}
+	if !strings.Contains(res.Output, reminder) {
+		t.Errorf("a pass does not carry the reminder:\n%s", res.Output)
+	}
+	if first, _, _ := strings.Cut(res.Output, "\n"); !strings.HasPrefix(first, "verification: ") || !strings.Contains(first, "passed") {
+		t.Errorf("the headline is no longer one `verification: ... passed` line: %q", first)
+	}
+	failed, err := helperVerifier(t, "fail").Run(t.Context())
+	if err != nil {
+		t.Fatalf("Run() = %v", err)
+	}
+	if strings.Contains(failed.Output, reminder) {
+		t.Errorf("a failure carries the reminder, which would read as permission to stop:\n%s", failed.Output)
+	}
+}
+
 // TestNothingThatDidNotRunReadsAsAPass is the honest-none rule as a property,
 // over every way a run can fail to conclude.
 //
