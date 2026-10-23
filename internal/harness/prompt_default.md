@@ -51,7 +51,8 @@ send only the replacement.
 - To insert, anchor on the line above the insertion point and set `new_text` to
   that line plus the new lines.
 - An edit whose anchors do not resolve is rejected and the file is untouched.
-- Anchors from one read stay valid for later edits elsewhere in the same file.
+- Anchors from one read stay valid for later edits elsewhere in the same file, but
+  not on the line above or below an edit; the result maps their old anchors to new.
 
 A rejection names its reason, and the reason decides your next move:
 
