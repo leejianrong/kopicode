@@ -46,7 +46,7 @@ event. Diagnostics go to stderr only. Protocol revisions `2025-06-18`, `2025-03-
 
 `kopicode_start` arguments: `dir` and `prompt` and **`consent_mode`** (all required);
 `containment_provided` (required, and true, for `unattended_policy`); `never_allow` (`auto`
-only); `session` (generated as `mcp-<hex>` if omitted); `model`, `harness`, `harness_config`, `max_turns`, `token_budget` (ADR-0022); `handoff` (a document from `kopicode_handoff`, told to the new session once as its first message) with `handoff_from` (the session it came from, recorded in the journal).
+only); `protected_paths` (paths inside `dir` the session may not change, ADR-0037: file writes under one are refused and, under `auto`, so is a shell line whose write target kopicode can see is under one; the model is told to stop and say so; not a sandbox, see [kopicode-serve-protocol.md](kopicode-serve-protocol.md)); `session` (generated as `mcp-<hex>` if omitted); `model`, `harness`, `harness_config`, `max_turns`, `token_budget` (ADR-0022); `handoff` (a document from `kopicode_handoff`, told to the new session once as its first message) with `handoff_from` (the session it came from, recorded in the journal).
 `consent_mode` is never defaulted — see [Consent](#consent). A misspelt argument is refused, not
 ignored.
 

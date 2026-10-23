@@ -26,6 +26,16 @@ Nothing in kopicode knows which paths a task protects. The rule is in natural la
 6. **A feature name** `session.protected_paths` in `server.hello` and a row in the serve and MCP documents, as every wire addition has.
 7. **In the harness hash only when set,** and recorded in `SessionStarted`, so a protected session is never pooled with an unprotected one (the rule ADR-0036 decision 9 follows).
 
+## Implementation notes
+
+Settled while building it (KOP-217); none changes a decision above except the first.
+
+- **Decision 7's hash.** `protected_paths` is recorded on `SessionStarted` only when set, as decided, but it is **not** folded into the harness configuration hash. The hash identifies the arm (the prompt, tools, limits and the user's hook commands). Session parameters a caller passes (`read_only`, the consent mode, `never_allow`) are not in it either, and a protected session is told apart by the record, not the arm. Revisit if a benchmark ever runs with protected paths.
+- **Where it applies.** The gate (file tools) in every mode; the auto and allowlist shell scans, and the REPL's switch over both. The asking policy has no scan: a person sees every line.
+- **Removal and moves count.** `rm -r .` or `mv` of a directory that *holds* a protected path is refused, as is a write under one.
+- **A policy file's exact-match `allow` entries are not scanned.** They are the caller's own statement of one argv; only `allow_commands` lines go through the tokenizer. This is stated in the wire document.
+- **`--protect`** on the REPL and `run --print`; `protected_paths` on `session.start` and `kopicode_start`. A user file key was not added.
+
 ## Alternatives
 
 - **A prompt or reminder change only** ("if the task forbids a change and tests contradict it, stop and report"). Cheap, no consent-model change, and the prompt is at its byte budget (KOP-215 spent the last of it). The 2026-10-23 prompt-only runs of a different instruction (KOP-216: "there is no /testbed") show a sentence does not move this model against a strong habit; a refusal the model must read is a stronger signal than a rule it can forget. Not tried for s5; it would need its own measurement.

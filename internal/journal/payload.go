@@ -144,6 +144,11 @@ type SessionStarted struct {
 	// is byte-identical to what it was before hooks existed, and a run is never
 	// compared against one with a different gate.
 	Hooks *HookConfig `json:"hooks,omitempty"`
+	// ProtectedPaths are the paths the caller told this session not to change
+	// (ADR-0037), as declared. Absent when there were none, so a session that
+	// protects nothing records exactly what it did before, and a run with a
+	// protected path is never pooled with one without.
+	ProtectedPaths []string `json:"protected_paths,omitempty"`
 }
 
 func (SessionStarted) Type() Type { return TypeSessionStarted }

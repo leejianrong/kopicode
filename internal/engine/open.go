@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/leejianrong/kopicode/internal/build"
@@ -267,6 +268,15 @@ type Options struct {
 	// [ConsentAuto], which would run shell unasked; see [Open].
 	ReadOnly bool
 
+	// ProtectedPaths names paths inside the root the session may not change
+	// (ADR-0037): the gate refuses write_file, edit_file, edit_file_fuzzy and
+	// delete_file under them in every consent mode, and the shell policies
+	// refuse a line whose write target the tokenizer can see is under one. Each
+	// is relative to the root or absolute inside it. It is a guard against the
+	// model's own convenient edit, not a sandbox: a build step or an
+	// interpreter that writes the tree is not seen.
+	ProtectedPaths []string
+
 	// AutoNeverAllow is the caller's additions to [ConsentAuto]'s never-allow
 	// list (ADR-0017): "command [token ...]" entries appended to the built-in
 	// list, never replacing or narrowing it. It is meaningful only under
@@ -405,6 +415,26 @@ const (
 	// the zero value of [ConsentMode] is [ConsentInteractive].
 	ConsentAuto
 )
+
+// maxProtectedPaths bounds the list a caller can declare, so a malformed
+// request fails at open rather than becoming a policy nobody can read.
+const maxProtectedPaths = 64
+
+// ValidateProtectedPaths reports whether paths are an acceptable
+// [Options.ProtectedPaths] without opening anything, so a front end can refuse
+// a malformed request before it starts a session. Whether each lies inside the
+// root is checked at open, where the root exists.
+func ValidateProtectedPaths(paths []string) error {
+	if len(paths) > maxProtectedPaths {
+		return fmt.Errorf("%d protected paths; at most %d are accepted", len(paths), maxProtectedPaths)
+	}
+	for _, p := range paths {
+		if strings.TrimSpace(p) == "" || strings.ContainsRune(p, 0) {
+			return fmt.Errorf("a protected path is empty or malformed: %q", p)
+		}
+	}
+	return nil
+}
 
 // ValidateAutoNeverAllow reports whether entries are an acceptable
 // [Options.AutoNeverAllow]. A front end calls it to refuse a malformed request
@@ -654,6 +684,9 @@ func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session,
 			"is also set; auto mode is its own answerer and this package will not guess which of two a "+
 			"caller meant (docs/adr/0017-auto-consent-mode.md)", ErrConfig)
 	}
+	if err := ValidateProtectedPaths(opts.ProtectedPaths); err != nil {
+		return nil, fmt.Errorf("%w: Options.ProtectedPaths: %w", ErrConfig, err)
+	}
 	if opts.ReadOnly && opts.ConsentMode == ConsentAuto {
 		return nil, fmt.Errorf("%w: Options.ReadOnly with ConsentAuto; auto runs shell inside the root unasked and a "+
 			"shell line can write, so the session would not be read-only (docs/adr/0019-read-only-sessions.md)", ErrConfig)
@@ -860,6 +893,13 @@ func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session,
 		return fail(fmt.Errorf("engine: building the consent gate: %w", err))
 	}
 	gate.SetReadOnly(opts.ReadOnly)
+	if len(opts.ProtectedPaths) > 0 {
+		resolved, perr := gate.SetProtected(opts.ProtectedPaths)
+		if perr != nil {
+			return fail(fmt.Errorf("%w: Options.ProtectedPaths: %w", ErrConfig, perr))
+		}
+		permission.ProtectShell(policy, resolved)
+	}
 
 	// A session outside a repository is legitimate — no snapshots, no head on
 	// the record — so this failure is not fatal for Open. What is not
@@ -938,17 +978,18 @@ func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session,
 		// One binary, one identity, one call. The surface prints this for
 		// --version and the record carries it on SessionStarted, and a field
 		// here would be a second answer to who this is (ADR-0007 decision 7).
-		Build:         buildInfo(),
-		CWD:           abs,
-		ParentSession: parentSession(opts),
-		RepoHead:      head,
-		Provider:      prov,
-		Journal:       teed,
-		Tools:         set,
-		Permissions:   gate,
-		Ask:           askFn,
-		AskSource:     askSource,
-		Syntax:        &syntax.Gate{Root: set.Root.Path()},
+		Build:          buildInfo(),
+		CWD:            abs,
+		ParentSession:  parentSession(opts),
+		ProtectedPaths: opts.ProtectedPaths,
+		RepoHead:       head,
+		Provider:       prov,
+		Journal:        teed,
+		Tools:          set,
+		Permissions:    gate,
+		Ask:            askFn,
+		AskSource:      askSource,
+		Syntax:         &syntax.Gate{Root: set.Root.Path()},
 		// Verify is left nil on purpose: nil means the default verifier, and
 		// Options offers no way to say otherwise. See Options.
 		Snapshots:     snaps,

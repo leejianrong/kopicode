@@ -73,6 +73,11 @@ type Config struct {
 	// on SessionStarted (ADR-0026). Empty for any other session.
 	ParentSession string
 
+	// ProtectedPaths are the paths the gate was told to refuse writes under
+	// (ADR-0037), as declared, recorded on SessionStarted. The gate itself holds
+	// the resolved form; this is only the record.
+	ProtectedPaths []string
+
 	// Provider is the model provider. Required.
 	Provider Provider
 
@@ -547,6 +552,7 @@ func (e *Engine) Start(ctx context.Context) error {
 		Build:             e.cfg.Build,
 		ParentSession:     e.cfg.ParentSession,
 		Hooks:             journalHooks(e.cfg.Selection.Config.Hooks),
+		ProtectedPaths:    e.cfg.ProtectedPaths,
 	})
 	if err != nil {
 		return err

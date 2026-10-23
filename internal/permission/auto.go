@@ -36,6 +36,10 @@ type AutoPolicy struct {
 	root     string
 	resolver Resolver
 	extra    []neverEntry
+
+	// protected are the resolved paths a shell line may not write under
+	// (ADR-0037), set by [ProtectShell] before the policy is shared.
+	protected []string
 }
 
 // neverEntry is a caller-supplied never-allow entry: a command name and zero or
@@ -398,6 +402,9 @@ func (s *autoScan) rules(words []shWord, depth int, viaWrapper bool) string {
 	if r := s.blunders(name, words[0], args); r != "" {
 		return r
 	}
+	if r := s.protectedWrites(name, args); r != "" {
+		return r
+	}
 
 	switch name {
 	case "rm":
@@ -670,6 +677,9 @@ func (s *autoScan) redirects(c shCommand) string {
 			}
 			if !contains(s.p.root, abs) {
 				return fmt.Sprintf("a redirection writes to %s, outside the session root %s", abs, s.p.root)
+			}
+			if r := s.protectedRedirect(t.text, abs); r != "" {
+				return r
 			}
 		}
 	}

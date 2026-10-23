@@ -422,6 +422,7 @@ type startArgs struct {
 	ConsentMode         string   `json:"consent_mode"`
 	ContainmentProvided bool     `json:"containment_provided"`
 	NeverAllow          []string `json:"never_allow"`
+	ProtectedPaths      []string `json:"protected_paths"`
 	Handoff             string   `json:"handoff"`
 	HandoffFrom         string   `json:"handoff_from"`
 }
@@ -456,7 +457,8 @@ func (s *mcpServer) toolStart(call *mcpCall, raw json.RawMessage) toolResult {
 		Model: a.Model, Harness: a.Harness, HarnessConfig: a.HarnessConfig,
 		MaxTurns: a.MaxTurns, TokenBudget: a.TokenBudget,
 		ConsentMode: a.ConsentMode, ContainmentProvided: a.ContainmentProvided, NeverAllow: a.NeverAllow,
-		Handoff: a.Handoff, ParentSession: a.HandoffFrom,
+		ProtectedPaths: a.ProtectedPaths,
+		Handoff:        a.Handoff, ParentSession: a.HandoffFrom,
 	}, s.observer(a.Session), s.turn(a.Session, call, ch)); err != nil {
 		return errorResult("%s", err.Message)
 	}
@@ -716,6 +718,7 @@ func mcpTools() []mcpTool {
     },
     "containment_provided": {"type": "boolean", "description": "Required, and must be true, for unattended_policy: you are supplying real process or container containment."},
     "never_allow": {"type": "array", "items": {"type": "string"}, "description": "auto only: extra never-allow entries, each 'command [token ...]', for example 'terraform apply'. Adds to the built-in list; cannot remove from it."},
+    "protected_paths": {"type": "array", "items": {"type": "string"}, "description": "Paths inside dir the session may not change, for example ['tests'], when the task says not to touch them. Each is relative to dir or absolute inside it, and protects itself and everything below. A file write under one is refused, and the model is told to stop and say so; under auto, a shell line whose write target kopicode can see is under one is refused too. Not a sandbox: a build step or an interpreter that writes the tree is not seen."},
     "session": {"type": "string", "description": "An id for the session; generated if omitted."},
     "model": {"type": "string", "description": "Model id override."},
     "harness": {"type": "string", "description": "Built-in harness config name override."},

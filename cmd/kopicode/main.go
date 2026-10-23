@@ -197,6 +197,7 @@ func interactive(args []string, _, stderr io.Writer) int {
 	overrides.UserConfig = true
 	mode := fs.String("mode", "", "consent mode to start in: default (ask before shell and outside writes) or auto (see /mode); default_mode in the user config sets it when this is not given")
 	debug := fs.Bool("debug", false, "engine diagnostics on stderr")
+	protect := bindProtectFlag(fs)
 	// --resume is deliberately minimal: the id of an existing session, and
 	// nothing to help find one. `kopicode sessions` (KAN-941) is what finds
 	// one; this flag stays a single string because resuming is one fact
@@ -278,10 +279,16 @@ func interactive(args []string, _, stderr io.Writer) int {
 		say(stderr, "kopicode: --mode %q: the modes are default and auto\n", startMode)
 		return exitUsage
 	}
+	protected, perr := protectedOptions(protect)
+	if perr != nil {
+		say(stderr, "kopicode: %v\n", perr)
+		return exitUsage
+	}
 	opts := engine.Options{
 		Dir: dir, Selection: selection, StartAuto: startMode == repl.ModeAuto,
 		AutoNeverAllow:   selection.Settings.AutoNeverAllow,
 		UserInstructions: engine.UserAgentsPath(),
+		ProtectedPaths:   protected,
 	}
 	std := stdio(stderr)
 	switch {

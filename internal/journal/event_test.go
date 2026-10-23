@@ -60,7 +60,8 @@ func fixtures() map[journal.Type]journal.Payload {
 				TreeState: "dirty",
 				Source:    "ldflags",
 			},
-			ParentSession: "20261009T101112Z-ab12cd34",
+			ParentSession:  "20261009T101112Z-ab12cd34",
+			ProtectedPaths: []string{"tests", "docs/adr"},
 			Hooks: &journal.HookConfig{
 				PreTool:  []string{"scripts/guard", "--strict"},
 				PostTool: []string{"gofmt", "-l", "."},

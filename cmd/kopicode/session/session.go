@@ -106,6 +106,11 @@ type StartParams struct {
 	// usage error under ConsentAuto, which would run shell unasked.
 	ReadOnly bool
 
+	// ProtectedPaths are paths inside Dir the session may not change (ADR-0037):
+	// the file tools refuse a write under one, in every consent mode, and the
+	// shell policies refuse a line whose write target they can see is under one.
+	ProtectedPaths []string
+
 	// Handoff is a handoff document (ADR-0026) the session starts from, and
 	// ParentSession the session it came from, recorded in the journal. Empty
 	// means the session starts fresh.
@@ -707,6 +712,10 @@ func (m *Manager) buildConsentOptions(p StartParams, opts *engine.Options) *Erro
 			"use %q or %q", ConsentAuto, ConsentRemoteInteractive, ConsentUnattendedPolicy)
 	}
 	opts.ReadOnly = p.ReadOnly
+	if err := engine.ValidateProtectedPaths(p.ProtectedPaths); err != nil {
+		return errf(KindUsage, "protected_paths: %v", err)
+	}
+	opts.ProtectedPaths = p.ProtectedPaths
 	if p.ConsentTimeout != 0 && p.ConsentMode != ConsentRemoteInteractive {
 		// Nothing would consult it: only a live consent request waits on a
 		// timeout. A caller who sent one is relying on it, so refuse rather than

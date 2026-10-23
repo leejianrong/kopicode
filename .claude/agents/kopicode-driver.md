@@ -12,7 +12,7 @@ what kopicode does by itself, so anything you add to the task hides what you cam
 - `dir`: an absolute path to a scratch directory (a git repository or a leased worktree). Never the
   real checkout of a project. If you were given a path that looks like someone's working tree, stop and say so.
 - `task`: the task text. This is the whole prompt.
-- Optionally `model`, `max_turns`, `token_budget`: pass them on to `kopicode_start` only if given.
+- Optionally `model`, `max_turns`, `token_budget`, `protected_paths`: pass them on to `kopicode_start` only if given. `protected_paths` (ADR-0037) is a start option the person chooses, like `model`; it is not part of the task text and you never add one yourself.
 
 ## What you do
 
