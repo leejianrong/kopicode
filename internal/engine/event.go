@@ -421,6 +421,9 @@ func eventOf(ev journal.Event) Event {
 			base.Reason = "dropped"
 			base.Size = p.Bytes
 		}
+		if p.Scope == journal.InstructionsScopeEnvironment {
+			base.Reason = journal.InstructionsScopeEnvironment
+		}
 
 	case journal.HandoffWritten:
 		base.Kind = EventHandoffWritten

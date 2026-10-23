@@ -9,7 +9,6 @@ import (
 
 	"github.com/leejianrong/kopicode/internal/engine"
 	harnesscfg "github.com/leejianrong/kopicode/internal/harness"
-	"github.com/leejianrong/kopicode/internal/journal"
 )
 
 // ADR-0032: the AGENTS.md chain, its byte cap, and what replay does with a
@@ -62,7 +61,7 @@ func TestInstructionsChainLoadsEveryFileNearestLast(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	got := payloadsOf[journal.ProjectInstructionsLoaded](t, readJournal(t, s.Path()))
+	got := instructionsOf(t, readJournal(t, s.Path()))
 	if len(got) != 2 || got[0].Content.Inline != "ROOT rule\n" || got[1].Content.Inline != "NESTED rule\n" {
 		t.Fatalf("events = %+v, want the root's file then the nested one", got)
 	}
@@ -105,7 +104,7 @@ func TestInstructionsOverTheCapDropTheFurthestWhole(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	got := payloadsOf[journal.ProjectInstructionsLoaded](t, readJournal(t, s.Path()))
+	got := instructionsOf(t, readJournal(t, s.Path()))
 	if len(got) != 2 || !got[0].Dropped || got[0].Content.Inline != "" || got[0].Bytes != int64(len(big)) || got[1].Dropped {
 		t.Fatalf("events = %+v, want the root dropped with its size and no content, the nested one loaded", got)
 	}
@@ -146,7 +145,7 @@ func TestALoneOversizedNearestFileLoadsWhole(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	defer func() { _ = s.Close(ctx) }()
-	got := sole[journal.ProjectInstructionsLoaded](t, readJournal(t, s.Path()))
+	got := soleInstruction(t, readJournal(t, s.Path()))
 	if got.Dropped || len(got.Content.Inline) != 2*harnesscfg.AgentsCapBytes {
 		t.Errorf("event = dropped %v, %d bytes, want the whole file loaded", got.Dropped, len(got.Content.Inline))
 	}

@@ -261,6 +261,30 @@ func sole[T journal.Payload](t *testing.T, evs []journal.Event) T {
 	return got[0]
 }
 
+// instructionsOf is the ProjectInstructionsLoaded payloads that carry a file, the
+// skills catalogue or a handoff, leaving out the environment note every new
+// session begins with (KOP-216), which tests of the others do not mean to count.
+func instructionsOf(t *testing.T, evs []journal.Event) []journal.ProjectInstructionsLoaded {
+	t.Helper()
+	var out []journal.ProjectInstructionsLoaded
+	for _, p := range payloadsOf[journal.ProjectInstructionsLoaded](t, evs) {
+		if p.Scope != journal.InstructionsScopeEnvironment {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// soleInstruction is [sole] over [instructionsOf].
+func soleInstruction(t *testing.T, evs []journal.Event) journal.ProjectInstructionsLoaded {
+	t.Helper()
+	got := instructionsOf(t, evs)
+	if len(got) != 1 {
+		t.Fatalf("want exactly one journal.ProjectInstructionsLoaded, got %d", len(got))
+	}
+	return got[0]
+}
+
 // recordingPolicy answers every consent request the same way and remembers what
 // it was asked.
 type recordingPolicy struct {

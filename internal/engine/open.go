@@ -970,6 +970,9 @@ func openSession(ctx context.Context, opts Options, fork *ForkSource) (*Session,
 		// again. After Start, deliberately, for the same reason recordFork
 		// runs after it below — this session's own SessionStarted (seq 1)
 		// must land before anything this bootstrap adds.
+		if err := eng.loadEnvironment(ctx); err != nil {
+			return fail(err)
+		}
 		if err := eng.loadProjectInstructions(ctx, abs, opts.UserInstructions); err != nil {
 			return fail(err)
 		}

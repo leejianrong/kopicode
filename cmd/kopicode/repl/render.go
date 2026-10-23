@@ -145,7 +145,10 @@ func (l *Loop) Render(e engine.Event) {
 		// shown without having to open the record.
 		label := e.Path
 		if label == "" {
-			label = "skills catalogue" // the one instructions event with no file behind it
+			label = "skills catalogue" // an instructions event with no file behind it
+			if e.Reason == "environment" {
+				label = "environment"
+			}
 		}
 		note := humanBytes(e.Size)
 		if e.Reason == "dropped" {

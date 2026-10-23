@@ -213,6 +213,13 @@ the model need not `list_dir` to find them. Only the repository's own: a persona
 never reaches a session opened over this wire (ADR-0024 decision 4). `kopicode mcp` and
 `run --print` do the same. Feature `skills.catalogue`.
 
+A new session is likewise told its repository root once, before anything else (KOP-216): `run_shell`
+starts there, and a model that is not told guesses a path from whatever benchmark it was tuned on
+(`cd /testbed`). It arrives as a `project_instructions_loaded` event with scope `environment`, right
+after `session_started`, so a client that counts those events for "files the model read" should skip
+that scope; `instructions` in the start result does not list it. `serve`, `mcp` and `run --print` all
+send it, and a resume or fork replays it from the journal. Feature `session.environment`.
+
 ### `session.submit`
 
 Runs the next turn on an already-open session. It **queues** rather than rejecting: if a

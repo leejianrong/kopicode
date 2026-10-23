@@ -102,7 +102,7 @@ func TestSkillCatalogueIsJournalledOnceAndSeenByTheModel(t *testing.T) {
 	}
 	_ = s.Close(context.Background())
 
-	loaded := payloadsOf[journal.ProjectInstructionsLoaded](t, readJournal(t, s.Path()))
+	loaded := instructionsOf(t, readJournal(t, s.Path()))
 	if len(loaded) != 1 || loaded[0].Scope != journal.InstructionsScopeSkills {
 		t.Fatalf("loaded = %+v, want one skills-scope event", loaded)
 	}
@@ -123,7 +123,7 @@ func TestNoSkillsMeansNothingIsSaid(t *testing.T) {
 	}
 	_, _ = s.Run(context.Background(), "hi")
 	_ = s.Close(context.Background())
-	if n := len(payloadsOf[journal.ProjectInstructionsLoaded](t, readJournal(t, s.Path()))); n != 0 {
+	if n := len(instructionsOf(t, readJournal(t, s.Path()))); n != 0 {
 		t.Errorf("%d instruction events for a session with nothing to say", n)
 	}
 }
