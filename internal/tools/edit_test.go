@@ -371,6 +371,78 @@ func TestEditAnchorsStayValidOutsideTheChange(t *testing.T) {
 	}
 }
 
+// TestEditReportsTheNeighboursItReanchored is KOP-215: a model that edits a line
+// and then the line under it from one read used to be refused as drift, because
+// the first edit re-anchored its neighbour. The result now maps the old anchors
+// of the lines either side to their new ones, and those are the ones a fresh
+// read would print.
+func TestEditReportsTheNeighboursItReanchored(t *testing.T) {
+	body := "one\ntwo\nthree\nfour\nfive\nsix\nseven\n"
+	f := newFixture(t, map[string]string{"f.txt": body})
+	s := f.set(t)
+	before := derivedAnchors(body)
+
+	res := applyEdit(t, s, tools.EditRequest{
+		Path: "f.txt", AnchorStart: before[2], AnchorEnd: before[2], NewText: "THREE\n",
+	})
+
+	after := derivedAnchors(onDisk(t, f, "f.txt"))
+	rendered := anchor.Render(anchor.Split([]byte(onDisk(t, f, "f.txt"))))
+	if len(res.Reanchored) != 2 {
+		t.Fatalf("got %+v, want the line above and the line below", res.Reanchored)
+	}
+	for i, want := range []struct{ line int }{{2}, {4}} {
+		got := res.Reanchored[i]
+		if got.Old != before[want.line-1] || got.Now.Line != want.line ||
+			got.Now.Anchor != after[want.line-1] || got.Now.Rendered != rendered[want.line-1] {
+			t.Errorf("reanchored[%d] = %+v, want old %s now %s on line %d", i, got,
+				before[want.line-1], after[want.line-1], want.line)
+		}
+		if !strings.Contains(res.Output, got.Old+" -> "+got.Now.Rendered) {
+			t.Errorf("the output does not map %s to %q:\n%s", got.Old, got.Now.Rendered, res.Output)
+		}
+	}
+
+	// The neighbour's old anchor is stale and still refused, never applied
+	// somewhere plausible; the new one works.
+	rej := rejectEdit(t, f, s, "f.txt", tools.EditRequest{
+		Path: "f.txt", AnchorStart: before[3], AnchorEnd: before[3], NewText: "FOUR\n",
+	})
+	if rej.Reason != tools.RejectAnchorDrift {
+		t.Errorf("reason = %q, want %q", rej.Reason, tools.RejectAnchorDrift)
+	}
+	applyEdit(t, s, tools.EditRequest{
+		Path: "f.txt", AnchorStart: res.Reanchored[1].Now.Anchor, AnchorEnd: res.Reanchored[1].Now.Anchor, NewText: "FOUR\n",
+	})
+	if got, want := onDisk(t, f, "f.txt"), "one\ntwo\nTHREE\nFOUR\nfive\nsix\nseven\n"; got != want {
+		t.Errorf("file = %q, want %q", got, want)
+	}
+}
+
+func TestEditReanchorsAtTheEdgesAndAfterADeletion(t *testing.T) {
+	body := "one\ntwo\nthree\n"
+	f := newFixture(t, map[string]string{"f.txt": body})
+	s := f.set(t)
+	a := derivedAnchors(body)
+
+	// First line: nothing above, so only the line below.
+	res := applyEdit(t, s, tools.EditRequest{Path: "f.txt", AnchorStart: a[0], AnchorEnd: a[0], NewText: "ONE\n"})
+	if len(res.Reanchored) != 1 || res.Reanchored[0].Old != a[1] || res.Reanchored[0].Now.Line != 2 {
+		t.Errorf("first-line reanchored = %+v, want only line 2", res.Reanchored)
+	}
+
+	// Deleting the middle line re-anchors the two lines that now meet.
+	a = derivedAnchors(onDisk(t, f, "f.txt"))
+	res = applyEdit(t, s, tools.EditRequest{Path: "f.txt", AnchorStart: a[1], AnchorEnd: a[1], NewText: ""})
+	if len(res.Reanchored) != 2 || res.Reanchored[0].Now.Line != 1 || res.Reanchored[1].Now.Line != 2 {
+		t.Errorf("deletion reanchored = %+v, want lines 1 and 2", res.Reanchored)
+	}
+	if res.Reanchored[0].Old != a[0] || res.Reanchored[1].Old != a[2] {
+		t.Errorf("deletion reanchored olds = %s, %s, want %s, %s",
+			res.Reanchored[0].Old, res.Reanchored[1].Old, a[0], a[2])
+	}
+}
+
 // --- the diff ---------------------------------------------------------------
 
 func TestEditReturnsTheDiffItApplied(t *testing.T) {

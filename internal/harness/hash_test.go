@@ -118,7 +118,7 @@ func everyConfig(t *testing.T) []harness.Config {
 // session documented on its own under docs/dogfood-runs/, not a hash-anchored
 // bench arm — so nothing pools incorrectly across this move either.
 func TestDefaultConfigHashIsStable(t *testing.T) {
-	const want = "2eb2124667f4177be19211f5ecf5c95f90eb80576ca55dbd5c37cd48e5246635"
+	const want = "68141395bee3c192584f5a7ccf99e6fb6656fbeb41fafabef73ed57f7f9966f7"
 
 	got := defaultConfig(t).Hash()
 	if got != want {
@@ -143,7 +143,7 @@ func TestDefaultConfigHashIsStable(t *testing.T) {
 // TestNoTwoConfigsShareAHash below is what checks that expectation rather
 // than this test silently passing if they happened to collide.
 func TestMinimaxM2ConfigHashIsStable(t *testing.T) {
-	const want = "8240e0a82efe56ba20919e8ff4560daf532328947e86d2f90659d2e377a41045"
+	const want = "54b7e20805e0c56ba0c6f8f6984d8c85b56eb3fb2ac4817c5cdd843a45daa305"
 
 	got := configByName(t, harness.MinimaxM2ConfigName).Hash()
 	if got != want {

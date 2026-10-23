@@ -217,6 +217,19 @@ type EditResult struct {
 	// SLICE-1 §4 requires it and journal.EditApplied carries it.
 	Diff string
 
+	// Reanchored lists the unedited lines directly above and below the region
+	// whose anchor the edit changed. An anchor hashes a line with both
+	// neighbours (ADR-0006 §7), so an edit re-anchors the lines beside it
+	// without touching their text, and a model holding the old read would be
+	// refused as drift on its next edit there. Each entry pairs the anchor the
+	// model holds with the one the line has now.
+	//
+	// It is a mapping from old to new, not a list of current anchors, on
+	// purpose: a bare list of valid anchors invites a model to spend one on the
+	// wrong line, and a wrong-line edit that applies is worse than a refusal
+	// (KOP-215, measured). Nil when nothing was applied or nothing moved.
+	Reanchored []Reanchor
+
 	// Rejection is set, and the file byte-identical, when the edit was refused.
 	Rejection *EditRejection
 
@@ -335,9 +348,46 @@ func (s *Set) EditFile(ctx context.Context, req EditRequest) (EditResult, error)
 		BytesBefore:   len(src),
 		BytesAfter:    len(next),
 		Diff:          unifiedDiff(p.Slash(), lines, start, end, repl),
+		Reanchored:    reanchored(lines, anchors, next, start, end, len(repl)),
 	}
 	res.Output = res.render()
 	return res, nil
+}
+
+// Reanchor is one unedited line whose anchor an edit changed.
+type Reanchor struct {
+	// Old is the anchor the line had before the edit.
+	Old string
+	// Now is the line as read_file would print it now, new anchor first.
+	Now AnchorLine
+}
+
+// reanchored pairs the old and new anchors of the lines either side of an edit.
+// old and next are the file before and after; the replaced region was the
+// 0-based inclusive [start, end] of old and became n lines at start in next.
+//
+// Those two neighbours are the only lines whose three-line window the edit
+// changed; every other anchor hashes the lines it did before, so it stays valid
+// and is not repeated. A neighbour that does not exist (an edit at either end
+// of the file) is skipped, and so is one whose anchor happened not to change.
+func reanchored(old []string, oldAnchors []string, next []byte, start, end, n int) []Reanchor {
+	lines := anchor.Split(next)
+	anchors := anchor.Derive(lines)
+	rendered := anchor.Render(lines)
+	var out []Reanchor
+	for _, p := range [...]struct{ was, now int }{{start - 1, start - 1}, {end + 1, start + n}} {
+		if p.was < 0 || p.was >= len(old) || p.now < 0 || p.now >= len(lines) {
+			continue
+		}
+		if oldAnchors[p.was] == anchors[p.now] {
+			continue
+		}
+		out = append(out, Reanchor{
+			Old: oldAnchors[p.was],
+			Now: AnchorLine{Line: p.now + 1, Anchor: anchors[p.now], Rendered: rendered[p.now]},
+		})
+	}
+	return out
 }
 
 // cancelledEdit is the result of a call the context ended before it wrote.
@@ -920,6 +970,12 @@ func (r EditResult) render() string {
 		tool, r.Path, region, plural(r.LinesRemoved, "line", "lines"),
 		plural(r.LinesAdded, "line", "lines"), mode)
 	b.WriteString(r.Diff)
+	if len(r.Reanchored) > 0 {
+		b.WriteString("re-anchored by this edit (same lines, new anchors; use the new one wherever you held the old):\n")
+		for _, l := range r.Reanchored {
+			fmt.Fprintf(&b, "%s -> %s\n", l.Old, l.Now.Rendered)
+		}
+	}
 	return b.String()
 }
 
