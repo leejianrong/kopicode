@@ -39,3 +39,8 @@ edits through seq 81), so it did not change the behaviour and was not kept.
   whose anchor named a different line from the one it meant, and those applied (control seq 74, after seq 52, 62 and 76 replaced a `def` or `with` line), then it re-read and repaired the files. The after run
   had more of those; whether that is the change or the sampling is not known from one run each.
 - One run per setting, one model, one driver. The Codex driver and `deepseek/deepseek-v4.1-flash` were not rerun for this card.
+
+## Afterwards
+
+The final round on the merged build ([`2026-10-23-final-round`](../2026-10-23-final-round/README.md)) had **3** rejections on s3 again, all in one reply. The run above that showed 1 was within this scenario's spread
+(control 3, here 1, later 3); what the change fixed is the cross-turn case only, and the in-reply case is KOP-222.
