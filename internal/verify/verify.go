@@ -566,7 +566,8 @@ func (v *Verifier) render(r Result, raw string) string {
 func headline(r Result) string {
 	switch r.Outcome {
 	case Passed:
-		return fmt.Sprintf("`%s` (%s) passed", commandText(r), r.Source)
+		return fmt.Sprintf("`%s` (%s) passed. In your closing summary, state any assumption you made "+
+			"where the task was unclear", commandText(r), r.Source)
 	case Failed:
 		return fmt.Sprintf("`%s` (%s) FAILED, exit %d — this change is not finished",
 			commandText(r), r.Source, r.ExitCode)
