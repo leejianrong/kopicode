@@ -16,7 +16,7 @@ including the real-repo demo and the full corpus run — see
 [`docs/SLICE-1.md`](../docs/SLICE-1.md)). The engine has since gained `serve` and
 `mcp` front ends and four registered models; the README has the current state.
 
-Module + toolchain: Go 1.26.9, two dependencies (`golang.org/x/term` for the line
+Module + toolchain: Go 1.26.10, two dependencies (`golang.org/x/term` for the line
 editor, `github.com/google/go-cmp` in tests only), no CGo. `make xbuild` cross-compiles
 and `go vet`s both binaries for linux/amd64, linux/arm64, darwin/amd64, darwin/arm64
 and windows/amd64 with `CGO_ENABLED=0` — the ADR-0001 distribution promise, checked
