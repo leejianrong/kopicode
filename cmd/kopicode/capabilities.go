@@ -35,6 +35,7 @@ var features = []string{
 	"server.sessions",
 	"server.shutdown",
 	"session.close",
+	"session.environment",
 	"session.events_since",
 	"session.handoff",
 	"session.instructions",

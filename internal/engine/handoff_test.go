@@ -114,7 +114,7 @@ func TestANewSessionStartsFromAHandoffAndSaysWhere(t *testing.T) {
 	}
 
 	evs := readJournal(t, s.Path())
-	loaded := payloadsOf[journal.ProjectInstructionsLoaded](t, evs)
+	loaded := instructionsOf(t, evs)
 	if len(loaded) != 1 || loaded[0].Scope != journal.InstructionsScopeHandoff {
 		t.Fatalf("loaded = %+v, want one handoff-scope event", loaded)
 	}

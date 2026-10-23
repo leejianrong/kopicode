@@ -36,7 +36,8 @@ func wrapProjectInstructions(content string) string {
 // own file is told apart from the repository's, so the model can weigh a
 // repository rule against a personal preference.
 func wrapInstructions(scope, content string) string {
-	if scope == journal.InstructionsScopeSkills || scope == journal.InstructionsScopeHandoff {
+	if scope == journal.InstructionsScopeSkills || scope == journal.InstructionsScopeHandoff ||
+		scope == journal.InstructionsScopeEnvironment {
 		return content
 	}
 	if scope == journal.InstructionsScopeUser {

@@ -406,18 +406,27 @@ func TestForkSharesHistoryRestoresTheTreeAndLeavesTheSourceUntouched(t *testing.
 	if marker.SourceSessionID != "session-source" || marker.SourceTurn != 1 {
 		t.Errorf("SessionForked = %+v, want SourceSessionID session-source, SourceTurn 1", marker)
 	}
-	turn1FromSource := filterByTurn(sourceEvents, 1)
+	// What a fork copies is the source's turn 1 and, from turn 0, the
+	// environment note every new session starts with (KOP-216): the fork opens
+	// in the same root, so the note is as true for it as for the source.
+	var turn1FromSource []journal.Event
+	for _, ev := range sourceEvents {
+		if p, ok := ev.Payload.(journal.ProjectInstructionsLoaded); ok && p.Scope == journal.InstructionsScopeEnvironment {
+			turn1FromSource = append(turn1FromSource, ev)
+		}
+	}
+	turn1FromSource = append(turn1FromSource, filterByTurn(sourceEvents, 1)...)
 	if marker.Copied != len(turn1FromSource) {
-		t.Errorf("SessionForked.Copied = %d, want %d (session-source's own turn 1 events)",
+		t.Errorf("SessionForked.Copied = %d, want %d (session-source's environment note and its own turn 1 events)",
 			marker.Copied, len(turn1FromSource))
 	}
 	copiedBlock := forkedEvents[2 : 2+marker.Copied]
 	for i, ev := range copiedBlock {
-		if ev.Turn != 1 {
-			t.Errorf("copied event %d has Turn %d, want 1", i, ev.Turn)
+		if ev.Turn != turn1FromSource[i].Turn {
+			t.Errorf("copied event %d has Turn %d, want %d", i, ev.Turn, turn1FromSource[i].Turn)
 		}
 		if ev.Type() != turn1FromSource[i].Type() {
-			t.Errorf("copied event %d is %s, want %s (source's own turn-1 event in the same position)",
+			t.Errorf("copied event %d is %s, want %s (source's own event in the same position)",
 				i, ev.Type(), turn1FromSource[i].Type())
 		}
 	}

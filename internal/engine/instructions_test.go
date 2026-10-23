@@ -76,7 +76,7 @@ func TestProjectInstructionsLoadedOnFreshSession(t *testing.T) {
 	}
 
 	events := readJournal(t, s.Path())
-	loaded := sole[journal.ProjectInstructionsLoaded](t, events)
+	loaded := soleInstruction(t, events)
 	if loaded.Content.Inline != content {
 		t.Errorf("journaled content = %q, want %q", loaded.Content.Inline, content)
 	}
@@ -114,7 +114,7 @@ func TestProjectInstructionsLoadedIsNotDuplicatedByRun(t *testing.T) {
 	}
 
 	events := readJournal(t, s.Path())
-	got := payloadsOf[journal.ProjectInstructionsLoaded](t, events)
+	got := instructionsOf(t, events)
 	if len(got) != 1 {
 		t.Errorf("journaled %d ProjectInstructionsLoaded events across two exchanges, want exactly 1", len(got))
 	}
@@ -183,7 +183,7 @@ func TestResumeReplaysTheOriginalProjectInstructions(t *testing.T) {
 
 	// The resumed session's own bootstrap must not have re-discovered the file
 	// and journaled a second copy.
-	got := payloadsOf[journal.ProjectInstructionsLoaded](t, readJournal(t, s2.Path()))
+	got := instructionsOf(t, readJournal(t, s2.Path()))
 	if len(got) != 1 {
 		t.Errorf("journaled %d ProjectInstructionsLoaded events across the original run and its resume, want exactly 1", len(got))
 	}
@@ -221,7 +221,7 @@ func TestUserInstructionsComeFirstAreScopedAndSurviveResume(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	loaded := payloadsOf[journal.ProjectInstructionsLoaded](t, readJournal(t, s.Path()))
+	loaded := instructionsOf(t, readJournal(t, s.Path()))
 	if len(loaded) != 2 || loaded[0].Scope != journal.InstructionsScopeUser || loaded[1].Scope != "" {
 		t.Fatalf("loaded = %+v, want the user file (scope user) then the repository's", loaded)
 	}

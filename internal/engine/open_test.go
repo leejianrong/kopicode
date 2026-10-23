@@ -108,6 +108,7 @@ func TestOpenRunsAWholeSessionUnderTheMockProvider(t *testing.T) {
 	events := readJournal(t, s.Path())
 	want := []journal.Type{
 		journal.TypeSessionStarted,
+		journal.TypeProjectInstructionsLoaded, // the environment note (KOP-216)
 		journal.TypeUserMessage,
 		journal.TypeProviderRequest,
 		journal.TypeProviderResponse,

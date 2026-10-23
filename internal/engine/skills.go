@@ -141,3 +141,31 @@ func (e *Engine) loadSkillCatalogue(ctx context.Context, dir string, all []Skill
 	e.asm.AppendUser(cat)
 	return nil
 }
+
+// environmentNote is what the model is told about where it is. Without it a
+// model that wants to run a command in the repository guesses a path from
+// whatever benchmark it was tuned on: `cd /testbed` was the first shell command
+// in 3 of 6 driven sessions (KOP-216), and a sentence in the prompt saying there
+// is no /testbed did not stop it. Naming the real root does.
+func environmentNote(root string) string {
+	return "Environment: the repository root is " + root + ". run_shell starts there and every relative path is " +
+		"relative to it, so there is no need to cd."
+}
+
+// loadEnvironment journals and feeds the repository root into a new session, once, before the
+// instructions. Like the skills catalogue it reuses ProjectInstructionsLoaded
+// with its own scope, so resume and fork replay it from the journal and there is
+// no new event type. The path is in the journal, not in the harness
+// configuration hash: two sessions on the same arm in two directories are still
+// the same arm (see [journal.ProjectInstructionsLoaded]).
+func (e *Engine) loadEnvironment(ctx context.Context) error {
+	note := environmentNote(e.cfg.Tools.Root.Path())
+	if _, err := e.append(ctx, 0, journal.ProjectInstructionsLoaded{
+		Content: journal.InlineText(note),
+		Scope:   journal.InstructionsScopeEnvironment,
+	}); err != nil {
+		return fmt.Errorf("engine: recording the environment: %w", err)
+	}
+	e.asm.AppendUser(note)
+	return nil
+}

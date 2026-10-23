@@ -58,7 +58,12 @@ func TestForkCopiesTheSourcesProjectInstructions(t *testing.T) {
 			"not the source's copied recorded content; messages: %+v", sent)
 	}
 
-	got := payloadsOf[journal.ProjectInstructionsLoaded](t, readJournal(t, forked.Path()))
+	var got []journal.ProjectInstructionsLoaded
+	for _, p := range payloadsOf[journal.ProjectInstructionsLoaded](t, readJournal(t, forked.Path())) {
+		if p.Scope != journal.InstructionsScopeEnvironment { // the environment note is copied too (KOP-216)
+			got = append(got, p)
+		}
+	}
 	if len(got) != 1 {
 		t.Errorf("forked journal carries %d ProjectInstructionsLoaded events, want exactly 1 "+
 			"(copied from the source, never rediscovered)", len(got))

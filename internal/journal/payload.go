@@ -709,6 +709,11 @@ const InstructionsScopeUser = "user"
 // can read (ADR-0025), already framed, with no file behind it.
 const InstructionsScopeSkills = "skills"
 
+// InstructionsScopeEnvironment marks one that tells the model where it is: the
+// absolute repository root, which is where run_shell starts (KOP-216). Already
+// framed, with no file behind it.
+const InstructionsScopeEnvironment = "environment"
+
 // InstructionsScopeHandoff marks one that is the handoff a session began from
 // (ADR-0026), already framed, with no file behind it.
 const InstructionsScopeHandoff = "handoff"
