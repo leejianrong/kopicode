@@ -40,6 +40,7 @@ var features = []string{
 	"session.handoff",
 	"session.instructions",
 	"session.limits",
+	"session.protected_paths",
 	"session.read_only",
 	"session.resume",
 	"session.usage",

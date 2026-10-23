@@ -334,6 +334,14 @@ type startParams struct {
 	// error under consent_mode "auto". Shell is not made read-only.
 	ReadOnly bool `json:"read_only"`
 
+	// ProtectedPaths are paths inside dir the session may not change
+	// (ADR-0037): a file write under one is refused in every consent mode, and
+	// under auto and unattended_policy a shell line whose write target the
+	// tokenizer can see is under one is refused too. Not a sandbox: a build step
+	// or an interpreter that writes the tree is not seen. Feature
+	// session.protected_paths.
+	ProtectedPaths []string `json:"protected_paths"`
+
 	// AskMode is "" or "remote" (ADR-0020): "remote" puts the model's ask to the
 	// client as an ask.request instead of the process ask policy or the fixed
 	// refusal. Needs consent_mode "remote_interactive".
@@ -800,7 +808,7 @@ func (s *server) dispatchStart(req rpcRequest) {
 		Model: p.Model, Harness: p.Harness, HarnessConfig: p.HarnessConfig,
 		MaxTurns: p.MaxTurns, TokenBudget: p.TokenBudget,
 		ConsentMode: p.ConsentMode, ContainmentProvided: p.ContainmentProvided, NeverAllow: p.NeverAllow,
-		ConsentTimeout: timeout, ReadOnly: p.ReadOnly, AskMode: p.AskMode,
+		ConsentTimeout: timeout, ReadOnly: p.ReadOnly, ProtectedPaths: p.ProtectedPaths, AskMode: p.AskMode,
 		Handoff: p.Handoff, ParentSession: p.HandoffFrom, Resume: p.Resume,
 	}, s.notifier(p.Session), sessioncore.Turn{Done: func(r sessioncore.TurnResult) {
 		s.writeResult(id, turnResultOf(r))

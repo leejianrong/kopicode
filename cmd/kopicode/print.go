@@ -179,6 +179,7 @@ func runPrint(args []string, stdout, stderr io.Writer) int {
 	// decision 5 and ADR-0008 keep the REPL's single-trusted-developer,
 	// always-interactive mode exclusive, and a human at a terminal has no use
 	// for a policy file answering questions on their behalf.
+	protect := bindProtectFlag(fs)
 	policyFile := fs.String("policy-file", "", "load a declared-allowlist policy file (ADR-0011) and let "+
 		"it answer shell/write consent instead of refusing everything; unset means the existing default, "+
 		"refuse everything")
@@ -235,7 +236,12 @@ func runPrint(args []string, stdout, stderr io.Writer) int {
 
 	// A new session is told which skills the repository ships, as the REPL's is
 	// (ADR-0025, KOP-159). The engine ignores it when resuming.
-	opts := engine.Options{Dir: dir, Selection: selection, Skills: engine.RepoSkills(dir)}
+	protected, perr := protectedOptions(protect)
+	if perr != nil {
+		say(stderr, "kopicode: %v\n", perr)
+		return exitUsage
+	}
+	opts := engine.Options{Dir: dir, Selection: selection, Skills: engine.RepoSkills(dir), ProtectedPaths: protected}
 	if *resume != "" {
 		opts.SessionID = *resume
 		opts.Resume = true

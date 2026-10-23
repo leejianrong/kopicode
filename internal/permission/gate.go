@@ -37,6 +37,10 @@ type Gate struct {
 	// construction by [Gate.SetReadOnly], before the gate is shared.
 	readOnly bool
 
+	// protected are the resolved paths a write may not land under (ADR-0037).
+	// Set once by [Gate.SetProtected], before the gate is shared.
+	protected []string
+
 	mu     sync.Mutex
 	grants map[grant]bool
 }
@@ -191,6 +195,9 @@ func (g *Gate) classify(a Action) (Request, bool, error) {
 		abs, err := g.resolver.Resolve(a.Path)
 		if err != nil {
 			return Request{}, false, denied(err, "%s: resolving %q", a.Tool, a.Path)
+		}
+		if _, hit := protectedBy(g.protected, abs); hit {
+			return Request{}, false, denied(ErrProtectedPath, "%s: %s: %s", a.Tool, a.Path, protectedAdvice)
 		}
 		if contains(g.root, abs) {
 			return Request{}, false, nil

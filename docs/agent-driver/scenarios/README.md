@@ -21,3 +21,6 @@ sh check.sh s1-off-by-one /tmp/run-s1          # the tree check; exit 0 is known
 Each folder has `task.txt` (the prompt), `fixture/` (the start tree), `check.sh` (the tree check) and `expected.md` (what good looks like
 and what to watch). `s2` also has `hidden/`, tests the model never sees. The setup writes `.kopicode/config.toml` with a `verify` command: without
 one kopicode reports "nothing ran, so nothing here is a pass", which a first run through `cuttlefish run-team` hit.
+
+`s5` can also be run with `protected_paths: ["tests"]` given to the driver as a start option ([ADR-0037](../../adr/0037-protected-paths.md)); the first measurement is in
+[`dogfood-runs/2026-10-23-kop-217`](../../dogfood-runs/2026-10-23-kop-217/README.md).

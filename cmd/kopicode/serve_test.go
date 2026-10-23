@@ -1259,6 +1259,66 @@ func TestServeReadOnlyIsAUsageErrorUnderAuto(t *testing.T) {
 	h.close()
 }
 
+// TestServeProtectedPathsRefuseAFileWriteAndAShellWriteUnderAuto (KOP-217,
+// ADR-0037): under auto, where nobody is asked, a model that is refused a write
+// to tests/ and then reaches for the shell is refused again, and the file is
+// byte-identical. An unprotected write in the same session still lands.
+func TestServeProtectedPathsRefuseAFileWriteAndAShellWriteUnderAuto(t *testing.T) {
+	t.Setenv(engine.APIKeyEnv, "kopicode-test-credential")
+	srv := scriptedProvider(t,
+		sseToolCall("call-1", "write_file", `{"path":"tests/t.py","content":"changed\n"}`),
+		sseToolCall("call-2", "run_shell", `{"command":"echo changed > tests/t.py"}`),
+		sseToolCall("call-3", "write_file", `{"path":"src.txt","content":"fine\n"}`),
+		sseBody("done"),
+	)
+	h := startServe(t, engine.Options{ProviderBaseURL: srv.URL})
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "tests"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "tests", "t.py"), []byte("original\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
+		"params": map[string]any{
+			"session": "s1", "dir": dir, "prompt": "make it pass; do not change tests/",
+			"consent_mode": consentModeAuto, "protected_paths": []string{"tests"},
+		}})
+	if resp := h.awaitResponse(1); resp["error"] != nil {
+		t.Fatalf("session.start errored: %v", resp["error"])
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "tests", "t.py")); string(got) != "original\n" {
+		t.Errorf("a protected file was changed: %q", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "src.txt")); string(got) != "fine\n" {
+		t.Errorf("an unprotected write did not land: %q", got)
+	}
+	h.close()
+}
+
+// TestServeProtectedPathsMustLieInsideDir: a path that cannot be honoured is a
+// usage error before anything runs, not a silent no-op.
+func TestServeProtectedPathsMustLieInsideDir(t *testing.T) {
+	for name, paths := range map[string][]string{
+		"outside": {"../elsewhere"}, "empty": {""}, "the root": {"."},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := startServe(t, engine.Options{})
+			h.send(map[string]any{"jsonrpc": "2.0", "id": 1, "method": methodSessionStart,
+				"params": map[string]any{
+					"session": "s1", "dir": t.TempDir(), "prompt": "hi",
+					"consent_mode": consentModeAuto, "protected_paths": paths,
+				}})
+			resp := h.awaitResponse(1)
+			rpcErr, _ := resp["error"].(map[string]any)
+			if rpcErr == nil {
+				t.Fatalf("got %v, want an error", resp)
+			}
+			h.close()
+		})
+	}
+}
+
 // askEvents returns the ask_answered events of a session.
 func askEvents(notes []map[string]any) []map[string]any {
 	var out []map[string]any
