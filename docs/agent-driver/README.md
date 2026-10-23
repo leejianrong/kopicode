@@ -68,7 +68,8 @@ When it settles, read stop, exit_code, turns, usage and record from the result, 
 `git log --oneline` in <DIR>, and find the last verification with
 `grep '"type":"VerificationRun"' <record>/events.jsonl | tail -1` (a non-empty `skip` means nothing was checked,
 whatever stop and exit_code say; otherwise exit_code 0 is a pass). Call kopicode_close, then report those and nothing else,
-including a line `verification: ran, last exit_code <n> | skipped: <skip> | none in the journal`.
+including exactly one line of these three, whichever is true: `verification: ran, last exit_code <n>`,
+`verification: skipped: <skip>` or `verification: none in the journal`.
 The last run only: a count is easy to get wrong, and the last one is what the session ended on.
 You may call kopicode_cancel if the session runs without bound. You must not rewrite the task, add hints, retry with a
 different prompt, edit files in <DIR>, run its tests, or answer on kopicode's behalf. If something outside kopicode blocks the
