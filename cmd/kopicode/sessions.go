@@ -39,7 +39,12 @@ func sessionsCmd(args []string, stdout, stderr io.Writer) int {
 	// print.go's schema does — a script picking up an interrupted `run
 	// --print` invocation needs a session id it can parse, not a column a
 	// human eyeballs.
-	asJSON := fs.Bool("json", false, "emit one JSON object per session, for a script")
+	asJSON := fs.Bool("json", false, "emit one JSON object per session (or the one report), for a script")
+	// --report <id> is KOP-214: the rubric's mechanical fields for one session,
+	// derived from its journal and nothing else, so a run note does not copy
+	// them out by hand. It judges nothing; every seq in it is an event's own.
+	report := fs.String("report", "", "print a digest of one session's record: how it ended, turns, tokens, cost, "+
+		"verification, edits and rejections, tool-call routes, syntax gate, permissions and the final message")
 	if err := fs.Parse(args); err != nil {
 		// flag has already printed the error and the usage. A help request is not
 		// an error: -h/--help exits 0, everything else is a usage error.
@@ -53,6 +58,10 @@ func sessionsCmd(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		say(stderr, "kopicode: %v\n", err)
 		return exitHarness
+	}
+
+	if *report != "" {
+		return reportCmd(stdout, stderr, dir, *report, *asJSON)
 	}
 
 	sessions, err := engine.ListSessions(context.Background(), dir)
@@ -163,4 +172,92 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return string(r[:n]) + "…"
+}
+
+// reportCmd is `kopicode sessions -report <id>`: [engine.ReportSession] as text,
+// or as one JSON object with -json.
+func reportCmd(stdout, stderr io.Writer, dir, id string, asJSON bool) int {
+	r, err := engine.ReportSession(context.Background(), dir, id)
+	if err != nil {
+		say(stderr, "kopicode: %v\n", err)
+		return exitHarness
+	}
+	if asJSON {
+		enc := json.NewEncoder(stdout)
+		enc.SetEscapeHTML(false)
+		if err := enc.Encode(r); err != nil {
+			say(stderr, "kopicode: writing the report: %v\n", err)
+			return exitHarness
+		}
+		return exitSuccess
+	}
+	writeReport(stdout, r)
+	return exitSuccess
+}
+
+// writeReport renders a report for a person writing a run note: one fact per
+// line, each with the seq it came from.
+func writeReport(w io.Writer, r engine.SessionReport) {
+	say(w, "session   %s   model %s   kopicode %s\n", r.ID, orDash(r.ModelID), orDash(r.Version))
+	if r.Ended != nil {
+		say(w, "ended     %s, exit %d (seq %d)\n", r.Ended.Reason, r.Ended.ExitCode, r.Ended.Seq)
+	} else {
+		say(w, "ended     no SessionEnded in the record (still running, or the process was killed)\n")
+	}
+	say(w, "usage     %d turns, %d requests (%d retried), %d tokens, $%.4f\n", r.Turns, r.Requests, r.Retries, r.Tokens, r.CostUSD)
+
+	v := r.Verification
+	switch {
+	case v.Runs == 0:
+		say(w, "verify    no VerificationRun in the record\n")
+	case v.Last.Skip != "":
+		say(w, "verify    %d runs, %d skipped; the last (seq %d) was skipped: %s, so nothing was checked\n", v.Runs, v.Skipped, v.Last.Seq, v.Last.Skip)
+	default:
+		say(w, "verify    %d runs, %d skipped, %d failed; last exit %d (seq %d) %s\n", v.Runs, v.Skipped, v.Failed, v.Last.ExitCode, v.Last.Seq, strings.Join(v.Last.Command, " "))
+	}
+
+	say(w, "edits     %d applied, %d rejected\n", len(r.Edits.Applied), len(r.Edits.Rejected))
+	for _, e := range r.Edits.Rejected {
+		say(w, "  rejected  seq %d  %s  %s\n", e.Seq, e.Path, e.Reason)
+	}
+	if len(r.Edits.Unrecovered) > 0 {
+		say(w, "  never followed by an applied edit to the same path: seq %s\n", joinSeqs(r.Edits.Unrecovered))
+	}
+	say(w, "calls     %s\n", countList(r.Tools))
+	say(w, "routes    %s\n", countList(r.Routes))
+	say(w, "syntax    %d runs, %d failed\n", r.SyntaxGate.Runs, len(r.SyntaxGate.Failed))
+	for _, g := range r.SyntaxGate.Failed {
+		say(w, "  failed  seq %d  %s  exit %d\n", g.Seq, g.Path, g.ExitCode)
+	}
+	say(w, "consent   %d requested; %s\n", r.Permissions.Requested, countList(r.Permissions.Decisions))
+	for _, d := range r.Permissions.Denied {
+		say(w, "  denied  seq %d  %s  %s\n", d.Seq, d.Source, d.Reason)
+	}
+	switch {
+	case r.Final == nil:
+		say(w, "final     no assistant message in the record\n")
+	case r.Final.Spilled:
+		say(w, "final     seq %d (over the inline limit; it is in a blob)\n", r.Final.Seq)
+	default:
+		say(w, "final     seq %d\n%s\n", r.Final.Seq, r.Final.Text)
+	}
+}
+
+func countList(m map[string]int) string {
+	if len(m) == 0 {
+		return "none"
+	}
+	parts := make([]string, 0, len(m))
+	for _, k := range engine.SortedCounts(m) {
+		parts = append(parts, fmt.Sprintf("%s %d", k, m[k]))
+	}
+	return strings.Join(parts, ", ")
+}
+
+func joinSeqs(seqs []uint64) string {
+	parts := make([]string, len(seqs))
+	for i, s := range seqs {
+		parts[i] = strconv.FormatUint(s, 10)
+	}
+	return strings.Join(parts, ", ")
 }

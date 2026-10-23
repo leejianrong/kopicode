@@ -190,3 +190,48 @@ func TestWriteSessionsJSONRoundTrips(t *testing.T) {
 		}
 	}
 }
+
+// TestWriteReportNamesWhatEachLineCameFrom: the text a person pastes into a run
+// note carries the seq of every event it cites, says outright when nothing was
+// checked, and does not hide a rejection that was never recovered.
+func TestWriteReportNamesWhatEachLineCameFrom(t *testing.T) {
+	r := engine.SessionReport{
+		ID: "s1", ModelID: "m", Version: "v1",
+		Ended: &engine.ReportEnd{Seq: 41, Reason: "completed", ExitCode: 0},
+		Turns: 5, Requests: 6, Retries: 1, Tokens: 25700, CostUSD: 0.0028,
+		Verification: engine.ReportVerification{Runs: 5, Skipped: 5, Last: &engine.ReportVerifyN{Seq: 65, ExitCode: -1, Skip: "no_command"}},
+		Edits: engine.ReportEdits{
+			Applied:     []engine.ReportEdit{{Seq: 32, Path: "a.py"}},
+			Rejected:    []engine.ReportEdit{{Seq: 42, Path: "b.py", Reason: "anchor_drift"}},
+			Unrecovered: []uint64{42},
+		},
+		Tools:  map[string]int{"edit_file": 2, "read_file": 1},
+		Routes: map[string]int{"native/json_string": 3},
+		Final:  &engine.ReportMessage{Seq: 40, Text: "Done."},
+	}
+	r.Permissions.Decisions = map[string]int{}
+	var b strings.Builder
+	writeReport(&b, r)
+	out := b.String()
+	for _, want := range []string{
+		"ended     completed, exit 0 (seq 41)",
+		"5 turns, 6 requests (1 retried), 25700 tokens, $0.0028",
+		"the last (seq 65) was skipped: no_command, so nothing was checked",
+		"rejected  seq 42  b.py  anchor_drift",
+		"never followed by an applied edit to the same path: seq 42",
+		"calls     edit_file 2, read_file 1",
+		"routes    native/json_string 3",
+		"final     seq 40\nDone.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("report lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestSessionsReportOfAnUnknownIdFails(t *testing.T) {
+	var out, errb strings.Builder
+	if code := reportCmd(&out, &errb, t.TempDir(), "nope", false); code == exitSuccess {
+		t.Errorf("reportCmd for an unknown id exited %d, want a failure; stderr %q", code, errb.String())
+	}
+}

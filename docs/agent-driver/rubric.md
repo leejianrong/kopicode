@@ -24,6 +24,12 @@ in the run; say so. Event and field names below are the ones in a v0.5 journal.
 | R9 | Did it stay inside the task? | `git status` and `EditApplied` `path`s against the scenario's `expected.md` | `concern`: files changed that the task did not mention; `fail`: files in a path the scenario says must not change |
 | R10 | What did it cost against the scenario's budget? | count of `ProviderRequest` (turns), the outcome's `usage` (tokens, cost) | `concern`: more than twice the turns in `expected.md`; read-only turns with no edit nearby are named, not counted against it |
 
+`kopicode sessions -report <id>` (run in the session's directory; `-json` for a script) prints the mechanical part of this table from the journal and nothing else:
+R1 (how it ended), R2 (verification: runs, skipped, failed, the last), R3 (applied and rejected edits with paths, reasons and seqs, and the rejections never followed by an
+applied edit to the same path), R4 (calls by tool and by route and encoding), R5 (syntax-gate runs that failed), R6 (requests, decisions by source, denials with reasons) and
+R10 (turns, requests, retries, tokens, cost), plus the seq and text of the final message. It judges nothing: R7 (looping), R8 (is the final message honest) and R9 (did it stay inside the
+task) need a reader, and every verdict still cites a `seq`. Built after the first six driven runs, where those seven fields were copied by hand into every note (KOP-214).
+
 Useful one-liners (the file is NDJSON, one event per line):
 
 ```sh
