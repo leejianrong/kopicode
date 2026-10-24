@@ -116,3 +116,60 @@ func TestAnUnreadableStreamIdleLimitIsRefused(t *testing.T) {
 		})
 	}
 }
+
+// KOP-224: the Codex route gets the same bound. The first reply goes silent after
+// the backend opened the stream; the session asks again, finishes, and the journal
+// holds the retry. Nothing about the login changes.
+func TestACodexSessionContinuesWhenAReplyStreamGoesSilent(t *testing.T) {
+	codexHome(t, 0o600, fakeLogin())
+	t.Setenv(engine.StreamIdleEnv, "1")
+	stream, err := os.ReadFile(filepath.Join("..", "provider", "testdata", "codex", "text_turn.sse"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		if requests.Add(1) == 1 {
+			_, _ = io.WriteString(w, ": keep-alive\n\n")
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+			return
+		}
+		_, _ = w.Write(stream)
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	sel, err := engine.ResolveSelection(dir, engine.SelectionOverrides{Provider: engine.ProviderCodex, Model: "gpt-5.6-luna"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := engine.Open(t.Context(), engine.Options{Dir: dir, Selection: sel, SessionID: "codex-silent", ProviderBaseURL: srv.URL})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
+
+	res, err := s.Run(t.Context(), "say ok")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Stop != engine.StopCompleted {
+		t.Fatalf("stop = %v (%s), want the session to finish on the retry", res.Stop, res.Detail)
+	}
+	var retried []journal.ProviderRetried
+	for _, ev := range readJournal(t, s.Path()) {
+		if p, ok := ev.Payload.(journal.ProviderRetried); ok {
+			retried = append(retried, p)
+		}
+	}
+	if len(retried) != 1 || retried[0].Cause != "stream silent" || !strings.Contains(retried[0].Detail, "went silent") {
+		t.Errorf("ProviderRetried events = %+v, want one silent stream with the cause quoted", retried)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Errorf("requests = %d, want 2", got)
+	}
+}
