@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 )
 
 // SSE framing. The transport is plain text/event-stream: `data: ` lines each
@@ -42,6 +43,17 @@ var (
 	// difference between "the model stopped" and "the connection did", which
 	// the bench classifier must not confuse.
 	ErrStreamIncomplete = errors.New("provider: stream ended before the provider finished")
+
+	// ErrStreamSilent reports a stream the provider opened and then sent no data
+	// on for longer than the idle limit (KOP-221). Keep-alive comments are not
+	// data: a provider that is alive but has stopped producing is the case this
+	// exists for, and counting its keep-alives would let it hang a session for ever.
+	ErrStreamSilent = errors.New("provider: stream went silent")
+
+	// ErrStreamBroken reports a stream whose connection failed while it was being
+	// read (a reset, a truncated chunk, a closed socket), as distinct from a
+	// frame this build could not decode ([ErrMalformedStream]) or a cancellation.
+	ErrStreamBroken = errors.New("provider: stream broke")
 
 	// ErrStreamNotFinished reports Reply being asked for before the stream was
 	// drained. Returning a zero Reply there would hand the loop a reply the
@@ -120,6 +132,18 @@ type Stream struct {
 	sawData bool
 	done    bool
 	err     error
+
+	// idle, idleCtx and idleCancel are the silence watch ([Stream.watchIdle]); zero
+	// idle means none, which is every replayed and every non-live stream.
+	idle       time.Duration
+	idleCtx    context.Context
+	idleCancel context.CancelCauseFunc
+	idleTimer  *time.Timer
+
+	// rt is set on the stream a live [Client] hands back: the Stream is then a
+	// shell around the attempt currently being read, and a failure that is worth
+	// another send is retried inside Next ([resilient]).
+	rt *resilient
 }
 
 // NewSSEStream reads a streamed reply from an SSE body.
@@ -168,6 +192,9 @@ func NewSSEStream(ctx context.Context, body io.Reader, raw json.RawMessage) *Str
 // than has been delivered as deltas; after the stream is drained it is the whole
 // body. It is empty for a stream built by [NewBodyStream], which read no wire.
 func (s *Stream) Transcript() []byte {
+	if s.rt != nil {
+		return s.rt.cur.Transcript()
+	}
 	return append([]byte(nil), s.wire.Bytes()...)
 }
 
@@ -209,8 +236,20 @@ func NewBodyStream(ctx context.Context, raw json.RawMessage) *Stream {
 // Next advances to the next delta, reporting false when the reply is finished
 // or has failed. Ask [Stream.Err] which.
 func (s *Stream) Next() bool {
+	if s.rt != nil {
+		return s.rt.next()
+	}
+	return s.step()
+}
+
+// step advances one attempt's decoder; Next is step plus the retry around it.
+func (s *Stream) step() bool {
 	if s.done {
 		return false
+	}
+	if s.idle > 0 {
+		s.idleTimer = time.AfterFunc(s.idle, func() { s.idleCancel(ErrStreamSilent) })
+		defer s.idleTimer.Stop()
 	}
 	if err := s.ctx.Err(); err != nil {
 		s.fail(fmt.Errorf("provider: stream cancelled: %w", err))
@@ -230,7 +269,12 @@ func (s *Stream) Next() bool {
 			s.fail(fmt.Errorf("provider: stream cancelled: %w", err))
 			return false
 		}
-		deltas, err := s.frame(s.scan.Text())
+		line := s.scan.Text()
+		if s.idleTimer != nil && line != "" && !strings.HasPrefix(line, sseCommentPrefix) {
+			// Data, not a keep-alive: the provider is producing. See ErrStreamSilent.
+			s.idleTimer.Reset(s.idle)
+		}
+		deltas, err := s.frame(line)
 		if err != nil {
 			s.fail(err)
 			return false
@@ -242,7 +286,14 @@ func (s *Stream) Next() bool {
 		return true
 	}
 	if err := s.scan.Err(); err != nil {
-		s.fail(fmt.Errorf("provider: reading stream: %w", err))
+		switch {
+		case s.idleCtx != nil && errors.Is(context.Cause(s.idleCtx), ErrStreamSilent):
+			s.fail(fmt.Errorf("%w: no data for %s on a stream the provider had opened (keep-alive comments do not count)", ErrStreamSilent, s.idle))
+		case s.ctx.Err() == nil && !errors.Is(err, bufio.ErrTooLong):
+			s.fail(fmt.Errorf("%w: reading stream: %w", ErrStreamBroken, err))
+		default:
+			s.fail(fmt.Errorf("provider: reading stream: %w", err))
+		}
 		return false
 	}
 
@@ -322,10 +373,28 @@ func (s *Stream) fail(err error) {
 }
 
 // Delta returns the increment [Stream.Next] just advanced to.
-func (s *Stream) Delta() Delta { return s.current }
+func (s *Stream) Delta() Delta {
+	if s.rt != nil {
+		return s.rt.cur.Delta()
+	}
+	return s.current
+}
 
 // Err reports why the stream stopped, or nil when it finished cleanly.
-func (s *Stream) Err() error { return s.err }
+func (s *Stream) Err() error {
+	if s.rt != nil {
+		return s.rt.failure()
+	}
+	return s.err
+}
+
+// watchIdle makes the stream fail with [ErrStreamSilent] when it waits longer
+// than idle for data: the timer cancels the attempt's request context, which
+// unblocks the read the stream is sitting in. cancel releases that context and
+// is called when the stream is closed.
+func (s *Stream) watchIdle(attemptCtx context.Context, cancel context.CancelCauseFunc, idle time.Duration) {
+	s.idleCtx, s.idleCancel, s.idle = attemptCtx, cancel, idle
+}
 
 // Reply returns the assembled reply.
 //
@@ -333,6 +402,12 @@ func (s *Stream) Err() error { return s.err }
 // error when the stream failed: a half-read reply that looks like a whole one
 // is how a cancelled turn gets recorded as a model answer.
 func (s *Stream) Reply() (Reply, error) {
+	if s.rt != nil {
+		if err := s.rt.failure(); err != nil {
+			return Reply{}, err
+		}
+		return s.rt.cur.Reply()
+	}
 	if s.err != nil {
 		return Reply{}, s.err
 	}
@@ -352,8 +427,14 @@ func (s *Stream) Reply() (Reply, error) {
 // from a body nobody read to the end, and returning the fragment that did
 // arrive would record a partial answer as a whole one.
 func (s *Stream) Close() error {
+	if s.rt != nil {
+		return s.rt.cur.Close()
+	}
 	if !s.done {
 		s.fail(fmt.Errorf("%w: it was closed before it finished", ErrStreamIncomplete))
+	}
+	if s.idleCancel != nil {
+		defer s.idleCancel(nil)
 	}
 	if s.closer == nil {
 		return nil

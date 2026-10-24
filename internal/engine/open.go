@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -478,6 +479,36 @@ const APIKeyEnv = "OPENROUTER_API_KEY"
 // CustomAPIKeyEnv is the credential for a custom provider URL (ADR-0027). The
 // OpenRouter key is never sent to any other host.
 const CustomAPIKeyEnv = provider.CustomKeyEnv
+
+// StreamIdleEnv overrides how long an opened model stream may send no data before
+// the attempt is ended and retried (KOP-221), in whole seconds; 0 removes the
+// limit. Unset means [provider.DefaultStreamIdleTimeout], three minutes.
+//
+// An environment variable and not a config key because the front ends that hang
+// on a silent model are `serve` and `mcp`, which never read the user's config file
+// (one person's file must not change what an orchestrator runs), and every front
+// end reads the environment. It is not in the harness hash: it changes nothing
+// about a session that streams.
+const StreamIdleEnv = "KOPICODE_STREAM_IDLE_SECONDS"
+
+// streamIdleOption reads [StreamIdleEnv]. A value that is not a whole number of
+// seconds is refused rather than ignored: a limit the person did not write is a
+// session that hangs or gives up when they expected the opposite.
+func streamIdleOption() (provider.ClientOption, error) {
+	v := os.Getenv(StreamIdleEnv)
+	if v == "" {
+		return provider.WithStreamIdleTimeout(0), nil
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n < 0 {
+		return nil, fmt.Errorf("%w: %s=%q is not a whole number of seconds; use a number such as 300, or 0 for no limit",
+			ErrConfig, StreamIdleEnv, v)
+	}
+	if n == 0 {
+		return provider.WithStreamIdleTimeout(-1), nil
+	}
+	return provider.WithStreamIdleTimeout(time.Duration(n) * time.Second), nil
+}
 
 // ErrNoCodexLogin is returned when the Codex provider (ADR-0035) is selected and
 // Codex CLI's login cannot be used: absent, not private to the user, not a ChatGPT
@@ -1222,6 +1253,10 @@ func openProvider(opts Options, jrn journal.Journal) (Provider, error) {
 		return nil, ErrNoAPIKey
 	}
 
+	idleOpt, err := streamIdleOption()
+	if err != nil {
+		return nil, err
+	}
 	baseURL := provider.DefaultBaseURL
 	clientOpts := []provider.ClientOption{
 		provider.WithRetryObserver(journalRetryObserver(jrn)),
@@ -1229,6 +1264,7 @@ func openProvider(opts Options, jrn journal.Journal) (Provider, error) {
 		// WithLogger) reach the same sink as everything else in this file —
 		// engine-internal, never a message, a reply or a tool call.
 		provider.WithLogger(slog.Default()),
+		idleOpt,
 	}
 	if opts.ProviderBaseURL != "" {
 		baseURL = opts.ProviderBaseURL
@@ -1273,11 +1309,16 @@ func openCodexProvider(opts Options) (Provider, error) {
 // belongs to OpenRouter alone. A loopback host with no key gets no Authorization
 // header at all. No routing object is sent: the run is unpinned.
 func openCustomProvider(opts Options, baseURL string, jrn journal.Journal) (Provider, error) {
+	idleOpt, err := streamIdleOption()
+	if err != nil {
+		return nil, err
+	}
 	clientOpts := []provider.ClientOption{
 		provider.WithBaseURL(baseURL),
 		provider.WithoutRouting(),
 		provider.WithRetryObserver(journalRetryObserver(jrn)),
 		provider.WithLogger(slog.Default()),
+		idleOpt,
 	}
 	key := os.Getenv(CustomAPIKeyEnv)
 	if key == "" {
@@ -1318,6 +1359,7 @@ func journalRetryObserver(jrn journal.Journal) provider.RetryObserver {
 			OfTries: ev.OfTries,
 			DelayMS: ev.Delay.Milliseconds(),
 			Cause:   ev.Cause,
+			Detail:  ev.Detail,
 		})
 	}
 }

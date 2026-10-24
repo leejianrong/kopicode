@@ -134,6 +134,11 @@ type RetryEvent struct {
 	// Cause summarises the failure that triggered the retry: "http 429",
 	// "http 503", "transport failure" — [cause]'s own classification.
 	Cause string
+	// Detail is the failure's own text, whole, for a cause that is a class and not
+	// a status: a stream that broke or went silent carries the error that says how
+	// (KOP-220, KOP-221). Empty for a status or a transport failure, whose Cause
+	// is all the log line has ever said.
+	Detail string
 }
 
 // RetryObserver is notified once per client-internal retry, synchronously and
@@ -173,6 +178,9 @@ type Client struct {
 	noRouting bool
 	noAuth    bool
 	onRetry   RetryObserver
+	// streamIdle is how long an opened stream may send no data; see
+	// [DefaultStreamIdleTimeout]. Negative means no limit.
+	streamIdle time.Duration
 
 	mu   sync.Mutex
 	rand Rand
@@ -267,6 +275,13 @@ func WithRetry(r Retry) ClientOption {
 	return func(c *Client) { c.retry = r }
 }
 
+// WithStreamIdleTimeout sets how long an opened stream may send no data before
+// the attempt is ended as [ErrStreamSilent] and retried (KOP-221). Zero keeps
+// [DefaultStreamIdleTimeout]; a negative value removes the limit.
+func WithStreamIdleTimeout(d time.Duration) ClientOption {
+	return func(c *Client) { c.streamIdle = d }
+}
+
 // WithLogger sends engine-internal diagnostics — which attempt, which status,
 // how long the backoff was — to lg.
 //
@@ -328,6 +343,9 @@ func NewClient(key APIKey, opts ...ClientOption) (*Client, error) {
 	for _, opt := range opts {
 		opt(c)
 	}
+	if c.streamIdle == 0 {
+		c.streamIdle = DefaultStreamIdleTimeout
+	}
 	// Checked after the options, because WithoutAuth is what makes an empty key
 	// legitimate. Without it the refusal is the same as ever.
 	if key.IsZero() && !c.noAuth {
@@ -361,10 +379,12 @@ func (c *Client) GoString() string { return c.String() }
 // reply; a reply that arrived and then failed part way through is reported by
 // the stream, because the deltas that did arrive are evidence.
 //
-// Retrying stops the moment a stream exists. A partially consumed reply has
-// already been printed, already been counted by the provider, and re-sending
-// over the top of it would bill the prompt twice and hand the loop two halves of
-// two different answers.
+// Retrying a *request* stops the moment a stream exists. A partially consumed
+// reply has already been printed and already been counted by the provider.
+// What a stream that then fails may do is [resilient]'s business: it is asked for
+// again, whole, only when the failure is one worth repeating, the loop has not
+// yet acted on a reply it never received, and the budget
+// ([DefaultStreamAttempts]) allows; the restart is journaled, never silent.
 func (c *Client) Complete(ctx context.Context, req Request) (*Stream, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -374,6 +394,33 @@ func (c *Client) Complete(ctx context.Context, req Request) (*Stream, error) {
 		return nil, err
 	}
 
+	first, err := c.sendRetrying(ctx, body, req)
+	if err != nil {
+		return nil, err
+	}
+	attempts := min(c.retry.maxAttempts(), DefaultStreamAttempts)
+	if attempts <= 1 {
+		return first, nil
+	}
+	return &Stream{rt: &resilient{
+		ctx:      ctx,
+		cur:      first,
+		resend:   func(ctx context.Context) (*Stream, error) { return c.sendRetrying(ctx, body, req) },
+		attempts: attempts,
+		delay:    c.delay,
+		clock:    c.clock,
+		observe:  c.onRetry,
+		log:      c.log,
+		turn:     req.Turn,
+		attempt:  req.Attempt,
+		tries:    1,
+	}}, nil
+}
+
+// sendRetrying sends the request until a stream exists, retrying a failure that
+// happened before a response started (a 429, a 5xx, a transport failure) under
+// the [Retry] policy.
+func (c *Client) sendRetrying(ctx context.Context, body []byte, req Request) (*Stream, error) {
 	attempts := c.retry.maxAttempts()
 	var last error
 	for attempt := range attempts {
@@ -428,7 +475,20 @@ func (c *Client) delay(attempt int) time.Duration {
 
 // send makes one attempt, returning a stream or the reason there is none.
 func (c *Client) send(ctx context.Context, body []byte, sessionID string) (*Stream, error) {
-	httpReq, err := c.newHTTPRequest(ctx, body, sessionID)
+	// A context of the attempt's own, so the silence watch can end this read
+	// without cancelling the caller's context (which would read as a Ctrl-C).
+	attemptCtx, cancel := context.WithCancelCause(ctx)
+	stream, err := c.sendOn(ctx, attemptCtx, cancel, body, sessionID)
+	if err != nil || stream.idleCancel == nil {
+		// Nothing holds the context: a failure, or a reply read whole already.
+		cancel(nil)
+	}
+	return stream, err
+}
+
+// sendOn is send on an attempt context; a stream it returns holds cancel.
+func (c *Client) sendOn(ctx, attemptCtx context.Context, cancel context.CancelCauseFunc, body []byte, sessionID string) (*Stream, error) {
+	httpReq, err := c.newHTTPRequest(attemptCtx, body, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -458,7 +518,9 @@ func (c *Client) send(ctx context.Context, body []byte, sessionID string) (*Stre
 		return NewBodyStream(ctx, raw), nil
 	}
 
-	return NewSSEStream(ctx, resp.Body, nil), nil
+	s := NewSSEStream(ctx, resp.Body, nil)
+	s.watchIdle(attemptCtx, cancel, max(c.streamIdle, 0))
+	return s, nil
 }
 
 // newHTTPRequest builds one attempt's HTTP request.

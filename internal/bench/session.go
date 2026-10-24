@@ -459,6 +459,7 @@ func journalRetryObserver(jrn journal.Journal) provider.RetryObserver {
 			OfTries: ev.OfTries,
 			DelayMS: ev.Delay.Milliseconds(),
 			Cause:   ev.Cause,
+			Detail:  ev.Detail,
 		})
 	}
 }

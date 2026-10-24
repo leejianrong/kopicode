@@ -85,6 +85,7 @@ func fixtures() map[journal.Type]journal.Payload {
 			OfTries: 6,
 			DelayMS: 2000,
 			Cause:   "http 429",
+			Detail:  "provider: stream went silent: no data for 3m0s",
 		},
 		journal.TypeProviderResponse: journal.ProviderResponse{
 			Body:         journal.BlobText("e3b0c44298fc1c149afbf4c8996fb924", 91234),

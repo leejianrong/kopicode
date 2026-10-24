@@ -271,6 +271,13 @@ type ProviderRetried struct {
 	// own diagnostic log line uses, so the two never disagree about what
 	// happened.
 	Cause string `json:"cause"`
+	// Detail is the failure's own text, whole, when Cause is a class and not a
+	// status: a reply stream that went silent or broke part way ("stream silent",
+	// "stream broken", "stream incomplete", KOP-220 and KOP-221) is retried from
+	// the start and this says how it failed. Absent for a status or a transport
+	// failure. The attempt's partial bytes are not kept; the ProviderResponse
+	// that follows holds the attempt that finished.
+	Detail string `json:"detail,omitempty"`
 }
 
 func (ProviderRetried) Type() Type { return TypeProviderRetried }
