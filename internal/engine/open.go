@@ -491,23 +491,33 @@ const CustomAPIKeyEnv = provider.CustomKeyEnv
 // about a session that streams.
 const StreamIdleEnv = "KOPICODE_STREAM_IDLE_SECONDS"
 
-// streamIdleOption reads [StreamIdleEnv]. A value that is not a whole number of
-// seconds is refused rather than ignored: a limit the person did not write is a
-// session that hangs or gives up when they expected the opposite.
-func streamIdleOption() (provider.ClientOption, error) {
+// streamIdle reads [StreamIdleEnv] as the clients take it: 0 for unset (their
+// default), a negative value for no limit, otherwise the limit. A value that is
+// not a whole number of seconds is refused rather than ignored: a limit the person
+// did not write is a session that hangs or gives up when they expected the opposite.
+func streamIdle() (time.Duration, error) {
 	v := os.Getenv(StreamIdleEnv)
 	if v == "" {
-		return provider.WithStreamIdleTimeout(0), nil
+		return 0, nil
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(v))
 	if err != nil || n < 0 {
-		return nil, fmt.Errorf("%w: %s=%q is not a whole number of seconds; use a number such as 300, or 0 for no limit",
+		return 0, fmt.Errorf("%w: %s=%q is not a whole number of seconds; use a number such as 300, or 0 for no limit",
 			ErrConfig, StreamIdleEnv, v)
 	}
 	if n == 0 {
-		return provider.WithStreamIdleTimeout(-1), nil
+		return -1, nil
 	}
-	return provider.WithStreamIdleTimeout(time.Duration(n) * time.Second), nil
+	return time.Duration(n) * time.Second, nil
+}
+
+// streamIdleOption is [streamIdle] as an option for the OpenRouter and custom clients.
+func streamIdleOption() (provider.ClientOption, error) {
+	d, err := streamIdle()
+	if err != nil {
+		return nil, err
+	}
+	return provider.WithStreamIdleTimeout(d), nil
 }
 
 // ErrNoCodexLogin is returned when the Codex provider (ADR-0035) is selected and
@@ -1239,7 +1249,7 @@ func openProvider(opts Options, jrn journal.Journal) (Provider, error) {
 	}
 
 	if opts.Selection.Provider == harness.ProviderCodex {
-		return openCodexProvider(opts)
+		return openCodexProvider(opts, jrn)
 	}
 	if u := opts.Selection.ProviderURL; u != "" {
 		return openCustomProvider(opts, u, jrn)
@@ -1286,12 +1296,20 @@ func openProvider(opts Options, jrn journal.Journal) (Provider, error) {
 // openCodexProvider builds the client for the Codex provider (ADR-0035). No pin
 // and no OpenRouter key: the only credential is Codex CLI's login, sent only to the
 // Codex backend. ProviderBaseURL redirects it for tests, as it does for the others.
-func openCodexProvider(opts Options) (Provider, error) {
+func openCodexProvider(opts Options, jrn journal.Journal) (Provider, error) {
 	creds, err := loadCodexCredentials(opts)
 	if err != nil {
 		return nil, err
 	}
-	var clientOpts []provider.CodexOption
+	idle, err := streamIdle()
+	if err != nil {
+		return nil, err
+	}
+	clientOpts := []provider.CodexOption{
+		provider.WithCodexRetryObserver(journalRetryObserver(jrn)),
+		provider.WithCodexStreamIdleTimeout(idle),
+		provider.WithCodexLogger(slog.Default()),
+	}
 	if opts.ProviderBaseURL != "" {
 		clientOpts = append(clientOpts, provider.WithCodexBaseURL(opts.ProviderBaseURL))
 	}

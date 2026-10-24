@@ -6,8 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/leejianrong/kopicode/internal/codexauth"
 )
@@ -26,16 +29,27 @@ const responsesPath = "/responses"
 //
 // A failed request is not retried. A 401, 403 or 429 comes back as a
 // [CodexError] saying what to do (KOP-199), wrapping the [APIError] with the
-// whole body; any other status is the plain [APIError].
+// whole body; any other status is the plain [APIError]. A *stream* that goes silent
+// or breaks after the backend opened it is a different case and is handled as
+// [Client] handles it (KOP-224): ended after an idle limit, and asked for again
+// within [DefaultStreamAttempts], each retry journaled.
 //
 // Sampling is not sent: the backend answers a `temperature` with a 400
 // ("Unsupported parameter: temperature"), and a `previous_response_id` the same
 // way, so history is always replayed in full with `store: false`
 // (docs/research/2026-10-codex-backend-verification.md, §7).
 type CodexClient struct {
-	creds   codexauth.Credentials
-	baseURL string
-	http    *http.Client
+	creds      codexauth.Credentials
+	baseURL    string
+	http       *http.Client
+	clock      Clock
+	retry      Retry
+	log        *slog.Logger
+	onRetry    RetryObserver
+	streamIdle time.Duration // see [WithCodexStreamIdleTimeout]
+
+	mu   sync.Mutex
+	rand Rand
 }
 
 // CodexOption configures a [CodexClient].
@@ -51,14 +65,53 @@ func WithCodexHTTPClient(h *http.Client) CodexOption {
 	return func(c *CodexClient) { c.http = h }
 }
 
+// WithCodexRetryObserver sets the callback notified once per stream retry, as
+// [WithRetryObserver] does for [Client]. Nil notifies nothing.
+func WithCodexRetryObserver(obs RetryObserver) CodexOption {
+	return func(c *CodexClient) { c.onRetry = obs }
+}
+
+// WithCodexStreamIdleTimeout sets how long an opened stream may send no data
+// before the attempt is ended as [ErrStreamSilent] and asked for again. Zero keeps
+// [DefaultStreamIdleTimeout]; a negative value removes the limit.
+func WithCodexStreamIdleTimeout(d time.Duration) CodexOption {
+	return func(c *CodexClient) { c.streamIdle = d }
+}
+
+// WithCodexLogger sends the stream retry diagnostics to lg. Nil is ignored.
+func WithCodexLogger(lg *slog.Logger) CodexOption {
+	return func(c *CodexClient) {
+		if lg != nil {
+			c.log = lg
+		}
+	}
+}
+
+// WithCodexRetry replaces the backoff policy; its MaxAttempts also caps the
+// stream budget, and 1 turns stream retries off, as for [WithRetry].
+func WithCodexRetry(r Retry) CodexOption {
+	return func(c *CodexClient) { c.retry = r }
+}
+
+// WithCodexClock and WithCodexRand inject the backoff's sources of time and
+// jitter, for tests.
+func WithCodexClock(clock Clock) CodexOption { return func(c *CodexClient) { c.clock = clock } }
+func WithCodexRand(r Rand) CodexOption       { return func(c *CodexClient) { c.rand = r } }
+
 // NewCodexClient builds a client from a login read by [codexauth.Load].
 func NewCodexClient(creds codexauth.Credentials, opts ...CodexOption) (*CodexClient, error) {
 	if creds.AccessToken.IsZero() {
 		return nil, errors.New("provider: the Codex credentials hold no access token")
 	}
-	c := &CodexClient{creds: creds, baseURL: CodexBaseURL, http: &http.Client{Transport: defaultTransport()}}
+	c := &CodexClient{
+		creds: creds, baseURL: CodexBaseURL, http: &http.Client{Transport: defaultTransport()},
+		clock: RealClock{}, retry: DefaultRetry, log: slog.New(slog.DiscardHandler), rand: globalRand{},
+	}
 	for _, o := range opts {
 		o(c)
+	}
+	if c.streamIdle == 0 {
+		c.streamIdle = DefaultStreamIdleTimeout
 	}
 	return c, nil
 }
@@ -79,7 +132,49 @@ func (c *CodexClient) Complete(ctx context.Context, req Request) (*Stream, error
 	if err != nil {
 		return nil, err
 	}
-	httpReq, err := c.newHTTPRequest(ctx, body)
+	first, err := c.send(ctx, body)
+	if err != nil {
+		return nil, err
+	}
+	attempts := min(c.retry.maxAttempts(), DefaultStreamAttempts)
+	if attempts <= 1 {
+		return first, nil
+	}
+	return &Stream{rt: &resilient{
+		ctx:      ctx,
+		cur:      first,
+		resend:   func(ctx context.Context) (*Stream, error) { return c.send(ctx, body) },
+		attempts: attempts,
+		delay:    c.delay,
+		clock:    c.clock,
+		observe:  c.onRetry,
+		log:      c.log,
+		turn:     req.Turn,
+		attempt:  req.Attempt,
+		tries:    1,
+	}}, nil
+}
+
+// delay draws one backoff, serialising access to the jitter source.
+func (c *CodexClient) delay(attempt int) time.Duration {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.retry.Delay(attempt, c.rand)
+}
+
+// send makes one attempt, on a context of its own so the silence watch can end
+// this read without cancelling the caller's (which would read as a Ctrl-C).
+func (c *CodexClient) send(ctx context.Context, body []byte) (*Stream, error) {
+	attemptCtx, cancel := context.WithCancelCause(ctx)
+	stream, err := c.sendOn(ctx, attemptCtx, cancel, body)
+	if err != nil {
+		cancel(nil)
+	}
+	return stream, err
+}
+
+func (c *CodexClient) sendOn(ctx, attemptCtx context.Context, cancel context.CancelCauseFunc, body []byte) (*Stream, error) {
+	httpReq, err := c.newHTTPRequest(attemptCtx, body)
 	if err != nil {
 		return nil, err
 	}
@@ -100,7 +195,9 @@ func (c *CodexClient) Complete(ctx context.Context, req Request) (*Stream, error
 		_ = resp.Body.Close()
 		return nil, fmt.Errorf("provider: the Codex backend answered 200 with content type %q, not an event stream", ct)
 	}
-	return NewResponsesStream(ctx, resp.Body), nil
+	s := NewResponsesStream(ctx, resp.Body)
+	s.watchIdle(attemptCtx, cancel, max(c.streamIdle, 0))
+	return s, nil
 }
 
 // newHTTPRequest builds the request. This is the only place the credential is
