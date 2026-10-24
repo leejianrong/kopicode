@@ -53,6 +53,7 @@ Two things a headless run needs, found in that check:
 - **Codex `exec` refuses MCP tool calls by default** ("MCP tool call requires approval, but approval policy is never"). Add
   `default_tools_approval_mode = "approve"` to the `[mcp_servers.kopicode]` table, or `-c 'mcp_servers.kopicode.default_tools_approval_mode="approve"'`
   on the command line. It lets Codex call kopicode's five tools and nothing else.
+- **Close Codex's stdin when scripting it** (`codex exec ... < /dev/null`). With an open, non-terminal stdin it prints "Reading additional input from stdin..." and waits for ever; to a script that looks like a hung kopicode, and no session is ever created.
 - **Claude Code `-p` needs the tools allowed up front**, for example `--allowedTools "Task" "mcp__kopicode" "Read" "Grep" "Bash(git -C:*)"`; a tool that needs
   approval is refused with no one to ask.
 
