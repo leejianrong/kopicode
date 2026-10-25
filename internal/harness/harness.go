@@ -252,6 +252,11 @@ type Config struct {
 	// arm's hash moves.
 	OutputCap int
 
+	// LeftoverNote makes the engine tell the model, after a passing verification,
+	// that a name its own edits removed is still in the tree (ADR-0039). False is
+	// off, and in the hash only when set.
+	LeftoverNote bool
+
 	// Hooks are the commands a person has asked to run around tool calls and
 	// at a stop (ADR-0036). The zero value is no hooks, which is every
 	// registered arm and so every benchmark number. They change what the

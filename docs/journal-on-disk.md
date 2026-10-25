@@ -46,3 +46,8 @@ A `PermissionRequested` event is written when kopicode raises a consent request,
 `tool` and `detail` say what is asked. A session grant (`allow_session`) that already covers a later request writes the pair together, with nothing in
 between. Until KOP-228 the request was written together with the answer, so a reader of an older journal never sees an open one.
 `ask` (the model's question to a person) is a different pair: `AskRequested` and `AskAnswered`.
+
+## What the model was told that the tree does not show
+
+`LeftoverNoted` (only with `--leftover-note`, ADR-0039) records the names the model's own edits removed that the engine then found still in the tree, with
+`file:line` for each, or a `skipped` reason when the search could not run (which is not "clean"). It is written before the note is shown, at most once per name per prompt.

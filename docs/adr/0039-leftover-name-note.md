@@ -27,6 +27,17 @@ Rejected before: parsing the task text for identifiers (KOP-226's own "not in sc
 6. **Off by default.** `Config.LeftoverNote` (bool), in the harness hash only when set, a `--leftover-note` flag on the REPL and `run --print`, and a declared-config key for `serve` and `mcp`, the same shape as ADR-0028 and ADR-0034. It becomes default only on a measurement.
 7. **It never blocks and never changes a stop.** The model may finish as it was going to; the note is information.
 
+## Implementation notes
+
+Settled while building it (KOP-226); none changes a decision above except where it says so.
+
+- **Where the note rides.** On the observation after a passing verification (the one-line pass summary), as decided. A resumed session does not rebuild it: the pass summary is not rebuilt either, and ADR-0034 decision 5 says a resume carries no past notes. Decision 5's "a replay shows the same observation" therefore holds for the *journal* (it records what was found) and not for a resumed model's history.
+- **The search is the `grep` tool's**, so it skips `.git` and `.kopicode`, binary and oversized files, and does **not** read the repository's ignore files; decision 4's "the repository's ignored paths" is not met. A vendored directory would be searched.
+- **Stop words.** A short list of language keywords (`return`, `self`, `import`, ...) is never a candidate, over and above "never added", so deleting a block of `return` lines does not name `return`.
+- **A diff's two header lines are skipped by position**, not by a `-`/`+` prefix, so a removed line that begins with dashes still counts.
+- **Declared config:** `leftover_note = 0` or `1`, since a declared config is flat integers. The flag is shared by the REPL and `run --print`.
+- **Not built: replay of the note on resume**, per the first bullet.
+
 ## Failure scenarios
 
 | Scenario | Outcome |

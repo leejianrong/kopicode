@@ -47,6 +47,7 @@ func (e *Engine) Run(ctx context.Context, prompt string) (Result, error) {
 	// wherever turn 1 was.
 	e.cancelPhase = ""
 	e.stopRefusals = 0
+	e.leftover = newLeftoverTracker()
 
 	// at is the turn events belong to, which is not e.turn: the loop increments
 	// that only once a turn actually starts, and the user's message — and a
@@ -527,7 +528,16 @@ func (e *Engine) verify(ctx context.Context, turn int) (Stop, error) {
 		// remaining move but to retry the same denied call. One line, not the
 		// full output res.Blocks() sends above — a pass has nothing further to
 		// spend tokens restating every time it recurs.
-		if err := e.observe(res.Summary()); err != nil {
+		summary := res.Summary()
+		// ADR-0039: a name this prompt's edits removed that is still in the tree.
+		note, nerr := e.leftoverNote(ctx, turn)
+		if nerr != nil {
+			return StopHarnessError, nerr
+		}
+		if note != "" {
+			summary += "\n\n" + note
+		}
+		if err := e.observe(summary); err != nil {
 			return StopHarnessError, err
 		}
 	}

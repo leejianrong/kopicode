@@ -93,6 +93,7 @@ func samplePayloads() []journal.Payload {
 			Point: "pre_tool", CallID: "t1c1", Tool: "run_shell", Command: []string{"guard"}, ExitCode: 2,
 			Outcome: "denied", Stdout: journal.InlineText("ok"), Stderr: journal.InlineText("read only"),
 		},
+		journal.LeftoverNoted{Names: []journal.LeftoverName{{Name: "fetch_user", Edits: 3, Locations: []string{"a.py:6"}}}},
 		journal.UnknownPayload{EventType: "SomethingNewer", Raw: json.RawMessage(`{"a":1}`)},
 	}
 }

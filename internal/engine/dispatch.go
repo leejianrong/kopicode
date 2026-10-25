@@ -571,6 +571,9 @@ func (e *Engine) journalEdit(ctx context.Context, turn int, callID string, res t
 		}); err != nil {
 			return err
 		}
+		if e.leftover != nil {
+			e.leftover.observe(res.Diff)
+		}
 		return e.syntaxGate(ctx, turn, res.Path)
 	}
 }

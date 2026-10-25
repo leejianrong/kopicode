@@ -184,6 +184,15 @@ func (l *Loop) Render(e engine.Event) {
 		}
 		l.tag("hook", line)
 
+	case engine.EventLeftoverNoted:
+		// A removed name was found still in the tree (ADR-0039). The model was
+		// shown the note; a person sees the same text.
+		if e.Text != "" {
+			l.tag("leftover", e.Text)
+		} else {
+			l.tag("leftover", "search did not run: "+e.Detail)
+		}
+
 	case engine.EventAskAnswered:
 		if e.Reason == "refused" {
 			l.tag("ask", fmt.Sprintf("unanswered (%s): %s", e.Source, e.Text))

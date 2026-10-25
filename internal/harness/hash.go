@@ -111,6 +111,10 @@ func (c Config) hashWith(anchorVersion string) string {
 	if c.OutputCap != 0 {
 		p.num("output_cap", c.OutputCap)
 	}
+	// Likewise for the leftover-name note (ADR-0039).
+	if c.LeftoverNote {
+		p.bool("leftover_note", true)
+	}
 
 	// Likewise for hooks (ADR-0036 decision 9): a session with none keeps the
 	// hash it had, and one with any is never pooled with one with a different

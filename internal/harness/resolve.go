@@ -56,6 +56,9 @@ type Overrides struct {
 	// means not given; a pointer to zero shows the model every byte. Like the
 	// limits it changes the configuration and so the hash.
 	OutputCap *int
+	// LeftoverNote turns on the leftover-name note (ADR-0039). False means not
+	// given. Like the limits it changes the configuration and so the hash.
+	LeftoverNote bool
 	// UserConfig reads the user-level config.toml (ADR-0024) as the rung between
 	// the repository's file and the built-in default. Only the human-facing front
 	// ends set it: serve, mcp and kopibench resolve from flags, the repository
@@ -115,6 +118,10 @@ func BindLimits(fs *flag.FlagSet, o *Overrides) {
 			return fmt.Errorf("want a count of bytes, 0 (off) or more")
 		}
 		o.OutputCap = &n
+		return nil
+	})
+	fs.BoolFunc("leftover-note", "after a passing verification, tell the model once if a name its own edits removed is still in the tree (off by default)", func(string) error {
+		o.LeftoverNote = true
 		return nil
 	})
 	fs.Func("stall-threshold", "tell the model it is stuck after this many identical calls with the same result, or failed edits to one file, in a row (default 3 in the REPL, 0 = off elsewhere)", func(v string) error {
@@ -422,6 +429,9 @@ func Resolve(dir string, o Overrides) (Selection, error) {
 	case o.Interactive && declaredPath == "":
 		cfg.OutputCap = DefaultOutputCap
 	}
+	if o.LeftoverNote {
+		cfg.LeftoverNote = true
+	}
 
 	cfg.Hooks = user.hooks()
 
@@ -490,6 +500,9 @@ func resolveUnpinned(dir string, o Overrides, file, user FileConfig, namePrefix,
 		cfg.OutputCap = *o.OutputCap
 	case o.Interactive && declaredPath == "":
 		cfg.OutputCap = DefaultOutputCap
+	}
+	if o.LeftoverNote {
+		cfg.LeftoverNote = true
 	}
 	cfg.Hooks = user.hooks()
 	return Selection{

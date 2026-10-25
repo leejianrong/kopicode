@@ -90,6 +90,8 @@ func everyKind() []engine.Event {
 		{Kind: engine.EventAskAnswered, Seq: 30, Detail: "kc-2", Text: "config/retry.toml", Source: "user"},
 		{Kind: engine.EventAskAnswered, Seq: 31, Detail: "kc-2", Text: "no human is present", Source: "policy", Reason: "refused"},
 		{Kind: engine.EventProjectInstructionsLoaded, Seq: 32, Path: "/repo/AGENTS.md", Size: 512},
+		{Kind: engine.EventLeftoverNoted, Seq: 35, Text: "kopicode: `fetch_user` was removed from lines by 2 of your edits and still appears at a.py:6."},
+		{Kind: engine.EventLeftoverNoted, Seq: 36, Detail: "searching for x: the search was abandoned part-way"},
 		{Kind: engine.EventHookRan, Seq: 34, Mode: "pre_tool", Tool: "run_shell", Command: []string{"guard"}, ExitCode: 2, HasExitCode: true, Reason: "denied", Text: "migrations/ is read only"},
 		{Kind: engine.EventHandoffWritten, Seq: 33, Path: "/repo/.kopicode/handoff/s.md", Size: 1024, Reason: "finish the backoff"},
 		// The zero value, which must be reported rather than dropped.
