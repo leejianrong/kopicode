@@ -13,7 +13,7 @@ On `qwen/qwen3-coder-next` scenario s3 (rename `fetch_user` to `get_user` across
 | `main-7` | 10 edits applied; a leftover in `tests/test_accounts.py`; final message says every occurrence is renamed | FAIL |
 | the other 19 | whole rename | OK |
 
-Four of 23. The two earlier KOP-222 notes show the same shape (`baseline-7`, `schema-2`, and four of six `default-regions` runs), on builds that differ from each other. Raw runs: [`2026-10-25-kop-222-translation`](../dogfood-runs/2026-10-25-kop-222-translation/README.md) and the ten `main-*` runs of this card (to be added to the same folder if this is accepted). Nothing tells the model, because the engine does not look at the tree after the model stops reading it.
+Four of 23. The two earlier KOP-222 notes show the same shape (`baseline-7`, `schema-2`, and four of six `default-regions` runs), on builds that differ from each other. Raw runs: [`2026-10-25-kop-222-translation`](../dogfood-runs/2026-10-25-kop-222-translation/README.md) and [`2026-10-25-kop-226-leftover`](../dogfood-runs/2026-10-25-kop-226-leftover/README.md). Nothing tells the model, because the engine does not look at the tree after the model stops reading it.
 
 Rejected before: parsing the task text for identifiers (KOP-226's own "not in scope"), because a free-text task is a guess the harness should not make (the same reasoning as [ADR-0037](0037-protected-paths.md)).
 
@@ -38,7 +38,7 @@ Rejected before: parsing the task text for identifiers (KOP-226's own "not in sc
 | An edit with only one removal of a name | no note (the threshold is two removed-line edits); a single-edit rename is not detected, and `base-1` made exactly one edit before stopping, so it would not be caught by this rule. Stated, not hidden: see below |
 | The tree is large | the walk is bounded by the existing `grep` limits; over them, skipped and journaled |
 
-**What it does not catch.** Four of the four failures above would be seen only if their removed name met the two-edit threshold. `base-1` and `trial-new-0` made one edit; the threshold of two would miss them. Lowering it to one would also fire on every single-line fix that touches an identifier. The ADR keeps two and accepts missing the one-edit stop; the alternative below is the way to reach it.
+**What it does not catch.** `base-1` and `trial-new-0` made one edit, so the two-edit threshold misses them; `main-5` and `main-7` made ten or more and would meet it. Lowering it to one would also fire on every single-line fix that touches an identifier. The ADR keeps two and accepts missing the one-edit stop; the alternative below is the way to reach it.
 
 ## Measurement (before any claim)
 
@@ -51,7 +51,7 @@ Same scenario, model and provider pin as the table above, `run --print`, a same-
 
 ## Alternatives
 
-- **Close as a documented qwen limit.** Cheap and honest: about 17% of runs on this one scenario end with a leftover that the tests do not see, no other scenario shows it, and deepseek's s3 runs were all clean on `check.sh`. The cost is that a fleet on a cheap model ships those silently.
+- **Close as a documented qwen limit.** Cheap and honest: about 17% of runs on this one scenario end with a leftover that the tests do not see, no other scenario shows it, and both deepseek s3 runs were clean on `check.sh`. The cost is that a fleet on a cheap model ships those silently.
 - **A one-line prompt reminder** ("after a rename, search the tree for the old name"). The prompt is at its byte budget, and four earlier sentence-level changes on this model moved nothing (KOP-215, KOP-222).
 - **Block the stop until the search is clean.** Rejected: it changes a stop into a loop and a deliberate keep would need an override.
 - **Let the model grep.** It already can, and these runs show it does not before finishing.
