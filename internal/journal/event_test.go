@@ -135,6 +135,7 @@ func fixtures() map[journal.Type]journal.Payload {
 			AnchorStart:   "a1b2",
 			AnchorEnd:     "c3d4",
 			AnchorVersion: "v1",
+			Translated:    []journal.TranslatedAnchor{{Which: "start", From: "a1b2", To: "e5f6", Line: 2}},
 			Diff:          text("@@ -1,3 +1,3 @@\n-old\n+new\n"),
 		},
 		journal.TypeEditRejected: journal.EditRejected{

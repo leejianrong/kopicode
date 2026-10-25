@@ -129,6 +129,7 @@ var toolEntries = []toolEntry{
 		func(ctx context.Context, e *Engine, turn int, callID string, a *editFileArgs) (toolOutcome, error) {
 			res, err := e.cfg.Tools.EditFile(ctx, tools.EditRequest{
 				Path: a.Path, AnchorStart: a.AnchorStart, AnchorEnd: a.AnchorEnd, NewText: a.NewText,
+				Reply: e.reply,
 			})
 			if jerr := e.journalEdit(ctx, turn, callID, res); jerr != nil {
 				return toolOutcome{}, jerr
@@ -236,6 +237,11 @@ func (e *Engine) dispatch(ctx context.Context, turn int, ext parse.Extraction) (
 	route := ext.Route().String()
 	mutated := false
 
+	// ADR-0038: what this reply's own edits re-anchored. One per reply, so an
+	// anchor from an earlier reply is never translated.
+	e.reply = tools.NewReplyAnchors()
+	defer func() { e.reply = nil }()
+
 	for i, call := range ext.Calls() {
 		// A native call keeps the id the provider issued, because the tool
 		// result has to echo it back. A text-route call has none — the model
@@ -271,6 +277,11 @@ func (e *Engine) dispatch(ctx context.Context, turn int, ext parse.Extraction) (
 			return mutated, err
 		}
 		mutated = mutated || mut
+		if mut && call.Name != tools.ToolEditFile {
+			// A write, delete, shell or fuzzy edit may have changed any file,
+			// so nothing remembered about one can be trusted.
+			e.reply.Reset()
+		}
 
 		// ADR-0012 decision 1 (KAN-989): a call byte-identical in tool name
 		// and raw arguments to the one dispatched immediately before it,
@@ -507,6 +518,7 @@ func (e *Engine) journalEdit(ctx context.Context, turn int, callID string, res t
 			AnchorStart:   res.AnchorStart,
 			AnchorEnd:     res.AnchorEnd,
 			AnchorVersion: res.AnchorVersion,
+			Translated:    translatedAnchors(res.Translated),
 			Diff:          journal.InlineText(res.Diff),
 		}); err != nil {
 			return err
@@ -594,4 +606,18 @@ func modelText(rendered string, err error) string {
 	default:
 		return "the tool produced no output"
 	}
+}
+
+// translatedAnchors is the journal form of the anchors an edit had translated
+// (ADR-0038), nil when none were, so the field is omitted from nearly every
+// EditApplied.
+func translatedAnchors(ts []tools.Translation) []journal.TranslatedAnchor {
+	if len(ts) == 0 {
+		return nil
+	}
+	out := make([]journal.TranslatedAnchor, len(ts))
+	for i, t := range ts {
+		out[i] = journal.TranslatedAnchor{Which: t.Which, From: t.From, To: t.To, Line: t.Line}
+	}
+	return out
 }

@@ -128,7 +128,10 @@ These are the product's structural promises. Hold them.
 - **Events are a compatibility surface from the first commit.** Version them, and make
   the unmarshaller preserve unknown types rather than dropping them.
 - **Edits fail closed.** An `edit_file` whose anchors no longer match the file is
-  rejected, never applied somewhere plausible. Fuzzy matching is a fallback that marks
+  rejected, never applied somewhere plausible. The one exception is an anchor that an
+  earlier edit in the same assistant reply made stale and that is an entry in that
+  reply's own re-anchor map: it is translated to the line's current anchor and
+  journaled (ADR-0038). Fuzzy matching is a fallback that marks
   the session `unattributed`. Never add an edit path that can land in the wrong region
   without emitting a signal.
 - **Shell out, do not link.** Language tooling, git, and diff rendering are all

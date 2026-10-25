@@ -27,7 +27,16 @@ import (
 // version 1's hash by the time this landed, so nothing pools incorrectly
 // either side of the bump — see the PR that introduced this comment for the
 // value the golden hash moved to.
-const PreimageVersion = 2
+//
+// 3, as of KOP-222 (ADR-0038): [EditRulesVersion] entered the preimage, which is
+// new coverage in the sense of version 2's note, so the version moves with it.
+const PreimageVersion = 3
+
+// EditRulesVersion identifies how edit_file treats an anchor, which no prompt,
+// schema or tool description records. 1 is ADR-0038: an anchor that matches no
+// line but was this reply's own earlier anchor for one is translated. It is in
+// the preimage so a build with the rule is never pooled with one without it.
+const EditRulesVersion = 1
 
 // Hash is the harness config hash journal.SessionStarted records: the
 // comparison key ADR-0005's paired method pools on, and the mechanism that makes
@@ -56,6 +65,7 @@ func (c Config) hashWith(anchorVersion string) string {
 	// boundary, and mixing the version in here is what enforces that
 	// mechanically rather than by anyone remembering.
 	p.str("anchor_version", anchorVersion)
+	p.num("edit_rules_version", EditRulesVersion)
 
 	p.str("name", c.Name)
 	p.num("version", c.Version)

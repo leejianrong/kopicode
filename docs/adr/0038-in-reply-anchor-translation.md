@@ -102,6 +102,17 @@ The scenario is `s3` on `qwen/qwen3-coder-next`, the Claude Code driver, six run
 
 One run per cell is a lead, not a result; six a side is the floor, and the schema measurement shows that count alone can look better while `check.sh` fails, so the second and third bullets carry the verdict. `make bench-smoke` stays green with the new hash. Deepseek s1 to s5 are rerun once to show no change where there was no drift.
 
+## Implementation notes
+
+Settled while building it (KOP-222); none changes a decision above.
+
+- `tools.ReplyAnchors` (`internal/tools/replyanchors.go`) holds, per file, the digest of the bytes the last applied edit produced and the remembered lines (`Old`, 0-based line). The engine makes one per `dispatch` and passes it to `edit_file`; `nil` is the rule off.
+- Entries follow a line by position through later edits, and the current anchor is derived from the file when a call is translated, so chains need no composition step.
+- Decision 3's "bytes on disk that differ" is a SHA-256 of the file compared on each call. The engine also empties the map after any mutating call that is not `edit_file`.
+- A refusal is computed again from the anchors the model sent, so its text reads as it would without the rule.
+- The hash input is `harness.EditRulesVersion` (1), and `PreimageVersion` moved to 3 with it.
+- Guards seen red: map scoping (a shared map fails four tests, including the older-read guard), the live-match rule, and the engine's per-reply map.
+
 ## What it changes
 
 - **ADR-0006 decision 1**, the bullet "If any referenced anchor no longer matches the file, the edit is **rejected** with the current anchors for that region. A drifted file can never be silently corrupted." gains an exception, in the ADR's own words if accepted: *the one case that is not rejected is an anchor that an earlier edit in the same assistant reply made stale, which the engine translates to the line's current anchor and journals.* "Anchors are only obtainable from a read" stays true: the engine only ever maps an anchor from a read.

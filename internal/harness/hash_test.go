@@ -117,8 +117,14 @@ func everyConfig(t *testing.T) []harness.Config {
 // prior hash was the KAN-1384 discovery dogfood — a diagnostic `run --print`
 // session documented on its own under docs/dogfood-runs/, not a hash-anchored
 // bench arm — so nothing pools incorrectly across this move either.
+//
+// It moved again on KOP-222 (ADR-0038): edit_rules_version entered the preimage
+// when edit_file began translating an anchor this reply's own edit made stale.
+// That is new preimage coverage, so PreimageVersion moved to 3 with it. Nothing
+// recorded under the prior hash must pool with a new one; that is the point of
+// the field.
 func TestDefaultConfigHashIsStable(t *testing.T) {
-	const want = "68141395bee3c192584f5a7ccf99e6fb6656fbeb41fafabef73ed57f7f9966f7"
+	const want = "72f8d6b729b34ecef202522115e38bbc04100c91cbed8daf48bb68c5ecbb5d0b"
 
 	got := defaultConfig(t).Hash()
 	if got != want {
@@ -143,7 +149,7 @@ func TestDefaultConfigHashIsStable(t *testing.T) {
 // TestNoTwoConfigsShareAHash below is what checks that expectation rather
 // than this test silently passing if they happened to collide.
 func TestMinimaxM2ConfigHashIsStable(t *testing.T) {
-	const want = "54b7e20805e0c56ba0c6f8f6984d8c85b56eb3fb2ac4817c5cdd843a45daa305"
+	const want = "6128dec4e281ab6cfdf57a765e03b23bfd0371abac15e9a95ec597b81d3b17cd"
 
 	got := configByName(t, harness.MinimaxM2ConfigName).Hash()
 	if got != want {
