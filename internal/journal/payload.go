@@ -512,6 +512,11 @@ func (SyntaxGateRun) Type() Type { return TypeSyntaxGateRun }
 // PermissionRequested records that the engine decided an action needs consent.
 // The engine decides that asking is required; how it is asked belongs to the
 // surface, and nothing about the prompt's presentation is recorded here.
+//
+// It is written when the request is raised, before the policy asks anyone, so
+// one with no PermissionDecided after it in a running session is a question that
+// is open now (KOP-228). The pair is written together only for a grant the
+// session already held.
 type PermissionRequested struct {
 	RequestID string `json:"request_id"`
 	// Kind is what triggered the policy: "run_shell", "write_outside_root".

@@ -264,7 +264,7 @@ kopicode knows which journal is its own; it is refused, with nothing written, if
 directory name (letters, digits, `.`, `_`, `-`) or already has a record. `kopicode sessions -report <id>` digests one session's journal (how it ended, turns, tokens, cost,
 verification, edits and rejections, tool-call routes, syntax gate, consent, the final message), each line with
 the `seq` it came from; `-json` for a script. Every session is a journal under `.kopicode/sessions/`; everything printed is
-derived from it.
+derived from it. A program that reads a journal from disk starts at [`docs/journal-on-disk.md`](docs/journal-on-disk.md).
 
 ## Documentation
 
