@@ -1,6 +1,6 @@
 # ADR-0039: Tell the model, after verification, that a name its edits removed is still in the tree
 
-*Proposed* 2026-10-25, for the owner to accept or reject. Nothing is built. KOP-226. Builds on [ADR-0034](0034-reminders-todo-and-turn-warnings.md) (wire-only notes appended to what the model is shown next) and on forced verification (`Config.Verification`, `internal/engine/loop.go`). It touches no boundary in `AGENTS.md`; it does change what the model is told, so it is a decision.
+*Accepted* 2026-10-25 by the owner, to be built and measured as decided below. KOP-226. Builds on [ADR-0034](0034-reminders-todo-and-turn-warnings.md) (wire-only notes appended to what the model is shown next) and on forced verification (`Config.Verification`, `internal/engine/loop.go`). It touches no boundary in `AGENTS.md`; it does change what the model is told, so it is a decision.
 
 ## Context
 
