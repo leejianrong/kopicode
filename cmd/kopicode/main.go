@@ -203,6 +203,7 @@ func interactive(args []string, _, stderr io.Writer) int {
 	// one; this flag stays a single string because resuming is one fact
 	// about which session, not several.
 	resume := fs.String("resume", "", "resume an existing session by id, instead of starting a new one")
+	sessionID := bindSessionIDFlag(fs)
 	// --fork's argument names both the source session and the turn to
 	// branch from in one string rather than two flags
 	// (--fork-from/--fork-turn), because a caller supplying one and
@@ -284,8 +285,14 @@ func interactive(args []string, _, stderr io.Writer) int {
 		say(stderr, "kopicode: %v\n", perr)
 		return exitUsage
 	}
+	newID, ierr := sessionIDOption(*sessionID, dir, *resume, *fork)
+	if ierr != nil {
+		say(stderr, "kopicode: %v\n", ierr)
+		return exitUsage
+	}
 	opts := engine.Options{
-		Dir: dir, Selection: selection, StartAuto: startMode == repl.ModeAuto,
+		SessionID: newID,
+		Dir:       dir, Selection: selection, StartAuto: startMode == repl.ModeAuto,
 		AutoNeverAllow:   selection.Settings.AutoNeverAllow,
 		UserInstructions: engine.UserAgentsPath(),
 		ProtectedPaths:   protected,
