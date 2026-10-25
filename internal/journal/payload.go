@@ -871,6 +871,31 @@ type HookRan struct {
 
 func (HookRan) Type() Type { return TypeHookRan }
 
+// LeftoverNoted records the note shown to the model after a passing verification:
+// names its own edits removed that are still in the tree (ADR-0039). The tree is
+// not in the journal, so what was found is, and a reader sees what the model was
+// told. Written once per name per prompt, and only when a name was found or the
+// search could not run.
+type LeftoverNoted struct {
+	// Names are the removed names still present, most-removed first, at most
+	// three.
+	Names []LeftoverName `json:"names,omitempty"`
+	// Skipped says why the search did not run, when it did not. A search that
+	// could not run is never read as "clean".
+	Skipped string `json:"skipped,omitempty"`
+}
+
+func (LeftoverNoted) Type() Type { return TypeLeftoverNoted }
+
+// LeftoverName is one removed name and where it still is.
+type LeftoverName struct {
+	Name string `json:"name"`
+	// Edits is how many applied edits removed it from a line.
+	Edits int `json:"edits"`
+	// Locations are `file:line`, at most five, in the order the search found them.
+	Locations []string `json:"locations"`
+}
+
 // AskRequested records that the model paused the turn to ask the human a
 // question (docs/adr/0009-ask-tool-contract.md decision 3).
 //

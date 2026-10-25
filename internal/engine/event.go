@@ -53,6 +53,9 @@ const (
 	EventHandoffWritten
 	// EventHookRan is one run of a user hook command (ADR-0036).
 	EventHookRan
+	// EventLeftoverNoted is the note that a removed name is still in the tree
+	// (ADR-0039).
+	EventLeftoverNoted
 
 	// EventUnknown is an event this build has no typed payload for, preserved
 	// by the journal's compatibility promise and passed through here rather
@@ -102,6 +105,7 @@ var eventKindText = map[EventKind]string{
 	EventProjectInstructionsLoaded: "project_instructions_loaded",
 	EventHandoffWritten:            "handoff_written",
 	EventHookRan:                   "hook_ran",
+	EventLeftoverNoted:             "leftover_noted",
 	EventUnknown:                   "unknown",
 	EventDelta:                     "delta",
 }
@@ -444,6 +448,13 @@ func eventOf(ev journal.Event) Event {
 		base.Detail = p.Detail
 		base.Text = p.Stderr.Inline
 		base.Size = p.Stdout.Size + p.Stderr.Size
+
+	case journal.LeftoverNoted:
+		// Text is what the model was shown, built by the same function; Detail is
+		// why the search did not run, when it did not.
+		base.Kind = EventLeftoverNoted
+		base.Text = leftoverText(p.Names)
+		base.Detail = p.Skipped
 
 	case journal.UnknownPayload:
 		// The journal's compatibility promise, carried one layer further out. A

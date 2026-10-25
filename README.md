@@ -187,6 +187,11 @@ A `run_shell` or `grep` result over 32 KiB is shown to the model as its start an
 was left out; the journal keeps all of it ([ADR-0033](docs/adr/0033-tool-output-cap.md)). `--output-cap N` changes the
 limit and `0` shows everything.
 
+`--leftover-note` (off by default; `leftover_note = 1` in a declared harness config) adds one more thing after a passing
+verification: if an identifier that two or more of the model's own edits removed from a line, and none added, still appears in
+the tree, the model is told once where. It exists for a rename that stops one place short while the tests still pass. It never
+blocks a stop, and each time it fires the journal holds a `LeftoverNoted` event ([ADR-0039](docs/adr/0039-leftover-name-note.md)).
+
 A session is bounded: each prompt gets at most **20 model calls** (the turn cap) and the
 session at most 2M tokens. A task that needs more ends with `stop: max_turns` rather than
 running on; the work done so far stays in the tree, and replying continues it with a fresh

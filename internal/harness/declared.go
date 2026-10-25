@@ -56,6 +56,8 @@ type declaredConfig struct {
 	tokenBudget  *int
 	repairBudget *int
 	maxTokens    *int
+	// leftoverNote is 0 or 1 (ADR-0039); a flat file has no booleans.
+	leftoverNote *int
 }
 
 // LoadDeclaredConfig reads the declared-config file at path and resolves it into
@@ -132,10 +134,11 @@ func parseDeclaredConfig(path, content string) (declaredConfig, error) {
 			"token_budget":  &dc.tokenBudget,
 			"repair_budget": &dc.repairBudget,
 			"max_tokens":    &dc.maxTokens,
+			"leftover_note": &dc.leftoverNote,
 		}[key]
 		if !ok {
 			return declaredConfig{}, usagef("%s:%d: %q is not a field a declared harness config can "+
-				"override; the tunable keys are base, max_turns, token_budget, repair_budget, max_tokens",
+				"override; the tunable keys are base, max_turns, token_budget, repair_budget, max_tokens, leftover_note",
 				path, lineNo, key)
 		}
 
@@ -192,6 +195,12 @@ func resolveDeclared(dc declaredConfig) (Config, error) {
 	}
 	if dc.maxTokens != nil {
 		cfg.Sampling.MaxTokens = *dc.maxTokens
+	}
+	if dc.leftoverNote != nil {
+		if *dc.leftoverNote != 0 && *dc.leftoverNote != 1 {
+			return Config{}, usagef("%s: leftover_note is %d; it is 0 (off) or 1 (on)", dc.path, *dc.leftoverNote)
+		}
+		cfg.LeftoverNote = *dc.leftoverNote == 1
 	}
 
 	// Validate the resolved value against the engine's own bounds. A built-in

@@ -86,6 +86,10 @@ const (
 
 	// TypeHookRan is ADR-0036's addition: one run of a user hook command.
 	TypeHookRan Type = "HookRan"
+
+	// TypeLeftoverNoted is ADR-0039's addition: the note that a name the model's
+	// own edits removed is still in the tree.
+	TypeLeftoverNoted Type = "LeftoverNoted"
 )
 
 // Payload is one event's typed body.
@@ -264,6 +268,8 @@ var registry = map[Type]func([]byte) (Payload, error){
 	TypeHandoffWritten: decodeInto[HandoffWritten],
 
 	TypeHookRan: decodeInto[HookRan],
+
+	TypeLeftoverNoted: decodeInto[LeftoverNoted],
 }
 
 // KnownTypes lists every discriminator this build can decode into a typed

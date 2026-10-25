@@ -230,6 +230,12 @@ func fixtures() map[journal.Type]journal.Payload {
 			Stdout:     text("checked 1 command"),
 			Stderr:     text("migrations/ is read only"),
 		},
+		journal.TypeLeftoverNoted: journal.LeftoverNoted{
+			Names: []journal.LeftoverName{
+				{Name: "fetch_user", Edits: 7, Locations: []string{"accounts/greeting.py:6", "tests/test_accounts.py:12"}},
+			},
+			Skipped: "searching for old_name: the search was abandoned part-way",
+		},
 		journal.TypeHandoffWritten: journal.HandoffWritten{
 			Goal:     "finish the retry backoff and make the suite pass",
 			Document: text("## Goal\nFinish the retry backoff."),

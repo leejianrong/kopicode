@@ -330,6 +330,10 @@ type Engine struct {
 	// succeeds, or a different call in between, never collapses.
 	lastDispatch dispatchOutcome
 
+	// leftover is this prompt's record of the names its applied edits removed and
+	// added (ADR-0039). Remade at the start of each prompt.
+	leftover *leftoverTracker
+
 	// reply is the current reply's re-anchor map (ADR-0038), set for the span
 	// of one dispatch and nil outside it.
 	reply *tools.ReplyAnchors
