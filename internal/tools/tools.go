@@ -185,6 +185,9 @@ type Set struct {
 	// environment, nothing else, and a command can still reach outside it by
 	// naming an absolute path. See childEnv in shell.go.
 	Home string
+
+	// ambiguity is what the last read of each file showed repeated (KOP-225).
+	ambiguity ambiguityLedger
 }
 
 // NewSet opens dir as a repository root and returns the tools bound to it. The

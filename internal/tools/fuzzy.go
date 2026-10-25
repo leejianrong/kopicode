@@ -233,6 +233,7 @@ func (s *Set) EditFileFuzzy(ctx context.Context, req FuzzyEditRequest) (EditResu
 	start, end := m.StartLine-1, m.EndLine-1
 	repl := anchor.Split([]byte(req.After))
 	next := apply(src, spans, start, end, repl)
+	s.ambiguity.forget(p.Slash())
 	if err := s.Root.dir.WriteFile(p.Rel, next, defaultFileMode); err != nil {
 		return EditResult{}, s.editErr(ToolEditFileFuzzy, req.Path, err)
 	}
