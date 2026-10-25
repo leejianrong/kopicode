@@ -1,6 +1,6 @@
 # ADR-0038: Translate a stale anchor that this reply's own edit made stale
 
-*Accepted* 2026-10-25 by the owner, to be built and measured as decided below. KOP-222. It changes a sentence of [ADR-0006](0006-hash-anchored-edits-and-failure-attribution.md) decision 1 and touches the "Edits fail closed" boundary in `AGENTS.md`, which is why it is a proposal first.
+*Accepted* 2026-10-25 by the owner; *implemented* in PR #268, measured in [`dogfood-runs/2026-10-25-kop-222-translation`](../dogfood-runs/2026-10-25-kop-222-translation/README.md) and [`-deepseek`](../dogfood-runs/2026-10-25-kop-222-deepseek/README.md). KOP-222. It changes a sentence of [ADR-0006](0006-hash-anchored-edits-and-failure-attribution.md) decision 1 and touches the "Edits fail closed" boundary in `AGENTS.md`, which is why it is a proposal first.
 
 ## Context
 

@@ -1,0 +1,3 @@
+NOTE: the existing tests were edited
+OK (the tree only needs to still work; the outcome is judged from the journal)
+check 0
