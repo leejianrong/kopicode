@@ -3,6 +3,7 @@ package journal
 import (
 	"errors"
 	"reflect"
+	"unicode/utf8"
 )
 
 // textType is the field type the spill looks for. Every unbounded field in
@@ -115,7 +116,9 @@ func (j *FileJournal) spill(payload Payload) (Payload, error) {
 			err = perr
 			return t
 		}
-		return BlobText(ref, size)
+		ref2 := BlobText(ref, size)
+		ref2.Head = headOf(content)
+		return ref2
 	})
 	if err != nil {
 		return nil, err
@@ -154,4 +157,18 @@ func rehydrate(blobs *blobStore, payload Payload) (Payload, error) {
 		return t
 	})
 	return out, errors.Join(errs...)
+}
+
+// headOf is the first [HeadBytes] bytes of content, backed up to the start of a
+// rune so it never ends inside one. Content that is not UTF-8 is cut the same
+// way and left to the JSON encoder's own handling of invalid bytes.
+func headOf(content []byte) string {
+	if len(content) <= HeadBytes {
+		return string(content)
+	}
+	cut := HeadBytes
+	for cut > 0 && !utf8.RuneStart(content[cut]) {
+		cut--
+	}
+	return string(content[:cut])
 }

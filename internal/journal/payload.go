@@ -30,7 +30,18 @@ type Text struct {
 	Blob string `json:"blob,omitempty"`
 	// Size is the length of the full value in bytes, spilled or not.
 	Size int64 `json:"size"`
+	// Head is the first [HeadBytes] bytes of a spilled value, cut at a rune
+	// boundary, so a reader can show something without opening the blob. It is
+	// set only beside Blob, and its presence is the marker that it is a head
+	// and not the whole value: the blob holds all of it. Taken from the content
+	// after secrets were scrubbed, the same bytes the blob holds. A value that
+	// spilled before this field existed has none, and a reader must not read
+	// its absence as "empty".
+	Head string `json:"head,omitempty"`
 }
+
+// HeadBytes is how much of a spilled value [Text.Head] carries.
+const HeadBytes = 2 << 10
 
 // InlineText holds s in the event itself.
 func InlineText(s string) Text { return Text{Inline: s, Size: int64(len(s))} }
