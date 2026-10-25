@@ -401,9 +401,29 @@ func (e *Engine) runTool(ctx context.Context, turn int, callID string, call pars
 	// The engine decides *that* consent is required and what the answer means.
 	// How it is asked belongs to the policy the surface supplied, and nothing
 	// about the prompt's presentation reaches this package or the record.
-	outcome, perr := e.cfg.Permissions.Check(ctx, act)
-	if outcome.Required {
-		if err := e.journalPermission(ctx, turn, outcome); err != nil {
+	//
+	// KOP-228: the request is journaled when it is raised, before the policy asks,
+	// so a person's open dialog is on the record while they decide. raisedID is
+	// set once that happened, and the answer then closes it whatever it was.
+	var raisedID string
+	var raisedErr error
+	outcome, perr := e.cfg.Permissions.CheckRaised(ctx, act, func(req permission.Request) error {
+		raisedID = req.ID
+		raisedErr = e.journalPermissionRequested(ctx, turn, req)
+		return raisedErr
+	})
+	if raisedErr != nil {
+		return "", "", false, false, false, raisedErr
+	}
+	switch {
+	case outcome.Required:
+		if err := e.journalPermission(ctx, turn, outcome, raisedID != ""); err != nil {
+			return "", "", false, false, false, err
+		}
+	case raisedID != "":
+		// Raised and then no answer came back at all (a policy that could not
+		// decide, or a cancellation): the request must not stay open on the record.
+		if err := e.journalPermissionUnanswered(ctx, turn, raisedID, perr); err != nil {
 			return "", "", false, false, false, err
 		}
 	}
@@ -462,16 +482,27 @@ func (e *Engine) journalToolResult(
 	return err
 }
 
-// journalPermission records that consent was required and how it was answered.
-func (e *Engine) journalPermission(ctx context.Context, turn int, out permission.Outcome) error {
-	if _, err := e.append(ctx, turn, journal.PermissionRequested{
-		RequestID: out.Request.ID,
-		Kind:      out.Request.Kind.String(),
-		Tool:      out.Request.Action.Tool,
-		Detail:    journal.InlineText(out.Request.Detail),
-		Reason:    out.Request.Reason,
-	}); err != nil {
-		return err
+// journalPermissionRequested records that consent was asked for, at the moment
+// the gate raised it (KOP-228).
+func (e *Engine) journalPermissionRequested(ctx context.Context, turn int, req permission.Request) error {
+	_, err := e.append(ctx, turn, journal.PermissionRequested{
+		RequestID: req.ID,
+		Kind:      req.Kind.String(),
+		Tool:      req.Action.Tool,
+		Detail:    journal.InlineText(req.Detail),
+		Reason:    req.Reason,
+	})
+	return err
+}
+
+// journalPermission records how consent was answered, and the request itself
+// first when it was not already journaled as it was raised (a grant the session
+// already held never raises one).
+func (e *Engine) journalPermission(ctx context.Context, turn int, out permission.Outcome, requested bool) error {
+	if !requested {
+		if err := e.journalPermissionRequested(ctx, turn, out.Request); err != nil {
+			return err
+		}
 	}
 	_, err := e.append(ctx, turn, journal.PermissionDecided{
 		RequestID: out.Request.ID,
@@ -479,6 +510,23 @@ func (e *Engine) journalPermission(ctx context.Context, turn int, out permission
 		Source:    out.Decision.Source.String(),
 		Reason:    out.Decision.Reason,
 		Note:      out.Decision.Note,
+	})
+	return err
+}
+
+// journalPermissionUnanswered closes a request the gate raised and then could
+// not get an answer for. It is a denial by the policy, with the reason, because
+// nothing proceeded.
+func (e *Engine) journalPermissionUnanswered(ctx context.Context, turn int, id string, cause error) error {
+	reason := "no answer"
+	if cause != nil {
+		reason = "no answer: " + cause.Error()
+	}
+	_, err := e.append(ctx, turn, journal.PermissionDecided{
+		RequestID: id,
+		Decision:  permission.VerdictDeny.String(),
+		Source:    permission.SourcePolicy.String(),
+		Reason:    reason,
 	})
 	return err
 }

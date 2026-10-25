@@ -292,10 +292,21 @@ type recordingPolicy struct {
 	source   permission.Source
 	reason   string
 	requests []permission.Request
+	// during runs inside Decide, where a real policy would be waiting on a
+	// person, so a test can look at the journal at that moment (KOP-228).
+	during func(permission.Request)
+	// err, when set, is returned instead of an answer.
+	err error
 }
 
 func (p *recordingPolicy) Decide(_ context.Context, req permission.Request) (permission.Decision, error) {
 	p.requests = append(p.requests, req)
+	if p.during != nil {
+		p.during(req)
+	}
+	if p.err != nil {
+		return permission.Decision{}, p.err
+	}
 	src := p.source
 	if src == permission.SourceUnspecified {
 		src = permission.SourceUser

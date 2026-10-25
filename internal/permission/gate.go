@@ -107,6 +107,17 @@ func (g *Gate) Root() string { return g.root }
 // policy asks a human. A cancelled context denies rather than proceeding: a
 // turn the user just interrupted must not be the turn that runs the command.
 func (g *Gate) Check(ctx context.Context, a Action) (Outcome, error) {
+	return g.CheckRaised(ctx, a, nil)
+}
+
+// CheckRaised is [Gate.Check] that calls raised with the consent request at the
+// moment it is raised, before the policy is asked (KOP-228). The policy may
+// block on a person for as long as they take, and a caller that records the
+// request only afterwards has nothing to show while it waits. raised is not
+// called when no consent is needed or a session grant already answers. An error
+// from raised denies the action: the request could not be recorded, so nothing
+// proceeds on it. A nil raised is Check.
+func (g *Gate) CheckRaised(ctx context.Context, a Action, raised func(Request) error) (Outcome, error) {
 	if err := ctx.Err(); err != nil {
 		return Outcome{}, denied(err, "%s: cancelled before consent", a.Tool)
 	}
@@ -132,6 +143,11 @@ func (g *Gate) Check(ctx context.Context, a Action) (Outcome, error) {
 		}, nil
 	}
 
+	if raised != nil {
+		if err := raised(req); err != nil {
+			return Outcome{}, denied(err, "%s: the consent request could not be recorded", a.Tool)
+		}
+	}
 	dec, err := g.policy.Decide(ctx, req)
 	if err != nil {
 		return Outcome{}, denied(err, "%s: policy could not decide", a.Tool)
