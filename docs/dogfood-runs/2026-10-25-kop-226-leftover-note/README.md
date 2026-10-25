@@ -82,4 +82,4 @@ False-positive runs, `--leftover-note` on:
 
 ## Not checked
 
-One model and scenario for the effect, one run per cell for the false-positive check, no driver, no rubric. Cost of the 46 runs: about $0.2. A second note per name, a lower threshold, and a default-on arm were not tried.
+One model and scenario for the effect, one run per cell for the false-positive check, no driver, no rubric. Cost of the 46 runs: $0.25 from the journals' reported cost. A second note per name, a lower threshold, and a default-on arm were not tried.
