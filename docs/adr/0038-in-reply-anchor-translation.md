@@ -1,6 +1,6 @@
 # ADR-0038: Translate a stale anchor that this reply's own edit made stale
 
-*Proposed* 2026-10-25, for the owner to accept or reject. Nothing is built. KOP-222. It changes a sentence of [ADR-0006](0006-hash-anchored-edits-and-failure-attribution.md) decision 1 and touches the "Edits fail closed" boundary in `AGENTS.md`, which is why it is a proposal first.
+*Accepted* 2026-10-25 by the owner, to be built and measured as decided below. KOP-222. It changes a sentence of [ADR-0006](0006-hash-anchored-edits-and-failure-attribution.md) decision 1 and touches the "Edits fail closed" boundary in `AGENTS.md`, which is why it is a proposal first.
 
 ## Context
 
