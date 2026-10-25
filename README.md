@@ -259,7 +259,9 @@ mock provider with `make bench-smoke`.
 | skills: reusable task instructions | `<name>/SKILL.md` under `.agents/skills`, `.kopicode/skills`, `~/.config/kopicode/skills`, or `skills_paths` in the user config; `~/.claude/skills` and `~/.agents/skills` are read as fallbacks | the convention Claude Code, Codex and Cursor read. `/skills` lists them, `/<name> [task]` runs one, Tab completes the name. A repository's skill beats a personal one of the same name. The model is also shown the ones inside the project once per session, in `run --print`, `serve` and `mcp` as well (feature `skills.catalogue`; only the repository's own, never your personal ones). `/skills` and `/<name>` are interactive `kopicode` only ([ADR-0014](docs/adr/0014-skills-mechanism.md), [ADR-0025](docs/adr/0025-skills-discovery-and-commands.md)) |
 
 `kopicode sessions` lists past sessions; `--resume <id>` and `--fork <id>:<turn>` continue or
-branch one. `kopicode sessions -report <id>` digests one session's journal (how it ended, turns, tokens, cost,
+branch one. `--session-id <id>` (REPL and `run --print`) names a new session, so a program that launches
+kopicode knows which journal is its own; it is refused, with nothing written, if the id is not a safe
+directory name (letters, digits, `.`, `_`, `-`) or already has a record. `kopicode sessions -report <id>` digests one session's journal (how it ended, turns, tokens, cost,
 verification, edits and rejections, tool-call routes, syntax gate, consent, the final message), each line with
 the `seq` it came from; `-json` for a script. Every session is a journal under `.kopicode/sessions/`; everything printed is
 derived from it.

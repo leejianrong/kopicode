@@ -143,6 +143,7 @@ func runPrint(args []string, stdout, stderr io.Writer) int {
 	// not touch the working tree (see Options.Resume's own doc comment) —
 	// exactly the property a headless surface with nobody watching needs.
 	resume := fs.String("resume", "", "resume an existing session by id, instead of starting a new one")
+	sessionID := bindSessionIDFlag(fs)
 	// --fork is refused outright rather than wired up. Forking wipes every
 	// file directly under the working tree except .git and .kopicode
 	// before restoring the source session's tree — see
@@ -241,7 +242,12 @@ func runPrint(args []string, stdout, stderr io.Writer) int {
 		say(stderr, "kopicode: %v\n", perr)
 		return exitUsage
 	}
-	opts := engine.Options{Dir: dir, Selection: selection, Skills: engine.RepoSkills(dir), ProtectedPaths: protected}
+	newID, ierr := sessionIDOption(*sessionID, dir, *resume, *fork)
+	if ierr != nil {
+		say(stderr, "kopicode: %v\n", ierr)
+		return exitUsage
+	}
+	opts := engine.Options{Dir: dir, Selection: selection, Skills: engine.RepoSkills(dir), ProtectedPaths: protected, SessionID: newID}
 	if *resume != "" {
 		opts.SessionID = *resume
 		opts.Resume = true

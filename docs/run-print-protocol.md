@@ -124,6 +124,15 @@ A `verification_failed` stop's `text` is a one-line summary (`` `go test ./...` 
 ``); the full command output is on the earlier `verification` event in the same stream,
 not repeated here.
 
+## Naming the session
+
+`--session-id <id>` makes the new session's id the one you give, so the record is
+`.kopicode/sessions/<id>/` and the stream header's `record` says so. It is for a caller that
+needs to find its own journal without guessing from timestamps. An id is 1 to 128 letters,
+digits, `.`, `_` or `-`, starting with a letter or digit. A bad one, or one that already has a
+record, is a usage error (exit 2) before anything is opened or written. It cannot be combined
+with `--resume`; `run` refuses `--fork` anyway.
+
 ## Hooks are not run here
 
 The user-config hooks of [ADR-0036](adr/0036-minimal-hooks.md) (`pre_tool_hook`, `post_tool_hook`,
