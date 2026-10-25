@@ -25,13 +25,18 @@ newline is a write in flight; do not parse it.
 A string field over 64 KiB is not clipped. The line holds a reference in place of the text:
 
 ```json
-{"output": {"blob": "9f2c...e1", "size": 183422}}
+{"output": {"blob": "9f2c...e1", "size": 183422, "head": "first 2 KiB of the text..."}}
 ```
 
 where small values are `{"inline": "...", "size": 12}`. The bytes of a spilled value are the file `<root>/.kopicode/blobs/<blob>`, where `<blob>` is the
 64 lowercase hex characters in the reference. The name is the sha-256 of the stored bytes, so a reader can verify it. Secrets are scrubbed
 before a value is stored, so the blob is what the line would have held. Blobs are written once and never changed or deleted by kopicode.
 Never join a `blob` string to a path without checking it is 64 hex characters.
+
+**`head` is a head, not the value.** Beside a `blob`, `head` is the first 2,048 bytes of the stored text, backed up to the start of a character so it never ends
+inside one. It is there so a reader can show something without opening the file; its presence is the mark that what it shows is shortened, and `size` is the length
+of the whole. A value that is not spilled has no `head` and its `inline` is complete. A value spilled by a kopicode older than this field has a `blob` and no
+`head`: that means "not recorded", not "empty".
 
 ## Is a question open?
 
