@@ -170,6 +170,7 @@ func (s *Set) WriteFile(ctx context.Context, req WriteRequest) (WriteResult, err
 	}
 
 	content := []byte(req.Content)
+	s.ambiguity.forget(p.Slash())
 	if err := s.Root.dir.WriteFile(p.Rel, content, defaultFileMode); err != nil {
 		return WriteResult{}, s.writeErr(req.Path, p, err)
 	}

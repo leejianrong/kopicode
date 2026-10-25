@@ -227,6 +227,12 @@ results either side of a bump may not be pooled or paired.
 - If the slice-1 model cannot reliably copy anchors back, the fuzzy fallback carries
   more traffic than intended and the `unattributed` bucket grows. That outcome is
   visible by construction, which is the point.
+- An anchor that named more than one line when the model last read the file is refused
+  as ambiguous even after an edit has left it matching only one (KOP-225). Without that,
+  an edit that re-anchored one of two repeated lines would let the old anchor apply to the
+  other with no signal. The record is the tool set's memory of the last read of each file:
+  a fresh read, or a write to the file, clears it, and a session resumed in a new process
+  starts with none.
 - The hole is **bounded and visible, not closed.** A syntactically valid edit into a
   region the model did read, referencing correct anchors, can still be semantically
   wrong. No mechanism here catches that; the `unattributed` bucket and a sampled review

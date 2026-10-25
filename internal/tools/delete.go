@@ -99,6 +99,7 @@ func (s *Set) DeleteFile(ctx context.Context, req DeleteRequest) (DeleteResult, 
 		return cancelledDelete(req.Path), cancelledErr(ToolDeleteFile, req.Path, err, "nothing was deleted")
 	}
 
+	s.ambiguity.forget(p.Slash())
 	if err := s.Root.dir.Remove(p.Rel); err != nil {
 		return DeleteResult{}, s.deleteErr(req.Path, err)
 	}

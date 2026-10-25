@@ -122,6 +122,7 @@ func (s *Set) ReadFile(ctx context.Context, req ReadRequest) (string, error) {
 	}
 
 	rendered := anchor.Render(lines)
+	s.ambiguity.noteRead(p.Slash(), anchor.Derive(lines))
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s: %s, %d bytes\n", p.Slash(), plural(len(lines), "line", "lines"), len(src))

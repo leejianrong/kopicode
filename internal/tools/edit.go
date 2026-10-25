@@ -324,6 +324,10 @@ func (s *Set) EditFile(ctx context.Context, req EditRequest) (EditResult, error)
 	anchors := anchor.Derive(lines)
 
 	treq, translated := req.Reply.translateAnchors(p.Slash(), src, lines, anchors, req)
+	if rej := s.ambiguousSinceRead(req, treq, p.Slash(), lines, anchors); rej != nil {
+		res := rejectedEdit(req, p, rej)
+		return res, taskErr(ToolEditFile, req.Path, ErrEditRejected, rej.Summary)
+	}
 	start, end, rej, err := s.locate(treq, lines, anchors)
 	if err != nil {
 		return EditResult{}, err
@@ -372,6 +376,9 @@ func (s *Set) EditFile(ctx context.Context, req EditRequest) (EditResult, error)
 		Translated:    translated,
 	}
 	req.Reply.record(p.Slash(), anchors, start, end, len(repl), next, res.Reanchored)
+	for _, l := range res.Reanchored {
+		s.ambiguity.release(p.Slash(), l.Now.Anchor)
+	}
 	res.Output = res.render()
 	return res, nil
 }
@@ -504,6 +511,9 @@ func (s *Set) editErr(tool, given string, err error) error {
 // [EditRejection].
 type anchorFault struct {
 	reason RejectReason
+	// sinceRead marks an ambiguous refusal for an anchor that now names one line
+	// but named several when the model read the file (KOP-225).
+	sinceRead bool
 	// lines are the 1-based candidates of an ambiguous anchor.
 	lines []int
 }
@@ -645,6 +655,11 @@ func rejectSummary(field, arg string, fault *anchorFault, total int) string {
 		}
 		return fmt.Sprintf("%s %q matches no line in the file as it is now", field, arg)
 	case RejectAmbiguousAnchor:
+		if fault.sinceRead {
+			return fmt.Sprintf("%s %q matched more than one line when you read the file, and an edit since has "+
+				"changed that, so it now matches line %s alone: it was never an anchor for a single line. "+
+				"Read the file again and anchor on a unique line", field, arg, joinInts(fault.lines))
+		}
 		return fmt.Sprintf("%s %q matches %d lines (%s), so it does not name a region",
 			field, arg, len(fault.lines), joinInts(fault.lines))
 	case RejectAnchorOrder:
@@ -1012,4 +1027,27 @@ func editToolName(mode string) string {
 		return ToolEditFileFuzzy
 	}
 	return ToolEditFile
+}
+
+// ambiguousSinceRead refuses an anchor that named more than one line when the
+// model last read the file and names exactly one now (KOP-225). Only anchors the
+// model sent count: one [ReplyAnchors] translated is the tool's own current
+// anchor, and one that still names several lines is refused by the ordinary
+// ambiguity rule.
+func (s *Set) ambiguousSinceRead(req, sent EditRequest, path string, lines, anchors []string) *EditRejection {
+	for _, f := range [...]struct{ field, was, now string }{
+		{"anchor_start", req.AnchorStart, sent.AnchorStart},
+		{"anchor_end", req.AnchorEnd, sent.AnchorEnd},
+	} {
+		if f.was != f.now || !s.ambiguity.wasAmbiguous(path, f.was) {
+			continue
+		}
+		i, err := anchor.Resolve(anchors, f.was)
+		if err != nil {
+			continue // drift or ambiguity: refused by the ordinary rules
+		}
+		fault := &anchorFault{reason: RejectAmbiguousAnchor, lines: []int{i + 1}, sinceRead: true}
+		return s.reject(req, lines, anchors, f.field, f.was, fault, nil)
+	}
+	return nil
 }
