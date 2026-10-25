@@ -448,8 +448,24 @@ type EditApplied struct {
 	// contract: changing it invalidates recorded provider traffic and starts a
 	// new experiment series.
 	AnchorVersion string `json:"anchor_version"`
+	// Translated names each anchor the model sent that matched no line but was
+	// this reply's own earlier anchor for one, and the current anchor used
+	// instead (ADR-0038). AnchorStart and AnchorEnd above stay what the model
+	// sent. Omitted when nothing was translated, and a translation does not
+	// make the mode fuzzy: the pairing is computed, not matched by similarity.
+	Translated []TranslatedAnchor `json:"translated_anchors,omitempty"`
 	// Diff is the unified diff actually applied.
 	Diff Text `json:"diff"`
+}
+
+// TranslatedAnchor is one anchor an edit had translated (ADR-0038).
+type TranslatedAnchor struct {
+	// Which is "start" or "end".
+	Which string `json:"which"`
+	// From is the anchor sent, To the line's current one, Line the 1-based line.
+	From string `json:"from"`
+	To   string `json:"to"`
+	Line int    `json:"line"`
 }
 
 func (EditApplied) Type() Type { return TypeEditApplied }

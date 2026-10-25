@@ -49,6 +49,9 @@ string-not-found failure modes instead of tolerating them, and â€” decisively â€
   requires the model to reproduce the existing content.
 - If any referenced anchor no longer matches the file, the edit is **rejected** with the
   current anchors for that region. A drifted file can never be silently corrupted.
+  The one case that is not rejected is an anchor that an earlier edit in the same
+  assistant reply made stale, which the engine translates to the line's current anchor
+  and journals ([ADR-0038](0038-in-reply-anchor-translation.md)).
 - Anchors are only obtainable from a read, so an edit into a region the model was never
   shown is structurally impossible.
 

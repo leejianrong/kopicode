@@ -102,6 +102,10 @@ type EditRequest struct {
 	AnchorStart string
 	AnchorEnd   string
 
+	// Reply is the reply-scoped map of what earlier edits in this assistant
+	// reply re-anchored (ADR-0038). Nil turns the translation off.
+	Reply *ReplyAnchors
+
 	// NewText is what the region becomes. It is read the way [anchor.Split]
 	// reads a file, so a trailing newline is a terminator rather than an extra
 	// blank line, and its line terminators are normalised to the file's own —
@@ -230,6 +234,12 @@ type EditResult struct {
 	// (KOP-215, measured). Nil when nothing was applied or nothing moved.
 	Reanchored []Reanchor
 
+	// Translated lists the anchors this call sent that matched no line but were
+	// this reply's own earlier anchor for a line, and were replaced by its
+	// current one (ADR-0038). AnchorStart and AnchorEnd still hold what the
+	// model sent. Nil for nearly every call.
+	Translated []Translation
+
 	// Rejection is set, and the file byte-identical, when the edit was refused.
 	Rejection *EditRejection
 
@@ -313,9 +323,19 @@ func (s *Set) EditFile(ctx context.Context, req EditRequest) (EditResult, error)
 	}
 	anchors := anchor.Derive(lines)
 
-	start, end, rej, err := s.locate(req, lines, anchors)
+	treq, translated := req.Reply.translateAnchors(p.Slash(), src, lines, anchors, req)
+	start, end, rej, err := s.locate(treq, lines, anchors)
 	if err != nil {
 		return EditResult{}, err
+	}
+	if rej != nil && len(translated) > 0 {
+		// A refusal reads exactly as it would have without the rule: it names
+		// the anchors the model sent.
+		translated = nil
+		start, end, rej, err = s.locate(req, lines, anchors)
+		if err != nil {
+			return EditResult{}, err
+		}
 	}
 	if rej != nil {
 		res := rejectedEdit(req, p, rej)
@@ -349,7 +369,9 @@ func (s *Set) EditFile(ctx context.Context, req EditRequest) (EditResult, error)
 		BytesAfter:    len(next),
 		Diff:          unifiedDiff(p.Slash(), lines, start, end, repl),
 		Reanchored:    reanchored(lines, anchors, next, start, end, len(repl)),
+		Translated:    translated,
 	}
+	req.Reply.record(p.Slash(), anchors, start, end, len(repl), next, res.Reanchored)
 	res.Output = res.render()
 	return res, nil
 }
@@ -969,6 +991,9 @@ func (r EditResult) render() string {
 	fmt.Fprintf(&b, "%s %s: applied at %s, %s replaced by %s (%s)\n",
 		tool, r.Path, region, plural(r.LinesRemoved, "line", "lines"),
 		plural(r.LinesAdded, "line", "lines"), mode)
+	for _, t := range r.Translated {
+		b.WriteString(t.note())
+	}
 	b.WriteString(r.Diff)
 	if len(r.Reanchored) > 0 {
 		b.WriteString("re-anchored by this edit (same lines, new anchors; use the new one wherever you held the old):\n")

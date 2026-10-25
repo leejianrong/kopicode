@@ -330,6 +330,10 @@ type Engine struct {
 	// succeeds, or a different call in between, never collapses.
 	lastDispatch dispatchOutcome
 
+	// reply is the current reply's re-anchor map (ADR-0038), set for the span
+	// of one dispatch and nil outside it.
+	reply *tools.ReplyAnchors
+
 	// stall is the stall detector's state (KAN-1971): transient, in memory, and
 	// reset by anything that changes the tree. Off when the harness config's
 	// StallThreshold is 0.
