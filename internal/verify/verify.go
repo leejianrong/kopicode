@@ -280,7 +280,23 @@ func (r Result) Blocks() bool { return r.Outcome == Failed }
 // the one-line form the engine hands the model when a run passes (KAN-960).
 // A pass has nothing further worth spending tokens on every time it recurs,
 // unlike a failure, where the stream is the fix's own evidence.
-func (r Result) Summary() string { return "verification: " + headline(r) }
+//
+// On a pass it also carries [passReminder] (KOP-218), which [Result.Output] does
+// not: that text is recorded on the journal's VerificationRun, where an outer
+// agent reading the session would meet an instruction addressed to the model
+// (KOP-231). What the model is shown is the same bytes as before.
+func (r Result) Summary() string {
+	s := "verification: " + headline(r)
+	if r.Outcome == Passed {
+		s += passReminder
+	}
+	return s
+}
+
+// passReminder ends the line the model reads after a pass. It is the last thing
+// read before the closing summary, so it is where the ask goes, and only on a
+// pass: a failure or a skip is not the moment anyone is summarising.
+const passReminder = ". In your closing summary, state any assumption you made where the task was unclear"
 
 // Verifier runs forced verification for one repository.
 //
@@ -566,8 +582,7 @@ func (v *Verifier) render(r Result, raw string) string {
 func headline(r Result) string {
 	switch r.Outcome {
 	case Passed:
-		return fmt.Sprintf("`%s` (%s) passed. In your closing summary, state any assumption you made "+
-			"where the task was unclear", commandText(r), r.Source)
+		return fmt.Sprintf("`%s` (%s) passed", commandText(r), r.Source)
 	case Failed:
 		return fmt.Sprintf("`%s` (%s) FAILED, exit %d — this change is not finished",
 			commandText(r), r.Source, r.ExitCode)
