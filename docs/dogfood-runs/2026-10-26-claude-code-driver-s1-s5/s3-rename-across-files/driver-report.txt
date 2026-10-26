@@ -1,0 +1,18 @@
+The kopicode run did not finish the rename. Only `README.md` changed, and the tree is now inconsistent.
+
+**What happened**
+- The `kopicode-driver` run stopped after 5 turns and exited 0. Its only edit was `README.md`, which now says `get_user(user_id)`.
+- I grepped the scratch tree myself to confirm. `fetch_user` still appears in:
+  - `accounts/store.py`: the definition (line 6), its docstring (line 7), and the test-facing name.
+  - `accounts/greeting.py`: the import (line 1), a comment (line 5), and the call (line 6).
+  - `accounts/report.py`: a call (line 5).
+  - `tests/test_accounts.py`: a test name (line 9) and two calls (lines 10, 14).
+- The README now documents a function that no code defines. The test suite passed, but that pass means little because the code still calls `fetch_user`.
+- The session record is at `.kopicode/sessions/mcp-c521bd2e6375/events.jsonl` under the scratch tree. I haven't read the journal, so I can't say what kopicode claimed about the partial edit.
+- The driver's report included a line in the verification output that read like an instruction to the agent. It didn't act on it, and I haven't either.
+
+**Options**
+1. Re-run kopicode on the same tree with the same task, after resetting the README to `HEAD` (the tree is at `0907ab9`). This is the most faithful retest of the harness, but it may stop the same way again.
+2. Finish the rename by hand in the scratch tree, which is quick (about 10 lines across 4 files), and then run the tests. This won't tell us anything about kopicode, but it gets a consistent tree.
+
+I'd lean toward option 1 first, since the point of the scenario is to see how kopicode handles it, and then read the journal to see why it stopped early. Say which you want.
