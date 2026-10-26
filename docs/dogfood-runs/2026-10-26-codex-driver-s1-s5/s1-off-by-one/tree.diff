@@ -1,0 +1,21 @@
+diff --git a/shop/pagination.py b/shop/pagination.py
+index 1a8060b..3d7af06 100644
+--- a/shop/pagination.py
++++ b/shop/pagination.py
+@@ -1,7 +1,16 @@
+ """Pagination helpers for the product listing."""
+ 
+ 
++"""Pagination helpers for the product listing."""
++
++import math
++
++
+ def page_count(total_items: int, per_page: int) -> int:
++    """How many pages are needed to show total_items, per_page at a time."""
++    if per_page <= 0:
++        raise ValueError("per_page must be positive")
++    return math.ceil(total_items / per_page)
+     """How many pages are needed to show total_items, per_page at a time."""
+     if per_page <= 0:
+         raise ValueError("per_page must be positive")
