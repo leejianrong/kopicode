@@ -188,8 +188,14 @@ func TestAPassAsksForTheAssumptionsInTheClosingSummary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() = %v", err)
 	}
-	if !strings.Contains(res.Output, reminder) {
-		t.Errorf("a pass does not carry the reminder:\n%s", res.Output)
+	// The model is shown Summary. The recorded Output must not carry the sentence
+	// (KOP-231): an outer agent reading the journal would meet an instruction.
+	const wantSummary = "In your closing summary, state any assumption you made where the task was unclear"
+	if got, want := res.Summary(), fmt.Sprintf("verification: `%s` (%s) passed. %s", strings.Join(res.Command, " "), res.Source, wantSummary); got != want {
+		t.Errorf("what the model is shown after a pass changed:\n got %q\nwant %q", got, want)
+	}
+	if strings.Contains(res.Output, reminder) {
+		t.Errorf("the recorded Output carries the model-facing reminder:\n%s", res.Output)
 	}
 	if first, _, _ := strings.Cut(res.Output, "\n"); !strings.HasPrefix(first, "verification: ") || !strings.Contains(first, "passed") {
 		t.Errorf("the headline is no longer one `verification: ... passed` line: %q", first)
@@ -198,7 +204,7 @@ func TestAPassAsksForTheAssumptionsInTheClosingSummary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() = %v", err)
 	}
-	if strings.Contains(failed.Output, reminder) {
+	if strings.Contains(failed.Output, reminder) || strings.Contains(failed.Summary(), reminder) {
 		t.Errorf("a failure carries the reminder, which would read as permission to stop:\n%s", failed.Output)
 	}
 }
