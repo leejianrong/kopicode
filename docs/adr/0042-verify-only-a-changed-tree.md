@@ -1,6 +1,6 @@
 # ADR-0042: Run forced verification only after a turn that changed the tree
 
-*Proposed* 2026-11-07, for the owner to accept or reject. Nothing is built. KOP-233. Builds on forced verification (`Config.Verification`, `internal/engine/loop.go`), on the turn snapshots (`internal/repo/snapshot.go`, "a snapshot of an unchanged tree is recorded rather than skipped; whether the turn touched anything is the caller's judgement") and on [ADR-0039](0039-leftover-name-note.md) for how an opt-in harness change is shaped. It changes when a check runs and what the model is told, so it is a decision.
+*Accepted* 2026-11-07 by the owner, to be built as decided below, with the measurement in "The measurement that decides the default" before any default changes (the skip version, not the no-skip alternative). KOP-233. Builds on forced verification (`Config.Verification`, `internal/engine/loop.go`), on the turn snapshots (`internal/repo/snapshot.go`, "a snapshot of an unchanged tree is recorded rather than skipped; whether the turn touched anything is the caller's judgement") and on [ADR-0039](0039-leftover-name-note.md) for how an opt-in harness change is shaped. It changes when a check runs and what the model is told, so it is a decision.
 
 ## Context
 
