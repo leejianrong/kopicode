@@ -257,6 +257,11 @@ type Config struct {
 	// off, and in the hash only when set.
 	LeftoverNote bool
 
+	// EditAftercare makes the engine tell the model, on an applied edit's result,
+	// that the edit left a line that can never run (ADR-0040). False is off, and in
+	// the hash only when set. Detection and the journal field do not depend on it.
+	EditAftercare bool
+
 	// Hooks are the commands a person has asked to run around tool calls and
 	// at a stop (ADR-0036). The zero value is no hooks, which is every
 	// registered arm and so every benchmark number. They change what the

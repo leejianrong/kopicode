@@ -220,6 +220,9 @@ func writeReport(w io.Writer, r engine.SessionReport) {
 	for _, e := range r.Edits.Rejected {
 		say(w, "  rejected  seq %d  %s  %s\n", e.Seq, e.Path, e.Reason)
 	}
+	for _, u := range r.Edits.Unreachable {
+		say(w, "  left code that cannot run  seq %d  %s  line %d returns or raises and line %d follows it\n", u.Seq, u.Path, u.Line, u.Next)
+	}
 	if len(r.Edits.Unrecovered) > 0 {
 		say(w, "  never followed by an applied edit to the same path: seq %s\n", joinSeqs(r.Edits.Unrecovered))
 	}

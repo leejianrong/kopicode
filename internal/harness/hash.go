@@ -115,6 +115,10 @@ func (c Config) hashWith(anchorVersion string) string {
 	if c.LeftoverNote {
 		p.bool("leftover_note", true)
 	}
+	// Likewise for the edit-aftercare note (ADR-0040).
+	if c.EditAftercare {
+		p.bool("edit_aftercare", true)
+	}
 
 	// Likewise for hooks (ADR-0036 decision 9): a session with none keeps the
 	// hash it had, and one with any is never pooled with one with a different

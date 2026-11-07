@@ -106,6 +106,18 @@ type ReportEdits struct {
 	Applied     []ReportEdit `json:"applied,omitempty"`
 	Rejected    []ReportEdit `json:"rejected,omitempty"`
 	Unrecovered []uint64     `json:"unrecovered,omitempty"`
+	// Unreachable are the applied edits that left a line that can never run
+	// (ADR-0040), by the edit's seq.
+	Unreachable []ReportUnreachable `json:"unreachable,omitempty"`
+}
+
+// ReportUnreachable is one EditApplied that left dead code: the file's `return`
+// or `raise` line and the line after it that cannot run, as numbered after the edit.
+type ReportUnreachable struct {
+	Seq  uint64 `json:"seq"`
+	Path string `json:"path"`
+	Line int    `json:"line"`
+	Next int    `json:"next"`
 }
 
 // ReportEdit is one EditApplied or EditRejected.
@@ -207,6 +219,9 @@ func ReportSession(ctx context.Context, dir, id string) (SessionReport, error) {
 			v.Last = &ReportVerifyN{Seq: ev.Seq, Command: p.Command, ExitCode: p.ExitCode, Skip: p.Skip}
 		case journal.EditApplied:
 			r.Edits.Applied = append(r.Edits.Applied, ReportEdit{Seq: ev.Seq, Path: p.Path, Mode: p.Mode})
+			for _, u := range p.Unreachable {
+				r.Edits.Unreachable = append(r.Edits.Unreachable, ReportUnreachable{Seq: ev.Seq, Path: p.Path, Line: u.Line, Next: u.Next})
+			}
 			delete(pending, p.Path)
 		case journal.EditRejected:
 			r.Edits.Rejected = append(r.Edits.Rejected, ReportEdit{Seq: ev.Seq, Path: p.Path, Mode: p.Mode, Reason: p.Reason})

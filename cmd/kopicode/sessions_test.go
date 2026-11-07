@@ -264,3 +264,17 @@ func TestWriteReportPrintsAClaimTheJournalDoesNotBack(t *testing.T) {
 		}
 	}
 }
+
+// TestWriteReportNamesAnEditThatLeftDeadCode is ADR-0040 decision 5: the report
+// cites the edit's seq, the file and both lines, so a run note does not need a diff.
+func TestWriteReportNamesAnEditThatLeftDeadCode(t *testing.T) {
+	r := engine.SessionReport{ID: "s1", Final: &engine.ReportMessage{Seq: 40, Text: "Done."}}
+	r.Permissions.Decisions = map[string]int{}
+	r.Edits.Applied = []engine.ReportEdit{{Seq: 33, Path: "shop/pagination.py"}}
+	r.Edits.Unreachable = []engine.ReportUnreachable{{Seq: 33, Path: "shop/pagination.py", Line: 13, Next: 14}}
+	var b strings.Builder
+	writeReport(&b, r)
+	if want := "left code that cannot run  seq 33  shop/pagination.py  line 13 returns or raises and line 14 follows it"; !strings.Contains(b.String(), want) {
+		t.Errorf("report lacks %q:\n%s", want, b.String())
+	}
+}
