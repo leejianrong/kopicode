@@ -1,14 +1,10 @@
-
-
-https://github.com/user-attachments/assets/c85718fa-2d2d-4c0d-8151-833ca1d6fe24
-
 # kopicode
 
-A terminal coding agent, and a harness you can tune per model. kopicode is built to make
-cheap open-weight models code reliably: it repairs malformed tool calls, edits through
-hash anchors that reject on drift instead of guessing, syntax-checks every edit, and will not
-report success until your project's own tests pass. One engine runs the same way from your
-terminal, a script, or another agent.
+A terminal coding agent whose harness is tuned for cheap open-weight models. It repairs malformed tool calls, edits through
+hash anchors that reject when the file has moved instead of guessing, syntax-checks every edit, and will not report success until
+your project's own tests pass. One engine runs the same way from your terminal, a script, or another agent.
+
+https://github.com/user-attachments/assets/c85718fa-2d2d-4c0d-8151-833ca1d6fe24
 
 ```mermaid
 flowchart LR
@@ -17,27 +13,30 @@ flowchart LR
     agent["an agent<br/>(Claude Code, cuttlefish, …)"] --> mcp["kopicode mcp<br/>kopicode serve"]
     ci["the benchmark"] --> bench["kopibench"]
     repl & run & mcp & bench --> engine["one engine<br/>tool-call repair · anchored edits<br/>syntax gate · forced verification<br/>permission gate"]
-    engine --> model["any OpenRouter model<br/>(pinned provider),<br/>or a Codex subscription"]
+    engine --> model["any OpenRouter model<br/>(pinned provider), a Codex<br/>subscription, or your own endpoint"]
     engine --> repo["your repo<br/>+ git shadow refs<br/>+ the session journal"]
 ```
 
-**Status:** v0.4 is the latest release and `main` is ahead of it, with recorded runs on real repositories in
-[`docs/dogfood-runs/`](docs/dogfood-runs/). Two models are measured on the corpus; four are
-registered. There is no sandbox: an approved shell command runs with your
-privileges ([why](docs/adr/0008-shell-isolation-accepted-risk.md)). Questions and bugs go in
+**Status:** pre-1.0. [v0.5.0](https://github.com/leejianrong/kopicode/releases/latest) is the latest release (binaries for Linux,
+macOS and Windows) and `main` is ahead of it, with recorded runs on real repositories in
+[`docs/dogfood-runs/`](docs/dogfood-runs/). Five models are registered. Two of them, `qwen/qwen3-coder-next` and
+`minimax/minimax-m2`, are measured on the 13-task corpus, and both pass 12 of 13 and fail the same task, so the corpus does
+not yet separate them. The other three (`z-ai/glm-5.2`, `deepseek/deepseek-v3.2`, `deepseek/deepseek-v4.1-flash`) have been
+driven on real tasks but not scored on the corpus. No public benchmark has been run yet. There is no sandbox: an approved shell
+command runs with your privileges ([why](docs/adr/0008-shell-isolation-accepted-risk.md)). Questions and bugs go in
 the [issue tracker](https://github.com/leejianrong/kopicode/issues).
 
 ## Quick start
 
 You need an [OpenRouter](https://openrouter.ai/keys) API key. The pre-built binary needs
-nothing else; building from source needs Go 1.26 or later.
+nothing else; building from source needs Go 1.26.10 or later.
 
 ```bash
 # install the latest release into ~/.local/bin (checks it against SHA256SUMS)
 curl -fsSL https://raw.githubusercontent.com/leejianrong/kopicode/main/scripts/install.sh | sh
 
 # or build from source
-git clone https://github.com/leejianrong/kopicode.git && cd kopicode && make build   # -> bin/kopicode
+git clone https://github.com/leejianrong/kopicode.git && cd kopicode && make build   # -> bin/kopicode; put it on your PATH
 
 export OPENROUTER_API_KEY="..."   # read from the environment only; a .env file is not loaded
 cd your-project
@@ -57,25 +56,133 @@ allow? [y]es / [N]o / [a]lways for this exact request, or type what to do instea
 `y` allows this call; `a` allows that exact request for the session (an exact match, never a
 directory or a command prefix); Enter or `n` denies. Anything else you type also denies, and
 the text goes to the model as a suggestion: `use uv and a venv` (or `no, use uv`) refuses the call and
-tells the agent what you want instead. A sentence that starts with "yes" is still a suggestion, never a yes. `Ctrl-C` cancels the
-turn in flight without ending the session; `/context` shows how much of the model's window the session is using, what it has spent and the
-provider-reported cost; `/mode auto` (or `kopicode --mode auto`) stops the prompts for shell inside the project, keeping a fixed never-allow list, and `/mode default` brings them back; `--protect <path>` (repeatable, also on `run --print`; `protected_paths` over `serve` and `mcp`) makes a path the task said not to touch refuse writes and tells the model to stop and say so instead of working around it ([ADR-0037](docs/adr/0037-protected-paths.md); a guard, not a sandbox); `/handoff [goal]` drafts a handoff document (one model call, session unchanged), opens it in `$VISUAL`/`$EDITOR` if set, and on a `y` ends the session and starts a fresh one from it, with verification reset to not run ([ADR-0026](docs/adr/0026-handoff.md)); `/exit` (or `/quit`) ends it. Your first task is best a small, well-described
-bug in a repo with tests: [`docs/trying-kopicode.md`](docs/trying-kopicode.md) walks through
-two real ones. A one-line fix cost about $0.04.
+tells the agent what you want instead. A sentence that starts with "yes" is still a suggestion, never a yes.
+`Ctrl-C` cancels the turn in flight without ending the session.
+
+Your first task is best a small, well-described bug in a repo with tests:
+[`docs/trying-kopicode.md`](docs/trying-kopicode.md) walks through two real ones. A one-line fix cost about $0.04.
 
 ## Usage
 
-**Interactively**, as above. Pick a model with `--model` (default `qwen/qwen3-coder-next`;
-`minimax/minimax-m2`, `z-ai/glm-5.2` and the cheap `deepseek/deepseek-v3.2` are also
-registered, and an unknown id is refused at startup with the list printed). Pin a repository's choice so everyone gets the same one:
+**Interactively**, as above. Pick a model with `--model` (default `qwen/qwen3-coder-next`; an unknown id is refused at
+startup with the list printed). Pin a repository's choice so everyone gets the same one:
 
 ```toml
 # .kopicode/config.toml
 model = "minimax/minimax-m2"
 ```
 
-Precedence is `--model` / `--harness`, then this file, then your user config (below), then the
+Precedence is `--model` / `--harness`, then this file, then your user config ([Reference](#reference)), then the
 built-in default. No environment variable is in that chain.
+
+**As a one-shot**, with the record as newline-delimited JSON on stdout:
+
+```bash
+kopicode run --print "fix the failing test in ./parser"
+```
+
+It refuses shell commands and out-of-project writes unless a policy file says otherwise
+([wire and exit codes](docs/run-print-protocol.md), and
+[how to let a run use the shell](docs/run-print-protocol.md#letting-a-run-use-the-shell)).
+
+**From another agent**, as an MCP server. Five tools (`kopicode_start`, `kopicode_submit`, `kopicode_cancel`,
+`kopicode_close`, `kopicode_handoff`), session events as progress notifications, and a required `consent_mode` that says who
+answers permission requests:
+
+```bash
+claude mcp add kopicode -- kopicode mcp
+```
+
+kopicode reads `OPENROUTER_API_KEY` from the environment it is launched with. If your client
+does not pass yours through, give it the key with the client's own option (for Claude Code,
+`-e OPENROUTER_API_KEY=...`, which stores the key in that client's config).
+
+`kopicode serve` is the same sessions over NDJSON JSON-RPC for an orchestrator that spawns
+kopicode as a child (or, with `--listen <socket>`, a long-lived process whose sessions survive its client
+restarting); `kopicode version --json` lists the protocol version and the features
+your binary supports, so a client can require one. See [`docs/kopicode-mcp.md`](docs/kopicode-mcp.md) and
+[`docs/kopicode-serve-protocol.md`](docs/kopicode-serve-protocol.md).
+
+### In the REPL
+
+- `/context` shows how much of the model's window the session is using, what it has spent and the provider-reported cost.
+- `/mode auto` (or `kopicode --mode auto`) stops the prompts for shell inside the project, keeping a fixed never-allow list;
+  `/mode default` brings them back.
+- `--protect <path>` (repeatable, also on `run --print`; `protected_paths` over `serve` and `mcp`) makes a path the task said
+  not to touch refuse writes and tells the model to stop and say so instead of working around it
+  ([ADR-0037](docs/adr/0037-protected-paths.md); a guard, not a sandbox).
+- `/handoff [goal]` drafts a handoff document (one model call, session unchanged), opens it in `$VISUAL`/`$EDITOR` if set, and
+  on a `y` ends the session and starts a fresh one from it, with verification reset to not run
+  ([ADR-0026](docs/adr/0026-handoff.md)).
+- `/skills` lists reusable task instructions and `/<name> [task]` runs one (see the Configuration table).
+- `/exit` (or `/quit`) ends the session.
+
+## How unattended sessions are kept safe
+
+Nobody is at a terminal to say yes, so a caller picks one of three answerers for shell
+commands and writes outside the project:
+
+| `consent_mode` | Who answers | Use it for |
+| --- | --- | --- |
+| `auto` | the harness: shell inside the project runs; a fixed never-allow list (`sudo`, `rm` outside the project, forced `git push`, a download piped into a shell, writes outside, a global `pip`/`npm` install, `git reset --hard`, `--no-verify`) is refused | your own repo, on your own machine |
+| `remote_interactive` | the calling agent, per action, live | open-ended work with a supervisor |
+| `unattended_policy` | a declared allowlist (`--policy-file`) | a fixed, known set of commands |
+
+Command lines are tokenized, every command in them is checked, and anything that cannot be
+analysed is refused. None of this is a sandbox; real containment is the caller's job
+([ADR-0017](docs/adr/0017-auto-consent-mode.md), [ADR-0018](docs/adr/0018-tokenized-allowlist.md)).
+
+## How it works, and what it has measured
+
+A model's harness (prompt structure, tool surface, parse-and-repair, verification loop) moves
+its measured coding ability by a large margin, and open-weight models have the most headroom
+because they get the least harness attention. The gains kopicode bets on are generic
+reliability work, in order of expected payoff:
+
+1. **Tool-call parse-and-repair.** Weak models emit malformed JSON and invented tool names;
+   accepting several formats and feeding back a specific error beats burning the turn.
+2. **An edit tool where the model never reproduces file content.** `read_file` returns
+   per-line anchors and `edit_file` rejects when they no longer match
+   ([ADR-0006](docs/adr/0006-hash-anchored-edits-and-failure-attribution.md)).
+3. **Forced verification.** The loop runs your tests after edits and will not report success
+   without them.
+
+Measured, not asserted: on the frozen 13-task corpus both pinned arms
+(`qwen/qwen3-coder-next` and `minimax/minimax-m2`) pass 12 of 13 and fail the *same* task, for
+about $0.17 and $0.29 a run. The corpus does not yet separate the two models; the result and
+what it says about the corpus are in
+[`docs/paired-ab-qwen-vs-minimax-m2-v2.md`](docs/paired-ab-qwen-vs-minimax-m2-v2.md). Every
+number comes from a pinned provider and quantization, because an unpinned A/B is not
+evidence ([`docs/provider-pin.md`](docs/provider-pin.md)). You can rerun it free against a
+mock provider with `make bench-smoke`.
+
+The opt-in switches in [Harness switches](#harness-switches) are each measured on small scenarios (one to three tiny Python
+repositories, mostly `qwen/qwen3-coder-next`), which show what a switch does and not how often; all three are off by default:
+
+- `--leftover-note`: on a rename task, 1 of 20 runs left the old name with the note against 2 of 20 without. A lead, not a gain
+  ([run](docs/dogfood-runs/2026-10-25-kop-226-leftover-note/README.md)).
+- `--edit-aftercare`: the note reached the model in all 3 sessions where an edit left dead code, and none of the 3 fixed it
+  ([run](docs/dogfood-runs/2026-11-07-kop-232-aftercare/README.md)).
+- `--verify-changed-only`: after a plain `ls` in a repository whose tests already fail, 10 of 10 sessions went off task and
+  edited an unrelated file without it, 0 of 10 with it on qwen (3 of 10 on `deepseek/deepseek-v3.2`) ([run](docs/dogfood-runs/2026-11-07-kop-233-verify-changed-only/README.md)).
+  But a wrong file generated into a git-ignored directory went unnoticed in 10 of 10 with it, so it is not the default
+  ([run](docs/dogfood-runs/2026-11-07-kop-235-verify-changed-only-limits/README.md)).
+
+## Prompt caching
+
+Every request carries the whole history, so provider prompt caching is the largest saving there is:
+DeepSeek and Qwen read cached input at about a tenth of the price, GLM at about a fifth, Moonshot at a
+quarter. A cache hits only on an exact prefix, so kopicode keeps history strictly append-only (the system
+prompt and the tool list never change within a session, and a test fails if any request alters an earlier
+message), and sends one stable `x-session-id` per session so OpenRouter keeps routing follow-ups to the
+provider that holds the cache. `/context` shows how many prompt tokens were cache hits and says so when
+none were. Which routes cache is the provider's business: DeepSeek, GLM and Moonshot do it automatically.
+Qwen documents an explicit `cache_control` marker, and kopicode does not send it: in one live run on the pinned
+`parasail/bf16` route the marker was accepted and changed nothing, because that provider already caches implicitly
+(cached tokens 0, then 4,352, with and without it), though not reliably request to request (one miss in six),
+so watch the hit rate in `/context` rather than assuming it.
+
+## Reference
 
 **Your own defaults** live in `~/.config/kopicode/config.toml` (`$XDG_CONFIG_HOME/kopicode` or
 `$KOPICODE_HOME` if set). Only the interactive `kopicode` reads it; `run --print`, `serve`, `mcp`
@@ -153,31 +260,7 @@ process never spends one person's subscription on other people's sessions. These
 named `codex:` in the harness hash, report no cost (a subscription has no per-token price) and cannot anchor a
 benchmark number. The login's token is sent only to the Codex backend and is never written to the journal.
 
-**As a one-shot**, with the record as newline-delimited JSON on stdout:
-
-```bash
-kopicode run --print "fix the failing test in ./parser"
-```
-
-It refuses shell commands and out-of-project writes unless a policy file says otherwise
-([wire and exit codes](docs/run-print-protocol.md)).
-
-**From another agent**, as an MCP server. Four tools, session events as progress
-notifications, and a required `consent_mode` that says who answers permission requests:
-
-```bash
-claude mcp add kopicode -- kopicode mcp
-```
-
-kopicode reads `OPENROUTER_API_KEY` from the environment it is launched with. If your client
-does not pass yours through, give it the key with the client's own option (for Claude Code,
-`-e OPENROUTER_API_KEY=...`, which stores the key in that client's config).
-
-`kopicode serve` is the same sessions over NDJSON JSON-RPC for an orchestrator that spawns
-kopicode as a child (or, with `--listen <socket>`, a long-lived process whose sessions survive its client
-restarting); `kopicode version --json` lists the protocol version and the features
-your binary supports, so a client can require one. See [`docs/kopicode-mcp.md`](docs/kopicode-mcp.md) and
-[`docs/kopicode-serve-protocol.md`](docs/kopicode-serve-protocol.md).
+### Harness switches
 
 If the model goes in circles (the same call with the same result three times, or three failed edits to one
 file, with nothing written in between) the REPL tells it so and what to try instead
@@ -205,63 +288,23 @@ read once, each later turn is compared with the last snapshot, and a turn that l
 (its `TurnSnapshot` carries `unchanged`). A change that only touches files git ignores, such as a build into `bin/`, is not seen
 as a change ([ADR-0042](docs/adr/0042-verify-only-a-changed-tree.md)).
 
-A session is bounded: each prompt gets at most **20 model calls** (the turn cap) and the
+A session is bounded: each prompt gets at most **100 model calls** in the REPL and **20** in `run --print` and the benchmark (the turn cap), and the
 session at most 2M tokens. A task that needs more ends with `stop: max_turns` rather than
 running on; the work done so far stays in the tree, and replying continues it with a fresh
 allowance. To raise the cap for a repository, declare `max_turns` in a harness config
 ([`docs/harness-tuning.md`](docs/harness-tuning.md)).
 
-## How unattended sessions are kept safe
+### Sessions and the journal
 
-Nobody is at a terminal to say yes, so a caller picks one of three answerers for shell
-commands and writes outside the project:
+`kopicode sessions` lists past sessions; `--resume <id>` and `--fork <id>:<turn>` continue or
+branch one. `--session-id <id>` (REPL and `run --print`) names a new session, so a program that launches
+kopicode knows which journal is its own; it is refused, with nothing written, if the id is not a safe
+directory name (letters, digits, `.`, `_`, `-`) or already has a record. `kopicode sessions -report <id>` digests one session's journal (how it ended, turns, tokens, cost,
+verification, edits and rejections, tool-call routes, syntax gate, consent, the final message, and any final message that names a file as changed which the journal shows no edit to), each line with
+the `seq` it came from; `-json` for a script. Every session is a journal under `.kopicode/sessions/`; everything printed is
+derived from it. A program that reads a journal from disk starts at [`docs/journal-on-disk.md`](docs/journal-on-disk.md).
 
-| `consent_mode` | Who answers | Use it for |
-| --- | --- | --- |
-| `auto` | the harness: shell inside the project runs; a fixed never-allow list (`sudo`, `rm` outside the project, forced `git push`, a download piped into a shell, writes outside, a global `pip`/`npm` install, `git reset --hard`, `--no-verify`) is refused | your own repo, on your own machine |
-| `remote_interactive` | the calling agent, per action, live | open-ended work with a supervisor |
-| `unattended_policy` | a declared allowlist (`--policy-file`) | a fixed, known set of commands |
-
-Command lines are tokenized, every command in them is checked, and anything that cannot be
-analysed is refused. None of this is a sandbox; real containment is the caller's job
-([ADR-0017](docs/adr/0017-auto-consent-mode.md), [ADR-0018](docs/adr/0018-tokenized-allowlist.md)).
-
-## Prompt caching
-
-Every request carries the whole history, so provider prompt caching is the largest saving there is:
-DeepSeek and Qwen read cached input at about a tenth of the price, GLM at about a fifth, Moonshot at a
-quarter. A cache hits only on an exact prefix, so kopicode keeps history strictly append-only (the system
-prompt and the tool list never change within a session, and a test fails if any request alters an earlier
-message), and sends one stable `x-session-id` per session so OpenRouter keeps routing follow-ups to the
-provider that holds the cache. `/context` shows how many prompt tokens were cache hits and says so when
-none were. Which routes cache is the provider's business: DeepSeek, GLM and Moonshot do it automatically;
-Qwen needs an explicit marker that kopicode does not send yet (KAN-1979).
-
-## Why a harness, and what it has measured
-
-A model's harness (prompt structure, tool surface, parse-and-repair, verification loop) moves
-its measured coding ability by a large margin, and open-weight models have the most headroom
-because they get the least harness attention. The gains kopicode bets on are generic
-reliability work, in order of expected payoff:
-
-1. **Tool-call parse-and-repair.** Weak models emit malformed JSON and invented tool names;
-   accepting several formats and feeding back a specific error beats burning the turn.
-2. **An edit tool where the model never reproduces file content.** `read_file` returns
-   per-line anchors and `edit_file` rejects when they no longer match
-   ([ADR-0006](docs/adr/0006-hash-anchored-edits-and-failure-attribution.md)).
-3. **Forced verification.** The loop runs your tests after edits and will not report success
-   without them.
-
-Measured, not asserted: on the frozen 13-task corpus both pinned arms
-(`qwen/qwen3-coder-next` and `minimax/minimax-m2`) pass 12 of 13 and fail the *same* task, for
-about $0.17 and $0.29 a run. The corpus does not yet separate the two models; the result and
-what it says about the corpus are in
-[`docs/paired-ab-qwen-vs-minimax-m2-v2.md`](docs/paired-ab-qwen-vs-minimax-m2-v2.md). Every
-number comes from a pinned provider and quantization, because an unpinned A/B is not
-evidence ([`docs/provider-pin.md`](docs/provider-pin.md)). You can rerun it free against a
-mock provider with `make bench-smoke`.
-
-## Configuration
+### Configuration
 
 | Setting | Where | Notes |
 | --- | --- | --- |
@@ -275,14 +318,6 @@ mock provider with `make bench-smoke`.
 | turn cap and other bounds | a declared harness config (`--harness-config`) | for example `max_turns = 40` when a session stops with `max_turns`; local-only, never anchors a published number. See [`docs/harness-tuning.md`](docs/harness-tuning.md) |
 | per-language examples | [`docs/examples/`](docs/examples/) | Go, JavaScript/TypeScript, Python, multi-language |
 | skills: reusable task instructions | `<name>/SKILL.md` under `.agents/skills`, `.kopicode/skills`, `~/.config/kopicode/skills`, or `skills_paths` in the user config; `~/.claude/skills` and `~/.agents/skills` are read as fallbacks | the convention Claude Code, Codex and Cursor read. `/skills` lists them, `/<name> [task]` runs one, Tab completes the name. A repository's skill beats a personal one of the same name. The model is also shown the ones inside the project once per session, in `run --print`, `serve` and `mcp` as well (feature `skills.catalogue`; only the repository's own, never your personal ones). `/skills` and `/<name>` are interactive `kopicode` only ([ADR-0014](docs/adr/0014-skills-mechanism.md), [ADR-0025](docs/adr/0025-skills-discovery-and-commands.md)) |
-
-`kopicode sessions` lists past sessions; `--resume <id>` and `--fork <id>:<turn>` continue or
-branch one. `--session-id <id>` (REPL and `run --print`) names a new session, so a program that launches
-kopicode knows which journal is its own; it is refused, with nothing written, if the id is not a safe
-directory name (letters, digits, `.`, `_`, `-`) or already has a record. `kopicode sessions -report <id>` digests one session's journal (how it ended, turns, tokens, cost,
-verification, edits and rejections, tool-call routes, syntax gate, consent, the final message), each line with
-the `seq` it came from; `-json` for a script. Every session is a journal under `.kopicode/sessions/`; everything printed is
-derived from it. A program that reads a journal from disk starts at [`docs/journal-on-disk.md`](docs/journal-on-disk.md).
 
 ## Documentation
 
