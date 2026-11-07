@@ -40,3 +40,14 @@ Rejected before: failing the edit (it is not "wrong region": the anchors matched
 ## Alternative
 
 Close KOP-232 as a documented limit: seven in 746 is rare, the tests usually catch the case where the old code matters, and each added note is a few tokens on every Python edit that fires (about 1 percent of them). The cost of closing is that two driven-run trees which pass the scenario check contain dead code, and that the only thing that found them was a person reading a diff.
+
+## Implementation notes
+
+Settled while building it (KOP-232); none changes a decision above except where it says so.
+
+- **Both edit tools.** The check runs on every applied edit, `edit_file` and `edit_file_fuzzy`, since both go through the one journaling path; decision 1 says `edit_file`.
+- **It reads the diff the edit produced**, not the file: the post-edit lines a unified diff carries (changed lines and their context), numbered from each hunk's `+N`. A pair outside that window cannot be an edit's own damage. Blank lines between the `return` and the next line are skipped, and a comment, a closing bracket, a deeper line, a dedent and `else`/`elif`/`except`/`finally`/`case` are not dead code.
+- **Journal field:** `EditApplied.unreachable: [{line, next}]`, where `line` is the `return` or `raise` and `next` the line that cannot run (decision 3's `{line, after}`). `kopicode sessions -report` prints one line per pair under the edits.
+- **The setting** is `Config.EditAftercare`, `--edit-aftercare` on the REPL and `run --print`, and `edit_aftercare = 0|1` in a declared config; in the hash only when set.
+- **Replayed over the journals committed under `docs/dogfood-runs`:** 175 sessions, 1,087 applied edits with an inline diff (992 to Python files), **21 edits in 20 sessions flagged**. That is a higher rate than the 7 of 746 above, and the difference is the corpus, not the rule: these are the same two or three scenarios, run again and again on the same model, so a habit of one model on one task is counted many times. Read by hand: the Codex-driven s1 and s2 edits, `kop-216/s1`, `kop-219/with-verify-command`, `kop-222-schema/schema-3`, `kop-215/after` (seq 103) and the `main-3` edit (read from the scratch copy of the run that `kop-226-leftover/main-3` holds). All real; each is the old body or the old `return` left after the new one. The rest repeat the same file and line pair in the same scenario and were not read one by one. 20 of 175 sessions is 11 percent of them, and each of those ended with a tree that passes its tests.
+- **Not measured:** what the note does to a model. That is the first run to make with `--edit-aftercare` on, against off.

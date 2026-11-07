@@ -192,6 +192,12 @@ verification: if an identifier that two or more of the model's own edits removed
 the tree, the model is told once where. It exists for a rename that stops one place short while the tests still pass. It never
 blocks a stop, and each time it fires the journal holds a `LeftoverNoted` event ([ADR-0039](docs/adr/0039-leftover-name-note.md)).
 
+`--edit-aftercare` (off by default; `edit_aftercare = 1` in a declared harness config) tells the model, on the result of a Python edit,
+when the edit left a `return` or `raise` followed at the same indentation by a line that can never run, which is what a rewrite of
+a function looks like when the edit's range ended at its `def` line. The check itself always runs and is recorded on the `EditApplied`
+event (`unreachable`) and in `kopicode sessions -report`; the flag only decides whether the model is told
+([ADR-0040](docs/adr/0040-edit-left-code-behind-note.md)).
+
 A session is bounded: each prompt gets at most **20 model calls** (the turn cap) and the
 session at most 2M tokens. A task that needs more ends with `stop: max_turns` rather than
 running on; the work done so far stays in the tree, and replying continues it with a fresh

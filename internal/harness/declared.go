@@ -58,6 +58,8 @@ type declaredConfig struct {
 	maxTokens    *int
 	// leftoverNote is 0 or 1 (ADR-0039); a flat file has no booleans.
 	leftoverNote *int
+	// editAftercare is 0 or 1 (ADR-0040), for the same reason.
+	editAftercare *int
 }
 
 // LoadDeclaredConfig reads the declared-config file at path and resolves it into
@@ -130,15 +132,16 @@ func parseDeclaredConfig(path, content string) (declaredConfig, error) {
 		}
 
 		target, ok := map[string]**int{
-			"max_turns":     &dc.maxTurns,
-			"token_budget":  &dc.tokenBudget,
-			"repair_budget": &dc.repairBudget,
-			"max_tokens":    &dc.maxTokens,
-			"leftover_note": &dc.leftoverNote,
+			"max_turns":      &dc.maxTurns,
+			"token_budget":   &dc.tokenBudget,
+			"repair_budget":  &dc.repairBudget,
+			"max_tokens":     &dc.maxTokens,
+			"leftover_note":  &dc.leftoverNote,
+			"edit_aftercare": &dc.editAftercare,
 		}[key]
 		if !ok {
 			return declaredConfig{}, usagef("%s:%d: %q is not a field a declared harness config can "+
-				"override; the tunable keys are base, max_turns, token_budget, repair_budget, max_tokens, leftover_note",
+				"override; the tunable keys are base, max_turns, token_budget, repair_budget, max_tokens, leftover_note, edit_aftercare",
 				path, lineNo, key)
 		}
 
@@ -201,6 +204,12 @@ func resolveDeclared(dc declaredConfig) (Config, error) {
 			return Config{}, usagef("%s: leftover_note is %d; it is 0 (off) or 1 (on)", dc.path, *dc.leftoverNote)
 		}
 		cfg.LeftoverNote = *dc.leftoverNote == 1
+	}
+	if dc.editAftercare != nil {
+		if *dc.editAftercare != 0 && *dc.editAftercare != 1 {
+			return Config{}, usagef("%s: edit_aftercare is %d; it is 0 (off) or 1 (on)", dc.path, *dc.editAftercare)
+		}
+		cfg.EditAftercare = *dc.editAftercare == 1
 	}
 
 	// Validate the resolved value against the engine's own bounds. A built-in

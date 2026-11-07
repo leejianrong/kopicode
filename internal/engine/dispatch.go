@@ -134,10 +134,11 @@ var toolEntries = []toolEntry{
 				Path: a.Path, AnchorStart: a.AnchorStart, AnchorEnd: a.AnchorEnd, NewText: a.NewText,
 				Reply: e.reply,
 			})
-			if jerr := e.journalEdit(ctx, turn, callID, res); jerr != nil {
+			note, jerr := e.journalEdit(ctx, turn, callID, res)
+			if jerr != nil {
 				return toolOutcome{}, jerr
 			}
-			return toolOutcome{output: modelText(res.Output, err), err: err}, nil
+			return toolOutcome{output: modelText(res.Output+note, err), err: err}, nil
 		}),
 
 	entryOf(tools.ToolEditFileFuzzy,
@@ -148,10 +149,11 @@ var toolEntries = []toolEntry{
 			res, err := e.cfg.Tools.EditFileFuzzy(ctx, tools.FuzzyEditRequest{
 				Path: a.Path, Before: a.Before, After: a.After,
 			})
-			if jerr := e.journalEdit(ctx, turn, callID, res); jerr != nil {
+			note, jerr := e.journalEdit(ctx, turn, callID, res)
+			if jerr != nil {
 				return toolOutcome{}, jerr
 			}
-			return toolOutcome{output: modelText(res.Output, err), err: err}, nil
+			return toolOutcome{output: modelText(res.Output+note, err), err: err}, nil
 		}),
 
 	// delete_file is classified permission.OperationWrite, matching write_file:
@@ -547,7 +549,7 @@ func (e *Engine) journalPermissionUnanswered(ctx context.Context, turn int, id s
 // them, because that adjacency is the rule SLICE-1 §9 classifies on: a syntax
 // failure directly after an edit means the edit produced code that does not
 // parse, which is a harness signal rather than a model one.
-func (e *Engine) journalEdit(ctx context.Context, turn int, callID string, res tools.EditResult) error {
+func (e *Engine) journalEdit(ctx context.Context, turn int, callID string, res tools.EditResult) (string, error) {
 	switch {
 	case res.Rejection != nil:
 		_, err := e.append(ctx, turn, journal.EditRejected{
@@ -559,15 +561,18 @@ func (e *Engine) journalEdit(ctx context.Context, turn int, callID string, res t
 			AnchorEnd:   res.AnchorEnd,
 			Detail:      journal.InlineText(res.Rejection.Detail),
 		})
-		return err
+		return "", err
 
 	case res.Cancelled || res.StartLine == 0:
 		// Nothing landed: the call was cancelled before the write, or never
 		// got as far as resolving the file. There is no diff to record and
 		// recording one would say a change happened.
-		return nil
+		return "", nil
 
 	default:
+		// ADR-0040: what this edit left that can never run. Always read and
+		// journaled; only shown to the model when the setting is on.
+		dead := deadAfterExit(res.Path, res.Diff)
 		if _, err := e.append(ctx, turn, journal.EditApplied{
 			CallID:        callID,
 			Path:          res.Path,
@@ -576,15 +581,20 @@ func (e *Engine) journalEdit(ctx context.Context, turn int, callID string, res t
 			AnchorEnd:     res.AnchorEnd,
 			AnchorVersion: res.AnchorVersion,
 			Translated:    translatedAnchors(res.Translated),
+			Unreachable:   deadJournal(dead),
 			Diff:          journal.InlineText(res.Diff),
 		}); err != nil {
-			return err
+			return "", err
 		}
 		if e.leftover != nil {
 			e.leftover.observe(res.Diff)
 		}
 		e.claims.touch(res.Path)
-		return e.syntaxGate(ctx, turn, res.Path)
+		note := ""
+		if e.cfg.Selection.Config.EditAftercare {
+			note = aftercareNote(dead)
+		}
+		return note, e.syntaxGate(ctx, turn, res.Path)
 	}
 }
 

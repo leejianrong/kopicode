@@ -465,8 +465,20 @@ type EditApplied struct {
 	// sent. Omitted when nothing was translated, and a translation does not
 	// make the mode fuzzy: the pairing is computed, not matched by similarity.
 	Translated []TranslatedAnchor `json:"translated_anchors,omitempty"`
+	// Unreachable lists each `return` or `raise` in a Python file that the edit
+	// left followed, at the same indentation, by a line that can never run, where
+	// either line was added by this edit (ADR-0040). Written whether or not the
+	// model was told. Omitted when there were none.
+	Unreachable []UnreachableLine `json:"unreachable,omitempty"`
 	// Diff is the unified diff actually applied.
 	Diff Text `json:"diff"`
+}
+
+// UnreachableLine is one such pair, by 1-based line number in the edited file:
+// Line is the return or raise, Next the line after it that cannot run.
+type UnreachableLine struct {
+	Line int `json:"line"`
+	Next int `json:"next"`
 }
 
 // TranslatedAnchor is one anchor an edit had translated (ADR-0038).

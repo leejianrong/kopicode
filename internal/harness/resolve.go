@@ -59,6 +59,10 @@ type Overrides struct {
 	// LeftoverNote turns on the leftover-name note (ADR-0039). False means not
 	// given. Like the limits it changes the configuration and so the hash.
 	LeftoverNote bool
+	// EditAftercare turns on the note for an edit that left code that can never
+	// run (ADR-0040). False means not given. It changes the configuration and so
+	// the hash.
+	EditAftercare bool
 	// UserConfig reads the user-level config.toml (ADR-0024) as the rung between
 	// the repository's file and the built-in default. Only the human-facing front
 	// ends set it: serve, mcp and kopibench resolve from flags, the repository
@@ -122,6 +126,10 @@ func BindLimits(fs *flag.FlagSet, o *Overrides) {
 	})
 	fs.BoolFunc("leftover-note", "after a passing verification, tell the model once if a name its own edits removed is still in the tree (off by default)", func(string) error {
 		o.LeftoverNote = true
+		return nil
+	})
+	fs.BoolFunc("edit-aftercare", "tell the model when an edit it just made left a Python line that can never run (off by default)", func(string) error {
+		o.EditAftercare = true
 		return nil
 	})
 	fs.Func("stall-threshold", "tell the model it is stuck after this many identical calls with the same result, or failed edits to one file, in a row (default 3 in the REPL, 0 = off elsewhere)", func(v string) error {
@@ -432,6 +440,9 @@ func Resolve(dir string, o Overrides) (Selection, error) {
 	if o.LeftoverNote {
 		cfg.LeftoverNote = true
 	}
+	if o.EditAftercare {
+		cfg.EditAftercare = true
+	}
 
 	cfg.Hooks = user.hooks()
 
@@ -503,6 +514,9 @@ func resolveUnpinned(dir string, o Overrides, file, user FileConfig, namePrefix,
 	}
 	if o.LeftoverNote {
 		cfg.LeftoverNote = true
+	}
+	if o.EditAftercare {
+		cfg.EditAftercare = true
 	}
 	cfg.Hooks = user.hooks()
 	return Selection{
