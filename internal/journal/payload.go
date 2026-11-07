@@ -896,6 +896,42 @@ type LeftoverName struct {
 	Locations []string `json:"locations"`
 }
 
+// ClaimUnbacked records that the model's final message said it changed a file the
+// journal shows no edit to (ADR-0041). It is a record and nothing more: the
+// session ended exactly as it would have, and the model was shown nothing. A
+// message is read as claiming a change when a file name is followed, on the same
+// line, by a change verb ("accounts/store.py - updated the definition").
+type ClaimUnbacked struct {
+	// Message is the Seq of the AssistantMessage that made the claim.
+	Message uint64 `json:"message"`
+	// Files are the files named as changed, at most ten.
+	Files []ClaimedFile `json:"files"`
+}
+
+func (ClaimUnbacked) Type() Type { return TypeClaimUnbacked }
+
+// ClaimUnchecked is ClaimUnbacked's other outcome: the message names files as
+// changed that the journal shows no edit to, but a shell command ran that may
+// have written them, so the journal cannot say the claim is false. Written
+// instead of ClaimUnbacked, never as well, and only when ClaimUnbacked would
+// otherwise have been written.
+type ClaimUnchecked struct {
+	Message uint64 `json:"message"`
+	Reason  string `json:"reason"`
+	// Files are the same list ClaimUnbacked would have carried.
+	Files []ClaimedFile `json:"files"`
+}
+
+func (ClaimUnchecked) Type() Type { return TypeClaimUnchecked }
+
+// ClaimedFile is one file a final message named as changed, with the text that
+// made it read as a claim so a false positive can be seen.
+type ClaimedFile struct {
+	Path string `json:"path"`
+	// Span is the file name through the change verb, as written.
+	Span string `json:"span"`
+}
+
 // AskRequested records that the model paused the turn to ask the human a
 // question (docs/adr/0009-ask-tool-contract.md decision 3).
 //

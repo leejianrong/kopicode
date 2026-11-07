@@ -90,6 +90,14 @@ const (
 	// TypeLeftoverNoted is ADR-0039's addition: the note that a name the model's
 	// own edits removed is still in the tree.
 	TypeLeftoverNoted Type = "LeftoverNoted"
+
+	// TypeClaimUnbacked is ADR-0041's addition: a final message said it changed a
+	// file the journal shows no edit to.
+	TypeClaimUnbacked Type = "ClaimUnbacked"
+
+	// TypeClaimUnchecked is ADR-0041's other half: the same comparison, which
+	// could not be made because a shell command may have written files.
+	TypeClaimUnchecked Type = "ClaimUnchecked"
 )
 
 // Payload is one event's typed body.
@@ -270,6 +278,9 @@ var registry = map[Type]func([]byte) (Payload, error){
 	TypeHookRan: decodeInto[HookRan],
 
 	TypeLeftoverNoted: decodeInto[LeftoverNoted],
+
+	TypeClaimUnbacked:  decodeInto[ClaimUnbacked],
+	TypeClaimUnchecked: decodeInto[ClaimUnchecked],
 }
 
 // KnownTypes lists every discriminator this build can decode into a typed

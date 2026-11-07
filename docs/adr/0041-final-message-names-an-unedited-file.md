@@ -30,3 +30,15 @@ The sample is the two scenario families this repo runs and is not a sample of re
 ## Alternative
 
 Close KOP-230: three of 89 is the same one-edit stop already counted in ADR-0039, which a driver caught by reading the tree. The cost of closing is that an outer agent has to do that every time; the event makes it one line in a report.
+
+## Implementation notes
+
+Settled while building it (KOP-230); none changes a decision above except where it says so.
+
+- **Per exchange, on a final stop.** The comparison runs at the end of each `Run` that stops on the model's own prose (completed, `verification_failed`, or `stop_gate_failed`), not once at `Close`, and the touched files are the ones this prompt's calls changed. A refused stop does not run it (its message is not the last word). A follow-up prompt that truthfully describes an earlier prompt's edits would be flagged; not measured.
+- **"A shell may have written" is read from the tree, not from the command.** A turn that ran a shell and no write tool counts as having written only if its snapshot's tree differs from the previous snapshot's. The first snapshot of a session has nothing to compare with, a turn with an edit beside the shell cannot be told apart, and a session with no snapshotter has no tree, so all three count as written. That is conservative: it can turn a real finding into `ClaimUnchecked`, never the reverse. (ADR-0042 would give the first snapshot a baseline.)
+- **`ClaimUnchecked` is written only when `ClaimUnbacked` would have been**, as decision 1 says "instead", so a session that ran a writing shell and made no such claim gets no event.
+- **A hedge word before the verb is not a claim.** The first replay over the committed journals flagged `2026-10-23-final-round/ds-s5`, where the message says "The fix belongs in `tests/test_ops.py`: line 12 should assert ... (or be deleted)", a suggestion. A verb with `should`, `could`, `would`, `might`, `must`, `may`, `need`, `please`, `if`, `be` or `to` between the file name and the verb is skipped. Decision 1's "0 false positives" held for the sample the ADR was written from, not for this one.
+- **Replay result, after that filter:** 175 sessions with a final message among the journals under `docs/dogfood-runs`, **7 flagged, all 7 the one-edit s3 stop** (an edit to `README.md` only, a message listing five files): `kop-222-regions/regions-1, 2, 4, 6`, `kop-222-translation/base-1`, `trial-new-0` and the Claude Code driver's s3. Read: regions-1 and regions-6 messages, and the edit list of regions-2 and 4. A claim in prose with no file name is not seen.
+- **The REPL prints one `[claim]` line** for either event, for a person; the model is shown nothing. `kopicode sessions -report` prints a `claims` line only when there is one.
+- **Not built:** decision 4, the extra turn.

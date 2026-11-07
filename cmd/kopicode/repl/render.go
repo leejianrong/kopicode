@@ -193,6 +193,13 @@ func (l *Loop) Render(e engine.Event) {
 			l.tag("leftover", "search did not run: "+e.Detail)
 		}
 
+	case engine.EventClaimUnbacked:
+		// ADR-0041: a record for the person; the model was shown nothing.
+		l.tag("claim", e.Text+" (the journal shows no edit to it)")
+
+	case engine.EventClaimUnchecked:
+		l.tag("claim", e.Text+" (cannot tell: "+e.Detail+")")
+
 	case engine.EventAskAnswered:
 		if e.Reason == "refused" {
 			l.tag("ask", fmt.Sprintf("unanswered (%s): %s", e.Source, e.Text))

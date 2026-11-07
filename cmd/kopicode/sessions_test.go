@@ -235,3 +235,32 @@ func TestSessionsReportOfAnUnknownIdFails(t *testing.T) {
 		t.Errorf("reportCmd for an unknown id exited %d, want a failure; stderr %q", code, errb.String())
 	}
 }
+
+// TestWriteReportPrintsAClaimTheJournalDoesNotBack is ADR-0041 decision 3: the
+// line names the message and the files, and says when a shell could have written
+// them. A report with no claims prints no claims line, so an older record is not
+// read as having passed a check it never had.
+func TestWriteReportPrintsAClaimTheJournalDoesNotBack(t *testing.T) {
+	r := engine.SessionReport{ID: "s1", Final: &engine.ReportMessage{Seq: 40, Text: "Done."}}
+	r.Permissions.Decisions = map[string]int{}
+	var none strings.Builder
+	writeReport(&none, r)
+	if strings.Contains(none.String(), "claims") {
+		t.Errorf("a report with no claims printed a claims line:\n%s", none.String())
+	}
+
+	r.Claims = &engine.ReportClaims{
+		Unbacked:  []engine.ReportClaim{{Seq: 41, Message: 40, Files: []string{"a.py", "b.py"}}},
+		Unchecked: []engine.ReportClaim{{Seq: 42, Message: 40, Files: []string{"c.py"}}},
+	}
+	var b strings.Builder
+	writeReport(&b, r)
+	for _, want := range []string{
+		"claims    message seq 40 names files as changed that the journal shows no edit to: a.py, b.py (seq 41)",
+		"a shell may have written them: c.py (seq 42)",
+	} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("report lacks %q:\n%s", want, b.String())
+		}
+	}
+}

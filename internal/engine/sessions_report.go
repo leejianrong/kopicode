@@ -52,8 +52,28 @@ type SessionReport struct {
 
 	Permissions ReportPermissions `json:"permissions"`
 
+	// Claims are the final messages that named a file as changed which the
+	// journal shows no edit to (ADR-0041). Absent when there were none, which
+	// includes every record written before the check existed.
+	Claims *ReportClaims `json:"claims,omitempty"`
+
 	// Final is the last AssistantMessage, which R8 reads against the rest.
 	Final *ReportMessage `json:"final_message,omitempty"`
+}
+
+// ReportClaims holds ClaimUnbacked and ClaimUnchecked events. Unchecked is the
+// same list when a shell command may have written the files, so it is not a
+// finding, only the record that the comparison could not be made.
+type ReportClaims struct {
+	Unbacked  []ReportClaim `json:"unbacked,omitempty"`
+	Unchecked []ReportClaim `json:"unchecked,omitempty"`
+}
+
+// ReportClaim is one such event.
+type ReportClaim struct {
+	Seq     uint64   `json:"seq"`
+	Message uint64   `json:"message"`
+	Files   []string `json:"files"`
 }
 
 // ReportEnd is the SessionEnded event.
@@ -206,6 +226,16 @@ func ReportSession(ctx context.Context, dir, id string) (SessionReport, error) {
 			if p.Decision != "allow" {
 				r.Permissions.Denied = append(r.Permissions.Denied, ReportDenial{Seq: ev.Seq, Source: p.Source, Reason: p.Reason})
 			}
+		case journal.ClaimUnbacked:
+			if r.Claims == nil {
+				r.Claims = &ReportClaims{}
+			}
+			r.Claims.Unbacked = append(r.Claims.Unbacked, ReportClaim{Seq: ev.Seq, Message: p.Message, Files: claimedPaths(p.Files)})
+		case journal.ClaimUnchecked:
+			if r.Claims == nil {
+				r.Claims = &ReportClaims{}
+			}
+			r.Claims.Unchecked = append(r.Claims.Unchecked, ReportClaim{Seq: ev.Seq, Message: p.Message, Files: claimedPaths(p.Files)})
 		case journal.AssistantMessage:
 			m := &ReportMessage{Seq: ev.Seq, Text: p.Text.Inline}
 			if p.Text.Inline == "" && p.Text.Blob != "" {

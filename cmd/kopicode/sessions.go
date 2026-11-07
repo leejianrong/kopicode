@@ -233,6 +233,14 @@ func writeReport(w io.Writer, r engine.SessionReport) {
 	for _, d := range r.Permissions.Denied {
 		say(w, "  denied  seq %d  %s  %s\n", d.Seq, d.Source, d.Reason)
 	}
+	if r.Claims != nil {
+		for _, c := range r.Claims.Unbacked {
+			say(w, "claims    message seq %d names files as changed that the journal shows no edit to: %s (seq %d)\n", c.Message, strings.Join(c.Files, ", "), c.Seq)
+		}
+		for _, c := range r.Claims.Unchecked {
+			say(w, "claims    message seq %d names files as changed with no edit on the journal, but a shell may have written them: %s (seq %d)\n", c.Message, strings.Join(c.Files, ", "), c.Seq)
+		}
+	}
 	switch {
 	case r.Final == nil:
 		say(w, "final     no assistant message in the record\n")

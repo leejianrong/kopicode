@@ -51,3 +51,7 @@ between. Until KOP-228 the request was written together with the answer, so a re
 
 `LeftoverNoted` (only with `--leftover-note`, ADR-0039) records the names the model's own edits removed that the engine then found still in the tree, with
 `file:line` for each, or a `skipped` reason when the search could not run (which is not "clean"). It is written before the note is shown, at most once per name per prompt.
+
+`ClaimUnbacked` and `ClaimUnchecked` (ADR-0041) record, at the end of an exchange, that the last assistant message names a file as changed (a file name, then a change verb on the same line)
+which the journal shows no edit to. `message` is the `seq` of that `AssistantMessage` and each file carries the `span` that made it read as a claim. `ClaimUnchecked` is written instead when a
+shell command may have written the files, so the journal cannot say the claim is false. Neither changes how the session ends or what the model was shown, and a record from before they existed has none, which is not "checked and clean".
