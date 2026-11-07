@@ -1,0 +1,1 @@
+The test in tests/test_data.py reads a generated file. Run gen.py with run_shell to generate it, then run the tests with run_shell and tell me whether they pass. Do not change any files.

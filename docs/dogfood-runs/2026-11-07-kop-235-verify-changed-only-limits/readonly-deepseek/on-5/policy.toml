@@ -1,0 +1,2 @@
+root = "<scratch>/readonly-deepseek_deepseek-v3.2/on-5/tree"
+allow_commands = [["ls"],["cat"],["git","status"],["git","log"]]
