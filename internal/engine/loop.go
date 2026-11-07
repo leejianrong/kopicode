@@ -214,11 +214,18 @@ func (e *Engine) runTurn(ctx context.Context, turn int) (Stop, error) {
 				return StopHarnessError, err
 			}
 			if mutated {
-				if err := e.snapshot(ctx, turn); err != nil {
+				unchanged, err := e.snapshot(ctx, turn)
+				if err != nil {
 					return StopHarnessError, err
 				}
-				if stop, err := e.verify(ctx, turn); stop != StopUnspecified {
-					return stop, err
+				// ADR-0042: a turn that left the tree as it found it has nothing to
+				// verify, and verifying it would show the model a failure it did not
+				// cause. A failure still outstanding stays outstanding (e.unverified
+				// is not touched here).
+				if !unchanged {
+					if stop, err := e.verify(ctx, turn); stop != StopUnspecified {
+						return stop, err
+					}
 				}
 			}
 			return StopUnspecified, nil
@@ -563,23 +570,48 @@ func (e *Engine) verify(ctx context.Context, turn int) (Stop, error) {
 
 // snapshot records the working tree after a turn that ran a tool able to change
 // it, and journals the shadow ref.
-func (e *Engine) snapshot(ctx context.Context, turn int) error {
+//
+// It reports whether the turn left the tree as it was before its mutating calls,
+// which is only ever true with Config.VerifyChangedOnly on (ADR-0042): the baseline
+// it compares with is not taken otherwise.
+func (e *Engine) snapshot(ctx context.Context, turn int) (bool, error) {
 	if e.cfg.Snapshots == nil {
 		e.claims.noteSnapshot("")
-		return nil
+		return false, nil
 	}
 	snap, err := e.cfg.Snapshots.Snapshot(ctx, turn)
 	if err != nil {
-		return fmt.Errorf("engine: snapshotting turn %d: %w", turn, err)
+		return false, fmt.Errorf("engine: snapshotting turn %d: %w", turn, err)
 	}
 	e.claims.noteSnapshot(snap.Tree)
+	unchanged := e.baseline != "" && snap.Tree == e.baseline
+	if e.cfg.Selection.Config.VerifyChangedOnly {
+		e.baseline = snap.Tree
+	}
 	_, err = e.append(ctx, turn, journal.TurnSnapshot{
-		Ref:    snap.Ref,
-		Commit: snap.Commit,
-		Tree:   snap.Tree,
-		Parent: snap.Parent,
+		Ref:       snap.Ref,
+		Commit:    snap.Commit,
+		Tree:      snap.Tree,
+		Parent:    snap.Parent,
+		Unchanged: unchanged,
 	})
-	return err
+	return unchanged, err
+}
+
+// takeBaseline reads the tree once, before the session's first mutating call, when
+// verification is limited to a changed tree. A session that never calls a mutating
+// tool pays nothing, and a resumed one takes its own at its first call: the tree may
+// have changed between the two runs.
+func (e *Engine) takeBaseline(ctx context.Context) error {
+	if !e.cfg.Selection.Config.VerifyChangedOnly || e.cfg.Snapshots == nil || e.baseline != "" {
+		return nil
+	}
+	tree, err := e.cfg.Snapshots.Tree(ctx)
+	if err != nil {
+		return fmt.Errorf("engine: reading the baseline tree: %w", err)
+	}
+	e.baseline = tree
+	return nil
 }
 
 // callSiteID is the identifier for a turn's call site — the thing a repair

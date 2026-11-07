@@ -63,6 +63,10 @@ type Overrides struct {
 	// run (ADR-0040). False means not given. It changes the configuration and so
 	// the hash.
 	EditAftercare bool
+	// VerifyChangedOnly turns on verification only after a turn that changed the
+	// tree (ADR-0042). False means not given. It changes the configuration and so
+	// the hash.
+	VerifyChangedOnly bool
 	// UserConfig reads the user-level config.toml (ADR-0024) as the rung between
 	// the repository's file and the built-in default. Only the human-facing front
 	// ends set it: serve, mcp and kopibench resolve from flags, the repository
@@ -130,6 +134,10 @@ func BindLimits(fs *flag.FlagSet, o *Overrides) {
 	})
 	fs.BoolFunc("edit-aftercare", "tell the model when an edit it just made left a Python line that can never run (off by default)", func(string) error {
 		o.EditAftercare = true
+		return nil
+	})
+	fs.BoolFunc("verify-changed-only", "run forced verification only after a turn whose tool calls changed the working tree, so a read-only shell call is not verified (off by default)", func(string) error {
+		o.VerifyChangedOnly = true
 		return nil
 	})
 	fs.Func("stall-threshold", "tell the model it is stuck after this many identical calls with the same result, or failed edits to one file, in a row (default 3 in the REPL, 0 = off elsewhere)", func(v string) error {
@@ -443,6 +451,9 @@ func Resolve(dir string, o Overrides) (Selection, error) {
 	if o.EditAftercare {
 		cfg.EditAftercare = true
 	}
+	if o.VerifyChangedOnly {
+		cfg.VerifyChangedOnly = true
+	}
 
 	cfg.Hooks = user.hooks()
 
@@ -517,6 +528,9 @@ func resolveUnpinned(dir string, o Overrides, file, user FileConfig, namePrefix,
 	}
 	if o.EditAftercare {
 		cfg.EditAftercare = true
+	}
+	if o.VerifyChangedOnly {
+		cfg.VerifyChangedOnly = true
 	}
 	cfg.Hooks = user.hooks()
 	return Selection{

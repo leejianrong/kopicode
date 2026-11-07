@@ -960,3 +960,39 @@ func TestSnapshotReadsTheClockPerSnapshot(t *testing.T) {
 		t.Errorf("both snapshots are dated %s; the clock was read once and reused", firstAt)
 	}
 }
+
+// ADR-0042: Tree is the question "did anything change", asked without recording an
+// answer. It returns the same id a Snapshot taken at that moment would, moves with
+// the working tree, and leaves no ref and no commit chain behind.
+func TestTreeAgreesWithSnapshotAndWritesNoRef(t *testing.T) {
+	dir := newRepo(t)
+	_, s := newSnapshotter(t, dir, "session-tree")
+	ctx := context.Background()
+
+	before, err := s.Tree(ctx)
+	if err != nil {
+		t.Fatalf("Tree: %v", err)
+	}
+	if again, err := s.Tree(ctx); err != nil || again != before {
+		t.Fatalf("Tree twice with nothing changed = %q, %v; want %q", again, err, before)
+	}
+	if refs := git(t, dir, "for-each-ref", "--format=%(refname)", repo.RefPrefix); refs != "" {
+		t.Errorf("Tree left refs behind: %q", refs)
+	}
+
+	writeFile(t, dir, "new.txt", "x\n")
+	changed, err := s.Tree(ctx)
+	if err != nil || changed == before {
+		t.Fatalf("Tree after a new file = %q, %v; want a different id from %q", changed, err, before)
+	}
+	snap, err := s.Snapshot(ctx, 1)
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if snap.Tree != changed {
+		t.Errorf("Snapshot tree = %q, Tree = %q; they must agree for a comparison to mean anything", snap.Tree, changed)
+	}
+	if snap.Parent != "" {
+		t.Errorf("Tree moved the chain: the first snapshot has parent %q", snap.Parent)
+	}
+}

@@ -452,6 +452,31 @@ func (s *Snapshotter) Snapshot(ctx context.Context, turn int) (Snapshot, error) 
 	return snap, nil
 }
 
+// Tree returns the tree id the working tree has right now, by the same `git add
+// -A` into the throwaway index and `git write-tree` that [Snapshotter.Snapshot]
+// uses, so two calls with nothing changed between them return the same id and a
+// Snapshot taken after returns it too. It writes no commit and no ref and does not
+// move the chain: it is for asking "did this change anything" (ADR-0042). Files
+// ignored by .gitignore or info/exclude are not in it, which is the same tree git
+// itself would describe.
+func (s *Snapshotter) Tree(ctx context.Context) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	env, err := s.env()
+	if err != nil {
+		return "", err
+	}
+	if _, err := runGit(ctx, s.repo.root, env, "add", "-A"); err != nil {
+		return "", fmt.Errorf("repo: staging the working tree into %s: %w", s.indexPath, err)
+	}
+	tree, err := s.object(ctx, env, "write-tree")
+	if err != nil {
+		return "", fmt.Errorf("repo: writing the working tree's tree: %w", err)
+	}
+	return tree, nil
+}
+
 // object runs a git command whose whole output is one object id, and checks
 // that it looks like one. A truncated or empty read here would otherwise be
 // recorded as a snapshot, and the lie would only surface when someone tried to

@@ -262,6 +262,12 @@ type Config struct {
 	// the hash only when set. Detection and the journal field do not depend on it.
 	EditAftercare bool
 
+	// VerifyChangedOnly makes the engine run forced verification only after a turn
+	// whose mutating calls changed the tree (ADR-0042). False is today's rule: any
+	// turn that ran a mutating tool, a shell included, is verified. In the hash only
+	// when set.
+	VerifyChangedOnly bool
+
 	// Hooks are the commands a person has asked to run around tool calls and
 	// at a stop (ADR-0036). The zero value is no hooks, which is every
 	// registered arm and so every benchmark number. They change what the

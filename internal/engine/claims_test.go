@@ -20,6 +20,8 @@ import (
 // having written nothing.
 type steadyTree struct{}
 
+func (steadyTree) Tree(context.Context) (string, error) { return strings.Repeat("b", 40), nil }
+
 func (steadyTree) Snapshot(_ context.Context, turn int) (repo.Snapshot, error) {
 	return repo.Snapshot{Ref: "refs/kopicode/x/1", Commit: strings.Repeat("a", 40), Tree: strings.Repeat("b", 40)}, nil
 }

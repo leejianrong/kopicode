@@ -321,6 +321,10 @@ type stubSnapshotter struct {
 	err   error
 }
 
+// Tree is the tree before the first turn's: it differs from every Snapshot's, so a
+// turn reads as having changed the tree unless a test says otherwise.
+func (s *stubSnapshotter) Tree(context.Context) (string, error) { return fmt.Sprintf("%040d", 99), nil }
+
 func (s *stubSnapshotter) Snapshot(_ context.Context, turn int) (repo.Snapshot, error) {
 	if s.err != nil {
 		return repo.Snapshot{}, s.err
