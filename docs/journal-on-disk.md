@@ -52,6 +52,9 @@ between. Until KOP-228 the request was written together with the answer, so a re
 `LeftoverNoted` (only with `--leftover-note`, ADR-0039) records the names the model's own edits removed that the engine then found still in the tree, with
 `file:line` for each, or a `skipped` reason when the search could not run (which is not "clean"). It is written before the note is shown, at most once per name per prompt.
 
+`TurnSnapshot.unchanged` (ADR-0042, only with `--verify-changed-only`) is true when the turn's mutating calls left the tree as it was before them, so forced verification was
+deliberately not run for that turn and there is no `VerificationRun` after it. Absent means the setting was off or the tree changed, not that a check passed.
+
 `EditApplied.unreachable` (ADR-0040) lists, for a Python edit, each `return` or `raise` the edit left followed at the same indentation by a line that cannot run, as `{line, next}`
 numbers in the edited file, where one of the two lines was added by the edit. It is written whether or not `--edit-aftercare` told the model; absent means none were found, and an older record has none because the check did not exist.
 

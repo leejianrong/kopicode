@@ -198,6 +198,13 @@ a function looks like when the edit's range ended at its `def` line. The check i
 event (`unreachable`) and in `kopicode sessions -report`; the flag only decides whether the model is told
 ([ADR-0040](docs/adr/0040-edit-left-code-behind-note.md)).
 
+`--verify-changed-only` (off by default; `verify_changed_only = 1` in a declared harness config) limits forced verification to a turn
+whose tool calls changed the working tree. Without it, a turn that ran any shell command is verified, even `ls`, and a failing suite the
+session never touched is shown to the model as "this change is not finished". With it, the tree before the session's first changing call is
+read once, each later turn is compared with the last snapshot, and a turn that left the tree as it was gets no verification and no message
+(its `TurnSnapshot` carries `unchanged`). A change that only touches files git ignores, such as a build into `bin/`, is not seen
+as a change ([ADR-0042](docs/adr/0042-verify-only-a-changed-tree.md)).
+
 A session is bounded: each prompt gets at most **20 model calls** (the turn cap) and the
 session at most 2M tokens. A task that needs more ends with `stop: max_turns` rather than
 running on; the work done so far stays in the tree, and replying continues it with a fresh
