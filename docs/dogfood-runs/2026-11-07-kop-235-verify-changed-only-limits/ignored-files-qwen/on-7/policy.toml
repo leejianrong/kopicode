@@ -1,0 +1,2 @@
+root = "<scratch>/ignored-qwen_qwen3-coder-next/on-7/tree"
+allow_commands = [["python3","gen.py"],["python3","-m","unittest"]]

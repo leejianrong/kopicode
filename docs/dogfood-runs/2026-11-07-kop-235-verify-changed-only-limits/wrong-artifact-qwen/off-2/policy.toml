@@ -1,0 +1,2 @@
+root = "<scratch>/wrongartifact-qwen_qwen3-coder-next/off-2/tree"
+allow_commands = [["python3","gen.py"],["python3","-m","unittest"],["cat"],["ls"]]

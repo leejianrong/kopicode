@@ -1,0 +1,18 @@
+F
+======================================================================
+FAIL: test_generated_file_has_the_answer (test_data.DataTest.test_generated_file_has_the_answer)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/tmp/claude-1000/-home-jianlee-projects-abang-ai-kopicode/df42de18-1978-41c3-9cc5-87810138c8b7/scratchpad/m235/wrongartifact-qwen_qwen3-coder-next/on-4/tree/tests/test_data.py", line 7, in test_generated_file_has_the_answer
+    self.assertEqual(f.read().strip(), "42")
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: '41' != '42'
+- 41
++ 42
+
+
+----------------------------------------------------------------------
+Ran 1 test in 0.001s
+
+FAILED (failures=1)
+exit 1
