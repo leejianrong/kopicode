@@ -133,6 +133,37 @@ digits, `.`, `_` or `-`, starting with a letter or digit. A bad one, or one that
 record, is a usage error (exit 2) before anything is opened or written. It cannot be combined
 with `--resume`; `run` refuses `--fork` anyway.
 
+## Letting a run use the shell
+
+With no policy, `run --print` refuses every `run_shell` call and every write outside the project (nobody is there to
+ask). The model is told so, and a model that wants to run its tests can keep trying until the turn cap, which ends the
+session `max_turns`. `--policy-file <path>` is how a caller says what an unattended run may do.
+
+```toml
+root = "/abs/path/to/the/repository"
+allow_commands = [["git", "status"], ["git", "diff"], ["ls"], ["python3", "-m", "unittest"]]
+```
+
+**Write command presets under `allow_commands`, not `allow`.** The two keys match differently:
+
+| key | an entry is | matches |
+| --- | --- | --- |
+| `allow_commands` ([ADR-0018](adr/0018-tokenized-allowlist.md)) | a command name and its leading arguments, `["git", "status"]` | any command line whose every command starts with a listed entry on whole tokens: `git status --short`, `cd sub && git status`, `git status \| head` if `head` is listed too |
+| `allow` ([ADR-0011](adr/0011-unattended-invocation-policy-gate.md)) | the exact argv `run_shell` runs, which is `["/bin/sh", "-c", "<the whole line>"]` | that one line, byte for byte, and nothing else |
+
+A preset written as `allow = [["git", "status"]]` looks right and permits nothing: `run_shell` executes
+`/bin/sh -c "git status --short"`, which is not that argv, so every call is refused with
+`["/bin/sh" "-c" "git status --short"] is not on the declared allowlist`. The same file with `allow_commands` allows it
+(`every command in the line matches the declared allow_commands`). Both were run against
+`kopicode run --print --policy-file` to write this paragraph.
+
+`cd` into a directory inside `root`, a redirect that writes inside `root` or to `/dev/null`, and `2>&1` need no entry; the
+filters a model pipes into (`head`, `tail`, `grep`) do. An entry that starts other commands (`env`, `sh`, `xargs`, `sudo`,
+`find`, ...) is a usage error (exit 2) when the file loads, and the never-allow rules apply on top of every entry. The
+full rules, with the never-allow list and the `serve` consent modes, are under
+[`"unattended_policy"`](kopicode-serve-protocol.md#unattended_policy-adr-0011) in the serve protocol; `kopicode mcp`
+takes the same flag.
+
 ## Hooks are not run here
 
 The user-config hooks of [ADR-0036](adr/0036-minimal-hooks.md) (`pre_tool_hook`, `post_tool_hook`,
