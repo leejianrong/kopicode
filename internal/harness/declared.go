@@ -60,6 +60,8 @@ type declaredConfig struct {
 	leftoverNote *int
 	// editAftercare is 0 or 1 (ADR-0040), for the same reason.
 	editAftercare *int
+	// verifyChangedOnly is 0 or 1 (ADR-0042), for the same reason.
+	verifyChangedOnly *int
 }
 
 // LoadDeclaredConfig reads the declared-config file at path and resolves it into
@@ -132,16 +134,17 @@ func parseDeclaredConfig(path, content string) (declaredConfig, error) {
 		}
 
 		target, ok := map[string]**int{
-			"max_turns":      &dc.maxTurns,
-			"token_budget":   &dc.tokenBudget,
-			"repair_budget":  &dc.repairBudget,
-			"max_tokens":     &dc.maxTokens,
-			"leftover_note":  &dc.leftoverNote,
-			"edit_aftercare": &dc.editAftercare,
+			"max_turns":           &dc.maxTurns,
+			"token_budget":        &dc.tokenBudget,
+			"repair_budget":       &dc.repairBudget,
+			"max_tokens":          &dc.maxTokens,
+			"leftover_note":       &dc.leftoverNote,
+			"edit_aftercare":      &dc.editAftercare,
+			"verify_changed_only": &dc.verifyChangedOnly,
 		}[key]
 		if !ok {
 			return declaredConfig{}, usagef("%s:%d: %q is not a field a declared harness config can "+
-				"override; the tunable keys are base, max_turns, token_budget, repair_budget, max_tokens, leftover_note, edit_aftercare",
+				"override; the tunable keys are base, max_turns, token_budget, repair_budget, max_tokens, leftover_note, edit_aftercare, verify_changed_only",
 				path, lineNo, key)
 		}
 
@@ -210,6 +213,12 @@ func resolveDeclared(dc declaredConfig) (Config, error) {
 			return Config{}, usagef("%s: edit_aftercare is %d; it is 0 (off) or 1 (on)", dc.path, *dc.editAftercare)
 		}
 		cfg.EditAftercare = *dc.editAftercare == 1
+	}
+	if dc.verifyChangedOnly != nil {
+		if *dc.verifyChangedOnly != 0 && *dc.verifyChangedOnly != 1 {
+			return Config{}, usagef("%s: verify_changed_only is %d; it is 0 (off) or 1 (on)", dc.path, *dc.verifyChangedOnly)
+		}
+		cfg.VerifyChangedOnly = *dc.verifyChangedOnly == 1
 	}
 
 	// Validate the resolved value against the engine's own bounds. A built-in

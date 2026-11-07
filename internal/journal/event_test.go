@@ -170,10 +170,11 @@ func fixtures() map[journal.Type]journal.Payload {
 			Note:      "use uv and a venv",
 		},
 		journal.TypeTurnSnapshot: journal.TurnSnapshot{
-			Ref:    "refs/kopicode/01JQ0/3",
-			Commit: "1111111111111111111111111111111111111111",
-			Tree:   "2222222222222222222222222222222222222222",
-			Parent: "3333333333333333333333333333333333333333",
+			Ref:       "refs/kopicode/01JQ0/3",
+			Commit:    "1111111111111111111111111111111111111111",
+			Tree:      "2222222222222222222222222222222222222222",
+			Parent:    "3333333333333333333333333333333333333333",
+			Unchanged: true,
 		},
 		journal.TypeVerificationRun: journal.VerificationRun{
 			Command:  []string{"uv", "run", "pytest"},

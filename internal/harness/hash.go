@@ -119,6 +119,10 @@ func (c Config) hashWith(anchorVersion string) string {
 	if c.EditAftercare {
 		p.bool("edit_aftercare", true)
 	}
+	// Likewise for verifying only a changed tree (ADR-0042).
+	if c.VerifyChangedOnly {
+		p.bool("verify_changed_only", true)
+	}
 
 	// Likewise for hooks (ADR-0036 decision 9): a session with none keeps the
 	// hash it had, and one with any is never pooled with one with a different

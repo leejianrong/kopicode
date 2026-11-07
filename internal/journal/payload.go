@@ -585,6 +585,10 @@ type TurnSnapshot struct {
 	Commit string `json:"commit"`
 	Tree   string `json:"tree"`
 	Parent string `json:"parent,omitempty"`
+	// Unchanged is true when Tree equals the tree before this turn's mutating
+	// calls, and so forced verification was deliberately not run (ADR-0042). Only
+	// ever written with the setting on; absent means "not asked", not "changed".
+	Unchanged bool `json:"unchanged,omitempty"`
 }
 
 func (TurnSnapshot) Type() Type { return TypeTurnSnapshot }

@@ -27,6 +27,9 @@ import (
 // G1); restore and fork are slice 2 and nothing here reads a snapshot back.
 type Snapshotter interface {
 	Snapshot(ctx context.Context, turn int) (repo.Snapshot, error)
+	// Tree is the tree id the working tree has now, with no commit and no ref
+	// (ADR-0042): what a baseline is taken with.
+	Tree(ctx context.Context) (string, error)
 }
 
 // Config is everything the loop needs: the identity of the arm it is running,
@@ -338,6 +341,11 @@ type Engine struct {
 	// comparing a final message with the journal. Kept for the session because
 	// the tree a later prompt starts from is the one the last snapshot saw.
 	claims *claimTracker
+
+	// baseline is the tree id the working tree had before the session's first
+	// mutating call, then the tree of each snapshot (ADR-0042). Empty until the
+	// first mutating call, and only ever taken when Config.VerifyChangedOnly is on.
+	baseline string
 
 	// reply is the current reply's re-anchor map (ADR-0038), set for the span
 	// of one dispatch and nil outside it.

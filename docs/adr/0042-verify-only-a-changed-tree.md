@@ -44,3 +44,14 @@ Two arms, same build, `qwen/qwen3-coder-next`, a scratch repository whose suite 
 1. **Say what is true instead of skipping.** Keep running verification, and when the tree is identical to the baseline replace "this change is not finished" with a line that the tree is unchanged since the session began and the failure was already there. No hole, since verification still runs against whatever was built. It keeps the extra suite run and the second copy of its output, and it still shows a model a failing suite on a task that is not about it. It also needs the same baseline, so it is not cheaper to build. A reasonable first step if the owner wants no skipped verification.
 2. **Classify the command as read-only.** Rejected above: it is a second allowlist of shell syntax.
 3. **Close KOP-233.** One live case in a corpus that cannot show it, and a person can run `ls` in a green repository without harm. The cost of closing is that a cuttlefish-style unattended run in a repository with a pre-existing failure can be taken off its task by its first read-only shell call, and nothing on the journal says the harness did it beyond the `VerificationRun` itself.
+
+## Implementation notes
+
+Settled while building it (KOP-233); none changes a decision above except where it says so.
+
+- **`Snapshotter.Tree(ctx)`** is on the engine's `Snapshotter` interface, as the Consequences said, and on `repo.Snapshotter`. It shares `Snapshot`'s `add -A` into the throwaway index and `write-tree`, writes no commit and no ref, and does not move the chain; a test holds that its id equals the next `Snapshot`'s.
+- **The baseline is read in `runTool`**, after the consent gate and before the call runs, for any tool marked `mutates`; so a call that is denied or refused takes none. Afterwards it is the last snapshot's tree, kept whether or not the turn was unchanged.
+- **The skip is in the loop, not in `verify`.** A mutating turn is still snapshotted and journaled (`TurnSnapshot.unchanged`); only `verify` is not called, so `e.unverified` is neither set nor cleared (decision 3), and the stop is whatever the model's own stop would have been. A test holds that a failure from an earlier changed turn survives a later unchanged one and the session still ends `verification_failed`.
+- **`unchanged` is written only with the setting on**, because the baseline it compares with exists only then.
+- **The setting** is `Config.VerifyChangedOnly`, `--verify-changed-only` on the REPL and `run --print`, `verify_changed_only = 0|1` in a declared config; in the hash only when set.
+- **The ignored-files hole is as described.** Nothing was added to mitigate it.

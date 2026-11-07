@@ -446,6 +446,14 @@ func (e *Engine) runTool(ctx context.Context, turn int, callID string, call pars
 		return detail, "", false, true, true, nil
 	}
 
+	// ADR-0042: the tree this session started changing, read before the first
+	// mutating call runs so a shell's own writes are not in it.
+	if entry.mutates {
+		if err := e.takeBaseline(ctx); err != nil {
+			return "", "", false, false, false, err
+		}
+	}
+
 	res, err := entry.run(ctx, e, turn, callID, args)
 	if err != nil {
 		return "", "", false, false, false, err
