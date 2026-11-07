@@ -1,6 +1,6 @@
 # ADR-0041: Record, from the journal, a final message that says it changed a file it never edited
 
-*Proposed* 2026-10-27, for the owner to accept or reject. Nothing is built. KOP-230. Builds on [ADR-0039](0039-leftover-name-note.md) (the engine derives what it checks from its own journal, not from the task) and on the one-session-record rule: everything a surface prints is derived from journal events. It touches no boundary in `AGENTS.md`. Part 2 changes how a session ends, so it is a decision.
+*Accepted* 2026-11-07 by the owner, to be built as decided below (proposed 2026-10-27). KOP-230. Builds on [ADR-0039](0039-leftover-name-note.md) (the engine derives what it checks from its own journal, not from the task) and on the one-session-record rule: everything a surface prints is derived from journal events. It touches no boundary in `AGENTS.md`. Part 2 changes how a session ends, so it is a decision.
 
 ## Context
 

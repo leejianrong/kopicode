@@ -1,6 +1,6 @@
 # ADR-0040: Tell the model, on the edit's own result, that its edit left code that can never run
 
-*Proposed* 2026-10-27, for the owner to accept or reject. Nothing is built. KOP-232. Builds on [ADR-0006](0006-hash-anchored-edits-and-failure-attribution.md) (edits fail closed, and never land somewhere plausible without a signal), [ADR-0038](0038-in-reply-anchor-translation.md) (a note appended to an applied edit's result) and [ADR-0039](0039-leftover-name-note.md) (a note is information and never blocks). It changes what the model is told, so it is a decision.
+*Accepted* 2026-11-07 by the owner, to be built as decided below (proposed 2026-10-27). KOP-232. Builds on [ADR-0006](0006-hash-anchored-edits-and-failure-attribution.md) (edits fail closed, and never land somewhere plausible without a signal), [ADR-0038](0038-in-reply-anchor-translation.md) (a note appended to an applied edit's result) and [ADR-0039](0039-leftover-name-note.md) (a note is information and never blocks). It changes what the model is told, so it is a decision.
 
 ## Context
 
