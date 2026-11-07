@@ -423,7 +423,7 @@ func (r *Runner) runTask(ctx context.Context, env taskEnv, task corpus.Task) (re
 
 	taskOut := filepath.Join(env.outDir, task.ID)
 	home := filepath.Join(taskOut, "home")
-	if err := os.MkdirAll(home, 0o700); err != nil {
+	if err := makeTaskHome(home, now()); err != nil {
 		res.SessionErr = fmt.Errorf("bench: creating the temp home for %s: %w", task.ID, err).Error()
 		res.Stop = engine.StopHarnessError.Reason()
 		return res
