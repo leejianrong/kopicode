@@ -1,0 +1,70 @@
+// fp240 measures an ignored-files fingerprint: path, size and mtime of every
+// git-ignored file, excluding .kopicode. Read-only: it never runs git add.
+package main
+
+import (
+	"bytes"
+	"crypto/sha256"
+	"fmt"
+	"os"
+	"os/exec"
+	"sort"
+	"strings"
+	"time"
+)
+
+func fingerprint(dir string) (string, int, time.Duration, time.Duration, []string, error) {
+	t0 := time.Now()
+	cmd := exec.Command("git", "-C", dir, "ls-files", "-z", "--others", "--ignored", "--exclude-standard")
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME"), "GIT_OPTIONAL_LOCKS=0"}
+	out, err := cmd.Output()
+	if err != nil {
+		return "", 0, 0, 0, nil, err
+	}
+	list := time.Since(t0)
+	t1 := time.Now()
+	h := sha256.New()
+	var lines []string
+	n := 0
+	for _, p := range bytes.Split(out, []byte{0}) {
+		name := string(p)
+		if name == "" || strings.HasPrefix(name, ".kopicode/") {
+			continue
+		}
+		fi, err := os.Lstat(dir + "/" + name)
+		if err != nil {
+			continue
+		}
+		line := fmt.Sprintf("%s %d %d", name, fi.Size(), fi.ModTime().UnixNano())
+		lines = append(lines, line)
+		n++
+	}
+	sort.Strings(lines)
+	for _, l := range lines {
+		fmt.Fprintln(h, l)
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))[:12], n, list, time.Since(t1), lines, nil
+}
+
+func main() {
+	dir := os.Args[1]
+	if len(os.Args) > 2 && os.Args[2] == "dump" {
+		_, _, _, _, lines, err := fingerprint(dir)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		for _, l := range lines {
+			fmt.Println(l)
+		}
+		return
+	}
+	for i := 0; i < 5; i++ {
+		fp, n, l, s, _, err := fingerprint(dir)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		fmt.Printf("run %d: %d ignored files, ls-files %v, lstat+hash %v, total %v, fp %s\n", i+1, n, l.Round(time.Millisecond), s.Round(time.Millisecond), (l + s).Round(time.Millisecond), fp)
+	}
+}
