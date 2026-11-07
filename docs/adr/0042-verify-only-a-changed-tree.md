@@ -57,3 +57,45 @@ Settled while building it (KOP-233); none changes a decision above except where 
 - **The ignored-files hole is as described.** Nothing was added to mitigate it.
 - **First measurement ([`2026-11-07-kop-233-verify-changed-only`](../dogfood-runs/2026-11-07-kop-233-verify-changed-only/README.md)):** qwen on the s1 repository with its failing suite, prompt "Run the command ls -la with run_shell and tell me what files exist", 10 pairs. Flag off: 10 of 10 sessions applied an edit (15 edits to the unrelated bug), 25 verifications. Flag on: 0 of 10 edited, 0 verifications, 10 of 10 turns recorded `unchanged`, 2.0 model calls against 6.1. s1 to s4 with the flag on still verify after every edit and pass `check.sh`; s5 made no change. A first prompt that asked for a description of the files never called a shell (20 of 20), so it could not show the effect. The ignored-files hole and other models are unmeasured, so the default stays off until the owner decides.
 - **Limits measured ([`2026-11-07-kop-235-verify-changed-only-limits`](../dogfood-runs/2026-11-07-kop-235-verify-changed-only-limits/README.md)):** the ignored-files hole is real. On a fixture where `gen.py` writes a wrong value into a git-ignored `build/` and the task only says to run it, flag off verified and the model fixed it (final tests pass 10 of 10); flag on skipped verification in 10 of 10 and every session ended `completed` with a failing suite (0 of 10 pass), nothing recorded. When the task says to run the tests, the model covered for the skipped check (10 of 10 ran them and passed). On deepseek/deepseek-v3.2 the read-only prompt edited in 10 of 10 off and 3 of 10 on, with more turns on. Recommendation: not the default as it stands; the next step is a fingerprint that includes ignored files, which is a design change to this ADR for the owner.
+
+## Amendment 1 (Proposed, 2026-11-07, KOP-240): count a change to an ignored file
+
+*Proposed*, for the owner's decision. Nothing is built, and this does not make the flag the default.
+
+### Why
+
+The hole named in the Context, and measured in KOP-235, is real: with a wrong generated file in an ignored `build/`, a session whose shell wrote only that file was treated as unchanged in 10 of 10, verification never ran, and the sessions ended `completed` with a failing suite. The tree id leaves out ignored files by design (decision 1), so an ignored file can change and the id stays put.
+
+### What it would cost
+
+Measured in [`2026-11-07-kop-240-ignored-fingerprint`](../dogfood-runs/2026-11-07-kop-240-ignored-fingerprint/README.md), no model run:
+
+- **Time.** A fingerprint of every ignored file's path, size and modification time (excluding `.kopicode/`) costs 0.3 to 0.45 s warm, 0.8 to 1.0 s on the first call, on two real repositories with about 45,000 ignored files (`node_modules`, 280 to 567 MB). The tree check ADR-0042 already makes costs about 0.01 s warm on the same two. It is paid once per mutating turn, and once more for the baseline.
+- **Noise.** The first `python3 -m unittest` a shell runs in the s1 scenario repository creates `__pycache__` files, which are ignored, so the fingerprint changes after a run that changed nothing. A second run does not change it. A run after a source edit changes one file's time.
+
+### Decision (proposed)
+
+1. **The change fingerprint is the tree id plus an ignored-files digest.** The digest is a hash of the sorted lines `path size mtime_ns` for each path in `git ls-files -z --others --ignored --exclude-standard`, leaving out `.kopicode/`. It reads no file content. It is taken at the same moments as the tree: the lazy baseline before the first mutating call, and after each mutating turn's snapshot.
+2. **A turn is `unchanged` only if both parts equal the baseline.**
+3. **The baseline is refreshed after a forced verification runs.** The suite writes its own caches, so without this every later turn would count as changed because of what the harness itself ran.
+4. **The journal says which part moved.** `TurnSnapshot` gets an optional `ignored_changed: true` when the tree id was equal and the digest was not, so a reader can tell why verification ran.
+5. **Same flag, same default.** This changes what `--verify-changed-only` means; the flag stays off by default, and the default question is decided separately.
+6. **No list of cache names.** `__pycache__`, `.pytest_cache` and the like are not excluded. The first shell test run on an unedited tree therefore counts as a change and verification runs once, which is what happens with the flag off. Skipping on `ls`, `cat` and `git log` is kept, because those write nothing.
+
+### What it does not fix
+
+- A write that keeps the size and the modification time (`cp -p`, `touch -r`, a tool that sets the time) is missed. A content hash would catch it and costs reading every ignored file, up to hundreds of MB per mutating turn here; not measured.
+- A file rewritten with the same bytes counts as changed, which is the safe direction.
+- Files outside the repository (a Go build cache, `~/.cache`) are not covered, as before.
+- The cost is per repository, not per session: a repository with several hundred thousand ignored files would pay several times the figures above; not measured.
+
+### Alternatives
+
+- **Do nothing and document the hole.** What stands today, in the README for the flag and ADR-0042's own Context.
+- **Hash the content of ignored files.** Catches the `touch -r` case, costs much more; not measured.
+- **Only fingerprint when the turn ran a shell.** Cheaper (edit tools already change the tree id), and the same result, since an edit tool never writes an ignored file. A better first cut than decision 1's "every mutating turn"; I would build this one if the owner accepts, and the ADR text for decision 1 would say so.
+- **Exclude well-known cache directories.** Rejected: a list of names that drifts, and the thing it excludes is the case in the hole (a generated file in a directory a project chose to ignore).
+
+### Measurement before any default
+
+The KOP-235 `ignored-files` and `wrong-artifact` scenarios, 10 pairs each, with the amendment on: the wrong-artifact sessions should now verify (10 of 10 skipped before), and the read-only `ls -la` prompt should still skip. If the second does not, the amendment has lost the flag's benefit and is marked Rejected.
