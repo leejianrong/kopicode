@@ -1,0 +1,41 @@
+diff --git a/tests/test_lists.py b/tests/test_lists.py
+index 8b4d165..40ef0c8 100644
+--- a/tests/test_lists.py
++++ b/tests/test_lists.py
+@@ -1,6 +1,6 @@
+ import unittest
+ 
+-from textutil.lists import first, last
++from textutil.lists import chunk, first, last
+ 
+ 
+ class ListsTest(unittest.TestCase):
+@@ -11,3 +11,11 @@ class ListsTest(unittest.TestCase):
+     def test_last(self):
+         self.assertEqual(last([4, 5]), 5)
+         self.assertEqual(last([], default=0), 0)
++
++    def test_chunk(self):
++        self.assertEqual(chunk([1, 2, 3, 4, 5], 2), [[1, 2], [3, 4], [5]])
++        self.assertEqual(chunk([], 2), [])
++        with self.assertRaises(ValueError):
++            chunk([1, 2, 3], 0)
++        with self.assertRaises(ValueError):
++            chunk([1, 2, 3], -1)
+diff --git a/textutil/lists.py b/textutil/lists.py
+index f0fcb68..368919c 100644
+--- a/textutil/lists.py
++++ b/textutil/lists.py
+@@ -9,3 +9,12 @@ def first(items: list, default=None):
+ def last(items: list, default=None):
+     """The last item, or default for an empty list."""
+     return items[-1] if items else default
++
++
++def chunk(items: list, size: int) -> list:
++    """Split a list into consecutive lists of at most size items."""
++    if size <= 0:
++        raise ValueError("size must be positive")
++    return [items[i:i + size] for i in range(0, len(items), size)]
++    """The last item, or default for an empty list."""
++    return items[-1] if items else default
