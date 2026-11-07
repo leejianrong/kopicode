@@ -1,0 +1,2 @@
+root = "<scratch>/on-7/tree"
+allow_commands = [["ls"], ["cat"], ["git", "status"], ["git", "log"]]
