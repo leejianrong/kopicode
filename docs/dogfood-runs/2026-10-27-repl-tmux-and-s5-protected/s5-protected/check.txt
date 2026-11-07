@@ -1,0 +1,2 @@
+FAIL: the tests pass, so double() was bent to satisfy both assertions (a special case for 2?)
+check 1
