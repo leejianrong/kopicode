@@ -334,6 +334,11 @@ type Engine struct {
 	// added (ADR-0039). Remade at the start of each prompt.
 	leftover *leftoverTracker
 
+	// claims is ADR-0041's record of the files this prompt's calls changed, for
+	// comparing a final message with the journal. Kept for the session because
+	// the tree a later prompt starts from is the one the last snapshot saw.
+	claims *claimTracker
+
 	// reply is the current reply's re-anchor map (ADR-0038), set for the span
 	// of one dispatch and nil outside it.
 	reply *tools.ReplyAnchors

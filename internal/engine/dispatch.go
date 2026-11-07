@@ -119,6 +119,9 @@ var toolEntries = []toolEntry{
 		func(a *writeFileArgs, _ string, act *permission.Action) { act.Path = a.Path },
 		func(ctx context.Context, e *Engine, _ int, _ string, a *writeFileArgs) (toolOutcome, error) {
 			res, err := e.cfg.Tools.WriteFile(ctx, tools.WriteRequest{Path: a.Path, Content: a.Content})
+			if err == nil {
+				e.claims.touch(a.Path)
+			}
 			return toolOutcome{output: modelText(res.Output, err), err: err}, nil
 		}),
 
@@ -163,6 +166,9 @@ var toolEntries = []toolEntry{
 		func(a *deleteFileArgs, _ string, act *permission.Action) { act.Path = a.Path },
 		func(ctx context.Context, e *Engine, _ int, _ string, a *deleteFileArgs) (toolOutcome, error) {
 			res, err := e.cfg.Tools.DeleteFile(ctx, tools.DeleteRequest{Path: a.Path})
+			if err == nil {
+				e.claims.touch(a.Path)
+			}
 			return toolOutcome{output: modelText(res.Output, err), err: err}, nil
 		}),
 
@@ -277,6 +283,9 @@ func (e *Engine) dispatch(ctx context.Context, turn int, ext parse.Extraction) (
 			return mutated, err
 		}
 		mutated = mutated || mut
+		if !denied {
+			e.claims.noteCall(call.Name)
+		}
 		if mut && call.Name != tools.ToolEditFile {
 			// A write, delete, shell or fuzzy edit may have changed any file,
 			// so nothing remembered about one can be trusted.
@@ -574,6 +583,7 @@ func (e *Engine) journalEdit(ctx context.Context, turn int, callID string, res t
 		if e.leftover != nil {
 			e.leftover.observe(res.Diff)
 		}
+		e.claims.touch(res.Path)
 		return e.syntaxGate(ctx, turn, res.Path)
 	}
 }

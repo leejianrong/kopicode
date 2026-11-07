@@ -56,6 +56,12 @@ const (
 	// EventLeftoverNoted is the note that a removed name is still in the tree
 	// (ADR-0039).
 	EventLeftoverNoted
+	// EventClaimUnbacked is a final message that says it changed a file the
+	// journal shows no edit to (ADR-0041).
+	EventClaimUnbacked
+	// EventClaimUnchecked is the same comparison, which a shell command that
+	// may have written files made impossible (ADR-0041).
+	EventClaimUnchecked
 
 	// EventUnknown is an event this build has no typed payload for, preserved
 	// by the journal's compatibility promise and passed through here rather
@@ -106,6 +112,8 @@ var eventKindText = map[EventKind]string{
 	EventHandoffWritten:            "handoff_written",
 	EventHookRan:                   "hook_ran",
 	EventLeftoverNoted:             "leftover_noted",
+	EventClaimUnbacked:             "claim_unbacked",
+	EventClaimUnchecked:            "claim_unchecked",
 	EventUnknown:                   "unknown",
 	EventDelta:                     "delta",
 }
@@ -455,6 +463,15 @@ func eventOf(ev journal.Event) Event {
 		base.Kind = EventLeftoverNoted
 		base.Text = leftoverText(p.Names)
 		base.Detail = p.Skipped
+
+	case journal.ClaimUnbacked:
+		base.Kind = EventClaimUnbacked
+		base.Text = claimText(p.Files)
+
+	case journal.ClaimUnchecked:
+		base.Kind = EventClaimUnchecked
+		base.Text = claimText(p.Files)
+		base.Detail = p.Reason
 
 	case journal.UnknownPayload:
 		// The journal's compatibility promise, carried one layer further out. A

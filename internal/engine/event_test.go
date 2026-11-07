@@ -94,6 +94,8 @@ func samplePayloads() []journal.Payload {
 			Outcome: "denied", Stdout: journal.InlineText("ok"), Stderr: journal.InlineText("read only"),
 		},
 		journal.LeftoverNoted{Names: []journal.LeftoverName{{Name: "fetch_user", Edits: 3, Locations: []string{"a.py:6"}}}},
+		journal.ClaimUnbacked{Message: 9, Files: []journal.ClaimedFile{{Path: "a.py", Span: "a.py - updated"}}},
+		journal.ClaimUnchecked{Message: 9, Reason: "a shell command may have written files", Files: []journal.ClaimedFile{{Path: "a.py", Span: "a.py - updated"}}},
 		journal.UnknownPayload{EventType: "SomethingNewer", Raw: json.RawMessage(`{"a":1}`)},
 	}
 }

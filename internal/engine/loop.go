@@ -48,6 +48,10 @@ func (e *Engine) Run(ctx context.Context, prompt string) (Result, error) {
 	e.cancelPhase = ""
 	e.stopRefusals = 0
 	e.leftover = newLeftoverTracker()
+	if e.claims == nil {
+		e.claims = &claimTracker{}
+	}
+	e.claims.begin()
 
 	// at is the turn events belong to, which is not e.turn: the loop increments
 	// that only once a turn actually starts, and the user's message — and a
@@ -167,11 +171,22 @@ func (e *Engine) runTurn(ctx context.Context, turn int) (Stop, error) {
 			// declaring finished, in which case it is not a clean anything
 			// (docs/SLICE-1.md §5).
 			if e.unverified != "" {
+				if err := e.claimCheck(ctx, turn); err != nil {
+					return StopHarnessError, err
+				}
 				return StopVerificationFailed, nil
 			}
 			// ADR-0036: the person's own gate, after forced verification and so
 			// only over a tree verification did not reject.
-			return e.stopGateStep(ctx, turn)
+			stop, err := e.stopGateStep(ctx, turn)
+			// ADR-0041: a record, on a stop that is final. A refused stop goes on,
+			// and its message is not the last word.
+			if err == nil && (stop == StopCompleted || stop == StopGateFailed) {
+				if cerr := e.claimCheck(ctx, turn); cerr != nil {
+					return StopHarnessError, cerr
+				}
+			}
+			return stop, err
 
 		case parse.EventToolCallRepaired:
 			if err := e.journalUnparsed(ctx, turn, site, reply, out); err != nil {
@@ -372,9 +387,11 @@ func (e *Engine) call(ctx context.Context, turn, attempt int) (provider.Reply, S
 		}
 	}
 	if reply.Content != "" {
-		if _, err := e.append(ctx, turn, journal.AssistantMessage{Text: journal.InlineText(reply.Content)}); err != nil {
+		ev, err := e.append(ctx, turn, journal.AssistantMessage{Text: journal.InlineText(reply.Content)})
+		if err != nil {
 			return provider.Reply{}, StopHarnessError, err
 		}
+		e.claims.note(ev.Seq, reply.Content)
 	}
 	return reply, StopUnspecified, nil
 }
@@ -548,12 +565,14 @@ func (e *Engine) verify(ctx context.Context, turn int) (Stop, error) {
 // it, and journals the shadow ref.
 func (e *Engine) snapshot(ctx context.Context, turn int) error {
 	if e.cfg.Snapshots == nil {
+		e.claims.noteSnapshot("")
 		return nil
 	}
 	snap, err := e.cfg.Snapshots.Snapshot(ctx, turn)
 	if err != nil {
 		return fmt.Errorf("engine: snapshotting turn %d: %w", turn, err)
 	}
+	e.claims.noteSnapshot(snap.Tree)
 	_, err = e.append(ctx, turn, journal.TurnSnapshot{
 		Ref:    snap.Ref,
 		Commit: snap.Commit,

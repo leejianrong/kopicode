@@ -230,6 +230,15 @@ func fixtures() map[journal.Type]journal.Payload {
 			Stdout:     text("checked 1 command"),
 			Stderr:     text("migrations/ is read only"),
 		},
+		journal.TypeClaimUnbacked: journal.ClaimUnbacked{
+			Message: 41,
+			Files:   []journal.ClaimedFile{{Path: "accounts/store.py", Span: "accounts/store.py** - Updated"}},
+		},
+		journal.TypeClaimUnchecked: journal.ClaimUnchecked{
+			Message: 41,
+			Reason:  "a shell command may have written files",
+			Files:   []journal.ClaimedFile{{Path: "accounts/store.py", Span: "accounts/store.py** - Updated"}},
+		},
 		journal.TypeLeftoverNoted: journal.LeftoverNoted{
 			Names: []journal.LeftoverName{
 				{Name: "fetch_user", Edits: 7, Locations: []string{"accounts/greeting.py:6", "tests/test_accounts.py:12"}},

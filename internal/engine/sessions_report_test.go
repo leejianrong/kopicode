@@ -114,6 +114,50 @@ func TestReportSessionDigestsTheRubricsFieldsFromTheJournalAlone(t *testing.T) {
 	}
 }
 
+// ADR-0041: the claim events come out of the record with the seq of the event and
+// of the message they judge, and a record without them has no Claims at all.
+func TestReportSessionCarriesTheClaimEvents(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	jrn, err := journal.Open(dir, "claims", journal.WithClock(fixedClock()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var msg, unbacked, unchecked uint64
+	for _, s := range []struct {
+		p   journal.Payload
+		out *uint64
+	}{
+		{journal.SessionStarted{ModelID: "m"}, nil},
+		{journal.AssistantMessage{Text: journal.InlineText("a.py - updated")}, &msg},
+		{journal.ClaimUnbacked{Message: 2, Files: []journal.ClaimedFile{{Path: "a.py", Span: "a.py - updated"}}}, &unbacked},
+		{journal.ClaimUnchecked{Message: 2, Reason: "shell", Files: []journal.ClaimedFile{{Path: "b.py", Span: "b.py - updated"}}}, &unchecked},
+	} {
+		ev, err := jrn.Append(ctx, 1, s.p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s.out != nil {
+			*s.out = ev.Seq
+		}
+	}
+	_ = jrn.Close()
+	got, err := engine.ReportSession(ctx, dir, "claims")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Claims == nil || len(got.Claims.Unbacked) != 1 || len(got.Claims.Unchecked) != 1 {
+		t.Fatalf("claims = %+v", got.Claims)
+	}
+	u := got.Claims.Unbacked[0]
+	if u.Seq != unbacked || u.Message != msg || len(u.Files) != 1 || u.Files[0] != "a.py" {
+		t.Errorf("unbacked = %+v, want seq %d judging message %d on a.py", u, unbacked, msg)
+	}
+	if got.Claims.Unchecked[0].Seq != unchecked {
+		t.Errorf("unchecked = %+v", got.Claims.Unchecked[0])
+	}
+}
+
 func TestReportSessionOfAnUnknownIdIsAnError(t *testing.T) {
 	if _, err := engine.ReportSession(context.Background(), t.TempDir(), "nope"); err == nil {
 		t.Error("an id with no record reported as if it existed")
